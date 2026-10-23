@@ -151,11 +151,29 @@ class DenseLM(nn.Module):
         rope = precompute_rope_cis(c.head_dim, c.max_seq_len, theta=c.rope_theta)
         self.register_buffer("rope_cis", rope, persistent=False)
 
+        self.apply(self._init_weights)
+        # 残差出口：加深网络时缩小输出投影，避免初始 logits 爆炸
+        for layer in self.layers:
+            torch.nn.init.normal_(
+                layer.attn.o_proj.weight, mean=0.0, std=0.02 / math.sqrt(2 * c.n_layers)
+            )
+            torch.nn.init.normal_(
+                layer.ffn.fc2.weight, mean=0.0, std=0.02 / math.sqrt(2 * c.n_layers)
+            )
+
         n = count_parameters(self)
         print(
             f"[DenseLM] vocab={c.vocab_size} d_model={c.d_model} "
             f"n_layers={c.n_layers} params={n:,} ({n / 1e6:.2f}M)"
         )
+
+    def _init_weights(self, module: nn.Module) -> None:
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(
         self, input_ids: torch.Tensor, labels: Optional[torch.Tensor] = None
@@ -178,8 +196,8 @@ class DenseLM(nn.Module):
         loss = None
         if labels is not None:
             loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
+                logits.reshape(-1, logits.size(-1)),
+                labels.reshape(-1),
                 ignore_index=-100,
             )
         return logits, loss

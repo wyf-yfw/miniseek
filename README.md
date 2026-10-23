@@ -74,12 +74,26 @@ huggingface-cli download jingyaogong/MiniMind2 --include "tokenizer*" --local-di
 ## 训练 / 生成 / 评测
 
 ```bash
+# 正式训（默认：loss 连续 200 步低于阈值才写 loss-*.pt；结束写 last.pt；刷新最低写 best.pt）
 python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0
+
+# 短跑 / 调参示例
+python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0 \
+  --max-steps 5000 --warmup-steps 200 --lr 1e-4 \
+  --save-loss-thresholds 20,15,12,10,9,8,7 --stable-steps 200
+
 python generate.py --ckpt checkpoints/stage0/last.pt --seed 42
 
 python eval/valid_ppl.py --ckpt checkpoints/stage0/last.pt --valid data/valid.jsonl
 python eval/gen_smoke.py --ckpt checkpoints/stage0/last.pt --seed 42
 ```
+
+### Checkpoint 策略
+
+- **里程碑**：`--save-loss-thresholds`（默认 `20,15,...,3`）——某一档需 **连续** `--stable-steps`（默认 200）步 `loss<=阈值` 才写 `loss-10.pt` 等；中途回升则计数清零。
+- **best.pt**：新历史最低 train loss 时更新（`--no-save-best` 可关）。
+- **last.pt**：跑结束写一次。
+- **`--save-every`**：默认 `0`（关）；需要按步备份时可开。
 
 C-Eval / CMMLU：见 [`eval/README.md`](eval/README.md)（lm-evaluation-harness，Stage 0 预留）。
 
