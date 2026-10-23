@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data (large jsonl)
+data/*.jsonl
+!data/.gitkeep
+
+# Checkpoints & exports
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+export/
+
+# Tokenizer downloads (optional local)
+tokenizer/
+minimind_tokenizer/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Eval outputs (keep templates)
+eval/reports/gen_smoke_*.jsonl
+eval/reports/lm_eval_*/
