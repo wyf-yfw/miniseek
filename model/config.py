@@ -1,48 +1,58 @@
-"""Stage-0 ModelConfig（Dense Decoder-only）.
+"""MiniSeek 模型配置。
 
-后续阶段（MoE / SWA / CSA2 / CED）仅保留扩展钩子字段，Stage 0 不实现。
+架构线：
+- dense → MiniSeek-D*（稠密 Decoder-only）
+- moe   → MiniSeek-M*（混合专家，实现见 model/moe.py）
+版本号写在 model_family / model_version（如 D0.1 / M0.1）。
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Optional
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Literal
+
+
+Arch = Literal["dense", "moe"]
 
 
 @dataclass
 class ModelConfig:
     """冻结规格：d_model=512, n_layers=8, n_heads=8, head_dim=64, FFN=2048."""
 
-    # --- Stage 0 Dense（冻结）---
+    # --- 产品命名 ---
+    model_family: str = "MiniSeek-D"  # MiniSeek-D / MiniSeek-M
+    model_version: str = "0.1"  # D0.1 → family=MiniSeek-D, version=0.1
+    arch: Arch = "dense"
+
+    # --- Dense 主干 ---
     d_model: int = 512
     n_layers: int = 8
     n_heads: int = 8
     head_dim: int = 64  # d_model // n_heads
     intermediate_size: int = 2048  # Dense FFN
-    vocab_size: int = 6400  # MiniMind tokenizer 实测；见 tokenizer.py / README
+    vocab_size: int = 6400  # MiniMind tokenizer 实测
     max_seq_len: int = 2048
     rope_theta: float = 1e6
     rms_norm_eps: float = 1e-5
     dropout: float = 0.0
     tie_word_embeddings: bool = True
 
-    # --- 扩展钩子（Stage 1+ TODO，Stage 0 忽略）---
-    use_moe: bool = False  # MoE（混合专家）
+    # --- MoE（arch=moe 时使用；dense 忽略）---
+    use_moe: bool = False
     n_shared_experts: int = 1
     n_routed_experts: int = 8
     num_experts_per_tok: int = 2
     moe_intermediate_size: int = 1024
 
-    use_swa: bool = False  # SWA（滑动窗口注意力）
+    # --- 后续注意力/结构钩子（未实现前勿打开）---
+    use_swa: bool = False
     swa_window: int = 128
-
-    use_csa2: bool = False  # CSA2（压缩稀疏注意力）
+    use_csa2: bool = False
     csa2_topk: int = 128
     csa2_m: int = 1
-
-    use_ced: bool = False  # CED（因果编码器-解码器）
-    ced_encoder_layers: int = 4  # L0–L3
-    ced_decoder_layers: int = 4  # L4–L7
+    use_ced: bool = False
+    ced_encoder_layers: int = 4
+    ced_decoder_layers: int = 4
 
     def __post_init__(self) -> None:
         if self.d_model != self.n_heads * self.head_dim:
@@ -50,6 +60,19 @@ class ModelConfig:
                 f"d_model={self.d_model} != n_heads*head_dim="
                 f"{self.n_heads * self.head_dim}"
             )
+        if self.arch == "moe":
+            self.use_moe = True
+            if self.model_family == "MiniSeek-D":
+                self.model_family = "MiniSeek-M"
+        elif self.arch == "dense":
+            self.use_moe = False
+
+    @property
+    def release_name(self) -> str:
+        """例如 MiniSeek-D0.1"""
+        letter = "M" if self.arch == "moe" or self.model_family.endswith("-M") else "D"
+        ver = self.model_version.lstrip("DMdm")
+        return f"MiniSeek-{letter}{ver}"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -60,7 +83,6 @@ class ModelConfig:
         return cls(**{k: v for k, v in d.items() if k in known})
 
     def with_vocab_size(self, vocab_size: int) -> "ModelConfig":
-        """返回覆盖 vocab_size 的新配置（通常由 tokenizer 检测写入）."""
         d = self.to_dict()
         d["vocab_size"] = int(vocab_size)
         return ModelConfig.from_dict(d)

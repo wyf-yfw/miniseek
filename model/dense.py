@@ -1,6 +1,6 @@
-"""Stage-0 Dense Decoder-only Transformer LM（RoPE + RMSNorm + SwiGLU-style FFN 可选用 GELU）.
+"""MiniSeek-D：稠密 Decoder-only Transformer LM（RoPE + RMSNorm + FFN）.
 
-设计目标：单卡 3090 可训、结构可扩展到后续 MoE/SWA/CSA2/CED（本文件仅 Dense）。
+产品线 MiniSeek-D*（当前 D0.1）。MoE 见 model/moe.py（MiniSeek-M*）。
 """
 
 from __future__ import annotations

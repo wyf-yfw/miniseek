@@ -37,3 +37,7 @@ minimind_tokenizer/
 # Eval outputs (keep templates)
 eval/reports/gen_smoke_*.jsonl
 eval/reports/lm_eval_*/
+
+.hf_token
+release/
+*.log
