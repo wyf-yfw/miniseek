@@ -10,6 +10,16 @@
 
 from __future__ import annotations
 
+import sys
+
+# 标准输出重定向到文件时，默认是块缓冲，Web 控制台会一次性看到一大段。
+# 改成按行刷出，配合 python -u，日志能跟着训练步实时出现。
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 import argparse
 import json
 import math
@@ -51,9 +61,14 @@ class JsonlTextDataset(Dataset):
     def __getitem__(self, idx: int):
         text = self.samples[idx]
         ids = self.tokenizer.encode(text, add_special_tokens=True)
-        if len(ids) < 2:
-            ids = ids + [getattr(self.tokenizer, "eos_token_id", 2) or 2]
+        eos_id = getattr(self.tokenizer, "eos_token_id", 2) or 2
+        # Always teach EOS as a stop signal (tokenizer add_eos_token is False).
+        if not ids or ids[-1] != eos_id:
+            ids = ids + [eos_id]
         ids = ids[: self.max_seq_len]
+        # Ensure truncation still leaves a next-token pair including EOS when possible.
+        if len(ids) < 2:
+            ids = [eos_id, eos_id]
         input_ids = torch.tensor(ids[:-1], dtype=torch.long)
         labels = torch.tensor(ids[1:], dtype=torch.long)
         return input_ids, labels
@@ -159,6 +174,8 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/pretrain_t2t_mini.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="checkpoints/stage0")
+    p.add_argument("--arch", choices=["dense", "moe"], default="dense")
+    p.add_argument("--aux-coef", type=float, default=0.01, help="MoE load-balance aux weight")
     p.add_argument("--max-seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--lr", type=float, default=1e-4, help="peak LR after warmup")
@@ -222,8 +239,13 @@ def main() -> None:
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    cfg = ModelConfig(max_seq_len=args.max_seq_len).with_vocab_size(vocab)
-    model = DenseLM(cfg).to(device)
+    cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len).with_vocab_size(vocab)
+    if args.arch == "moe":
+        from model.moe import MoELM
+        model = MoELM(cfg).to(device)
+    else:
+        model = DenseLM(cfg).to(device)
+    print(f"[train] arch={args.arch} aux_coef={args.aux_coef if args.arch == 'moe' else 'n/a'}")
 
     if not Path(args.data).exists():
         print(f"[train] WARN: 缺少 {args.data}，使用内置中文占位样本做 smoke")
@@ -304,7 +326,8 @@ def main() -> None:
         save_ckpt(path, ckpt)
         print(
             f"[train] milestone save loss<={threshold:g} stable={args.stable_steps} "
-            f"@ step={step} loss={loss_val:.4f} -> {path}"
+            f"@ step={step} loss={loss_val:.4f} -> {path}",
+            flush=True,
         )
 
     def maybe_save_best(step: int, loss_val: float) -> None:
@@ -315,7 +338,7 @@ def main() -> None:
             best_loss = loss_val
             ckpt = build_ckpt(model, opt, cfg, step, vocab, loss_val)
             save_ckpt(out_dir / "best.pt", ckpt)
-            print(f"[train] best save loss={loss_val:.4f} @ step={step} -> {out_dir / 'best.pt'}")
+            print(f"[train] best save loss={loss_val:.4f} @ step={step} -> {out_dir / 'best.pt'}", flush=True)
 
     def maybe_save_step(step: int, loss_val: float) -> None:
         if args.save_every <= 0 or step % args.save_every != 0:
@@ -324,7 +347,7 @@ def main() -> None:
         step_path = out_dir / f"step-{step}.pt"
         save_ckpt(step_path, ckpt)
         prune_step_ckpts(out_dir, args.keep_last)
-        print(f"[train] step save @ step={step} loss={loss_val:.4f} -> {step_path}")
+        print(f"[train] step save @ step={step} loss={loss_val:.4f} -> {step_path}", flush=True)
 
     for epoch in range(args.epochs):
         for input_ids, labels in loader:
@@ -343,11 +366,21 @@ def main() -> None:
             set_lr(opt, cur_lr)
 
             opt.zero_grad(set_to_none=True)
+
+            def _step_forward():
+                out = model(input_ids, labels=labels)
+                if isinstance(out, tuple) and len(out) == 3:
+                    _logits, ce, aux = out
+                    total = ce + args.aux_coef * aux
+                    return total, ce, aux
+                _logits, ce = out
+                return ce, ce, None
+
             if device.type == "cuda":
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    _, loss = model(input_ids, labels=labels)
+                    loss, ce_loss, aux_loss = _step_forward()
             else:
-                _, loss = model(input_ids, labels=labels)
+                loss, ce_loss, aux_loss = _step_forward()
             loss.backward()
             if args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -356,10 +389,19 @@ def main() -> None:
             last_loss = float(loss.item())
 
             if global_step % args.log_every == 0 or global_step == 1:
-                print(
-                    f"epoch={epoch} step={global_step} loss={last_loss:.4f} "
-                    f"ppl={math.exp(min(last_loss, 20)):.2f} lr={cur_lr:.2e}"
-                )
+                if aux_loss is not None:
+                    print(
+                        f"epoch={epoch} step={global_step} loss={last_loss:.4f} "
+                        f"ce={float(ce_loss.item()):.4f} aux={float(aux_loss.item()):.4f} "
+                        f"ppl={math.exp(min(float(ce_loss.item()), 20)):.2f} lr={cur_lr:.2e}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"epoch={epoch} step={global_step} loss={last_loss:.4f} "
+                        f"ppl={math.exp(min(last_loss, 20)):.2f} lr={cur_lr:.2e}",
+                        flush=True,
+                    )
 
             # loss milestones: need consecutive --stable-steps below each threshold
             for th in thresholds:
