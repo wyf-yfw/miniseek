@@ -25,8 +25,8 @@
 | `vocab_size` | **实测 MiniMind = 6400**（见下节）；规划表里曾用 32000 做纸面估算 |
 | `max_seq`（训练起步） | 512；以后再拉长 |
 | FFN 中间维（Dense） | 2048（=4d） |
-| MoE 专家中间维 | 1024（=2d） |
-| MoE 结构 | 1 shared + 8 routed，top-2 |
+| MoE 专家中间维 | 512（=d，M0.1） |
+| MoE 结构 | 1 shared + 32 routed，top-2（M0.1） |
 | SWA `n_win` | 128 |
 | CSA2 Top-K | 128（以后可调到 512） |
 | CSA2 压缩比 `m` | 阶段 3–5 先 `m=1`；以后 Encoder 可试 `m=2` |
@@ -39,7 +39,7 @@
 - MiniMind 自定义 `minimind_tokenizer` **实测词表 = 6400**（不是早期文档里的 ~32k mistral 词表）。
 - Stage 0 Dense + vocab=6400 + tie embedding ≈ **28.45M**（本仓库 `DenseLM` init 打印为准）。
 - 若强制 vocab=32000（非 MiniMind 默认），纸面 Dense 总参可接近早期估算的 **~58M**；**本仓库以 6400 为准**，便于直接吃 `minimind_dataset`。
-- 下文「体量总表」里的 58M / 117M 等，是 **V=32000 纸面估算**；换算到 V=6400 时，Embedding+LM Head 一项约从 32.8M 降到约 6.6M，其余层内项不变。
+- 下文「体量总表」里的 58M / 117M 等，是 **V=32000 纸面估算**；换算到 V=6400 时 Embedding+LM Head 约从 32.8M→6.6M。**M0.1 MoE 实测总参 ≈150.22M**（1+32, h=512）。
 
 ---
 
@@ -97,7 +97,7 @@
 1. Embedding + LM Head ≈ 2 × V × d = 2 × 32000 × 512 ≈ **32.8M**（V=6400 时 ≈ **6.6M**）
 2. Self-Attn（QKV+O）≈ 4 × d × d = 4 × 512² ≈ **1.05M / 层**
 3. Dense FFN ≈ 2 × d × 4d = 2 × 512 × 2048 ≈ **2.10M / 层**
-4. MoE：每专家 2×d×1024；1+8 个专家全计入参数；外加 router ≈ d×8
+4. MoE（M0.1）：每专家 2×d×512；1+32 个专家全计入参数；外加 router ≈ d×32
 5. 激活量：每 token 只跑 1 个共享 + top-2 路由专家，不等于总参
 
 ---
@@ -109,8 +109,8 @@
 | 阶段 | 结构变化 | 总参数≈ | 每 token 激活≈ | 备注 |
 |------|----------|---------|----------------|------|
 | 0 Dense | Full Attn + FFN ×8 | 58M | ≈25M | 8×(1.05+2.10)+32.8；**实测 V=6400 ≈28.45M** |
-| 1 MoE | FFN→MoE | 117M | ≈27M | 总参涨；激活仍接近 Dense |
-| 2 SWA | Attn→窗口 | 117M | ≈27M | 参数几乎不变，算力降 |
+| 1 MoE | FFN→MoE（1+32,h=512） | ≈150M（V=6400 实测） | ≈激活接近 Dense×3 专家 | 总参涨；激活仍可控 |
+| 2 SWA | Attn→窗口 | ≈150M | ≈同 Stage1 激活 | 参数几乎不变，算力降 |
 | 3 CSA2 | +三模式/indexer | 118M | ≈27M | indexer 很小，+约 1M 量级 |
 | 4 CED | 切 4+4 + 投影 | 118M | Prefill 更低 | 投影矩阵约数×d²，很小 |
 | 5 HSI+Replay | 候选池/重放 | 118M | 长上下文更省算 | 逻辑件为主 |
@@ -146,21 +146,21 @@ LM Head
 ```text
 Embedding
    ↓
-Full Attn（同阶段 0）  +  MoE（1+8 top-2）
+Full Attn（同阶段 0）  +  MoE（1+32 top-2，h=512）— MiniSeek-M0.1
    ↓
 LM Head
 ```
 
 | 层 | 注意力 | MoE | 参数/层≈ |
 |----|--------|-----|----------|
-| L0–L7 | Full Attn ≈1.05M | 1 shared + 8 routed，中间维 1024，top-2 | ≈10.49M |
+| L0–L7 | Full Attn ≈1.05M | 1 shared + 32 routed，中间维 512，top-2 | ≈专家主导 |
 
 | 项 | 值 |
 |----|-----|
-| 单专家权重 | 2×512×1024 ≈ 1.05M |
+| 单专家权重 | 2×512×512 ≈ 0.52M |
 | 9 个专家合计 | ≈9.44M |
 | router | 512×8 ≈ 0.004M |
-| 每 token 激活专家 | shared + 2 routed ≈ 3.15M（仅专家部分） |
+| 每 token 激活专家 | shared + 2 routed ≈ 1.57M（仅专家部分） |
 | 整模总参（V=32000 纸面） | ≈32.8 + 8×10.49 ≈ **116.7M** |
 
 加 auxiliary loss（负载均衡）。注意力仍全历史。
@@ -177,7 +177,7 @@ SWA (n_win=128)  +  MoE（同阶段 1）
 |----|--------|------|-----|
 | L0–L7 | SWA（权重仍≈1.05M） | n_win=128 | 同阶段 1 |
 
-总参仍约 117M（纸面）；变的是 mask 与 KV cache 长度，不是权重规模。
+总参仍约 150M（M0.1）；变的是 mask 与 KV cache 长度，不是权重规模。
 
 ---
 
@@ -270,11 +270,11 @@ Replay 末尾 128 token 的 SWA
 | Stage | 内容 | 状态 |
 |-------|------|------|
 | 0 | Dense Decoder-only + train/generate/Web UI | **进行中 / 已有权重** |
-| 1 | MoE FFN | TODO |
+| 1 | MoE FFN（MiniSeek-M0.1） | 实现中 / `model/moe.py` |
 | 2 | SWA | TODO |
 | 3 | CSA2 | TODO |
 | 4 | CED | TODO |
 | 5 | HSI / Replay | TODO |
 | 6 | Engram / mHC / DSpark / FP4 / 视觉 | 后置，默认关 |
 
-MoE/SWA/CSA2/CED 在 `ModelConfig` 与 block 注释中留扩展钩子；未实现前不要混进 Stage 0 对比实验。
+M0.1 MoE 已实现（`ModelConfig(arch="moe")` + `MoELM`）；SWA/CSA2/CED 仍为钩子，未实现前不要混进对比实验。

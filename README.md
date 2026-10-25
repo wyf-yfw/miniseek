@@ -3,11 +3,11 @@
 **中文为主 / English summary below.**
 
 对齐 DeepSeek-V4.1-Flash 思路的超小可训语言模型（MiniMind 风格数据与分词器），单卡 3090 可跑。  
-**当前仓库 = Stage 0：Dense Decoder-only 骨架**（后续 MoE / SWA / CSA2 / CED 仅钩子，未实现）。
+**当前仓库 = Stage 0 Dense（MiniSeek-D0.1）+ Stage 1 MoE 实现（MiniSeek-M0.1）**；SWA / CSA2 / CED 仍为后续钩子。
 
 ## English (short)
 
-Ultra-small trainable LM scaffold aligned with DeepSeek-V4.1-Flash ideas. Stage 0 = dense decoder-only (d=512, L=8, H=8, FFN=2048, MiniMind tokenizer vocab=**6400**, ~26–32M params). Later stages (MoE/SWA/CSA2/CED) are TODOs only. Data: `jingyaogong/minimind_dataset`. Eval-Core locked for fair A/B across stages 0–5.
+Ultra-small trainable LM scaffold aligned with DeepSeek-V4.1-Flash ideas. Stage 0 = dense decoder-only (d=512, L=8, H=8, FFN=2048, MiniMind tokenizer vocab=**6400**, ~26–32M params). Stage 1 MoE (MiniSeek-M0.1) implemented; SWA/CSA2/CED still TODOs. Data: `jingyaogong/minimind_dataset`. Eval-Core locked for fair A/B across stages 0–5.
 
 ## 目标与阶段路线
 
@@ -16,7 +16,7 @@ Ultra-small trainable LM scaffold aligned with DeepSeek-V4.1-Flash ideas. Stage 
 | Stage | 结构 | 本仓 |
 |-------|------|------|
 | 0 | Dense Decoder-only | ✅ |
-| 1 | + MoE（混合专家） | TODO |
+| 1 | + MoE MiniSeek-M0.1（1+32 top-2, h=512, ≈150M） | `model/moe.py` + `--arch moe` |
 | 2 | + SWA（滑动窗口注意力） | TODO |
 | 3 | + CSA2 | TODO |
 | 4 | + CED（因果编码器-解码器） | TODO |
