@@ -50,7 +50,8 @@ LOG_FILE = PROJECT_ROOT / "train_web.log"
 STATE_FILE = PROJECT_ROOT / "train_web.json"
 TRAIN_SCRIPTS = ("train_pretrain.py", "train_sft.py")
 STEP_RE = re.compile(
-    r"step=(\d+)\s+loss=([0-9.]+)\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
+    # MoE logs insert ce=/aux= between loss and ppl; dense has none.
+    r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
 )
 RESUME_RE = re.compile(r"resumed from .* step=(\d+)")
 
