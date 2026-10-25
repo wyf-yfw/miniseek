@@ -40,9 +40,9 @@ class ModelConfig:
     # --- MoE（arch=moe 时使用；dense 忽略）---
     use_moe: bool = False
     n_shared_experts: int = 1
-    n_routed_experts: int = 8
+    n_routed_experts: int = 32
     num_experts_per_tok: int = 2
-    moe_intermediate_size: int = 1024
+    moe_intermediate_size: int = 512
 
     # --- 后续注意力/结构钩子（未实现前勿打开）---
     use_swa: bool = False
