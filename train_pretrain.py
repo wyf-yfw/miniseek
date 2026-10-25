@@ -5,7 +5,7 @@
 
     python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --max-steps 2
     python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --epochs 1 --batch-size 8
-    # loss 连续低于阈值满 --stable-steps 才存盘；也可额外开 --save-every 1000
+    # loss 连续低于阈值满 --stable-steps 才存盘；best.pt 同理需稳定后再存；也可额外开 --save-every 1000
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import json
 import math
 import random
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -34,6 +35,55 @@ from torch.utils.data import DataLoader, Dataset
 from model.config import ModelConfig
 from model.dense import DenseLM
 from model.tokenizer import detect_vocab_size, load_tokenizer
+
+
+def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
+    """torch.compile 后取底层模块。"""
+    return getattr(model, "_orig_mod", model)
+
+
+def _emit_expert_load_line(
+    *,
+    model: torch.nn.Module,
+    step: int,
+    window_steps: int,
+    cfg: ModelConfig,
+) -> None:
+    """结束本 log 窗口的 usage 记录，打印 expert_load=JSON，再开启下一窗口。"""
+    raw = _unwrap_model(model)
+    if not hasattr(raw, "end_expert_usage") or not hasattr(raw, "begin_expert_usage"):
+        return
+    counts_t = raw.end_expert_usage()
+    counts = [int(x) for x in counts_t.tolist()]
+    total = int(sum(counts))
+    fractions = [(c / total if total > 0 else 0.0) for c in counts]
+    n_routed = int(getattr(cfg, "n_routed_experts", len(counts)))
+    if fractions:
+        max_expert = int(max(range(len(fractions)), key=lambda i: fractions[i]))
+        min_expert = int(min(range(len(fractions)), key=lambda i: fractions[i]))
+        max_frac = float(fractions[max_expert])
+        min_frac = float(fractions[min_expert])
+    else:
+        max_expert = min_expert = -1
+        max_frac = min_frac = 0.0
+    payload = {
+        "step": int(step),
+        "window_steps": int(window_steps),
+        "n_routed": n_routed,
+        "top_k": int(getattr(cfg, "num_experts_per_tok", 2)),
+        "n_layers": int(getattr(cfg, "n_layers", 0)),
+        "n_shared": int(getattr(cfg, "n_shared_experts", 1)),
+        "counts": counts,
+        "fractions": fractions,
+        "total_assignments": total,
+        "max_frac": max_frac,
+        "min_frac": min_frac,
+        "max_expert": max_expert,
+        "min_expert": min_expert,
+    }
+    print("expert_load=" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
+    raw.begin_expert_usage()
+
 
 
 class JsonlTextDataset(Dataset):
@@ -61,13 +111,16 @@ class JsonlTextDataset(Dataset):
     def __getitem__(self, idx: int):
         text = self.samples[idx]
         ids = self.tokenizer.encode(text, add_special_tokens=True)
-        eos_id = getattr(self.tokenizer, "eos_token_id", 2) or 2
-        # Always teach EOS as a stop signal (tokenizer add_eos_token is False).
-        if not ids or ids[-1] != eos_id:
-            ids = ids + [eos_id]
-        ids = ids[: self.max_seq_len]
-        # Ensure truncation still leaves a next-token pair including EOS when possible.
+        eos_id = int(getattr(self.tokenizer, "eos_token_id", 2) or 2)
+        # EOS comes from the dataset text (trailing <|im_end|>); do not append here.
+        # Truncation must keep a trailing EOS when the sample ends with one.
+        if len(ids) > self.max_seq_len:
+            if ids and ids[-1] == eos_id:
+                ids = ids[: self.max_seq_len - 1] + [eos_id]
+            else:
+                ids = ids[: self.max_seq_len]
         if len(ids) < 2:
+            # Degenerate sample (empty / too short after encode): keep a valid pair.
             ids = [eos_id, eos_id]
         input_ids = torch.tensor(ids[:-1], dtype=torch.long)
         labels = torch.tensor(ids[1:], dtype=torch.long)
@@ -208,14 +261,25 @@ def main() -> None:
     p.add_argument(
         "--stable-steps",
         type=int,
-        default=200,
-        help="某阈值需连续多少步 loss<=阈值才写入 loss-*.pt；中途回升则计数清零",
+        default=100,
+        help="里程碑/best：连续多少步满足条件才存盘；中途回升则计数清零",
     )
     p.add_argument(
         "--save-best",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="刷新历史最低 train loss 时更新 best.pt（默认开）",
+        help="loss 连续低于已保存 best 满 --stable-steps 后才更新 best.pt（默认开）",
+    )
+    p.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="DataLoader worker 进程数；0=主进程读数据",
+    )
+    p.add_argument(
+        "--compile",
+        action="store_true",
+        help="对模型 torch.compile（仅 CUDA；失败则告警并继续）",
     )
     p.add_argument(
         "--resume",
@@ -245,7 +309,19 @@ def main() -> None:
         model = MoELM(cfg).to(device)
     else:
         model = DenseLM(cfg).to(device)
+    if args.compile:
+        if device.type != "cuda":
+            print("[train] WARN: --compile ignored (需要 CUDA)")
+        else:
+            try:
+                model = torch.compile(model)
+                print("[train] torch.compile enabled")
+            except Exception as e:  # noqa: BLE001
+                print(f"[train] WARN: torch.compile 失败，继续未编译: {e}")
     print(f"[train] arch={args.arch} aux_coef={args.aux_coef if args.arch == 'moe' else 'n/a'}")
+    expert_window_steps = 0
+    if args.arch == "moe":
+        _unwrap_model(model).begin_expert_usage()
 
     if not Path(args.data).exists():
         print(f"[train] WARN: 缺少 {args.data}，使用内置中文占位样本做 smoke")
@@ -253,10 +329,10 @@ def main() -> None:
         smoke_path = Path("data/_smoke_train.jsonl")
         with open(smoke_path, "w", encoding="utf-8") as f:
             for t in [
-                "深度学习是机器学习的一个分支。",
-                "大语言模型可以生成自然语言文本。",
-                "今天天气很好，适合出去散步。",
-                "北京是中国的首都。",
+                "深度学习是机器学习的一个分支。<|im_end|>",
+                "大语言模型可以生成自然语言文本。<|im_end|>",
+                "今天天气很好，适合出去散步。<|im_end|>",
+                "北京是中国的首都。<|im_end|>",
             ]:
                 f.write(json.dumps({"text": t}, ensure_ascii=False) + "\n")
         args.data = str(smoke_path)
@@ -270,8 +346,9 @@ def main() -> None:
         ds,
         batch_size=args.batch_size,
         shuffle=True,
-        collate_fn=lambda b: collate_pad(b, pad_id=pad_id),
-        num_workers=0,
+        collate_fn=partial(collate_pad, pad_id=pad_id),
+        num_workers=max(0, int(args.num_workers)),
+        pin_memory=(device.type == "cuda"),
     )
 
     steps_per_epoch = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
@@ -300,6 +377,8 @@ def main() -> None:
 
     global_step = 0
     best_loss = float("inf")
+    best_streak = 0
+    pending_best = float("inf")
     if args.resume:
         resume_path = Path(args.resume)
         blob = torch.load(resume_path, map_location="cpu", weights_only=False)
@@ -331,14 +410,30 @@ def main() -> None:
         )
 
     def maybe_save_best(step: int, loss_val: float) -> None:
-        nonlocal best_loss
+        nonlocal best_loss, best_streak, pending_best
         if not args.save_best:
             return
+        need = max(1, int(args.stable_steps))
+        # 连续 stable_steps 步 loss 都 < 已记录 best_loss 才写盘；写后 best_loss=窗口内 min
         if loss_val < best_loss:
-            best_loss = loss_val
-            ckpt = build_ckpt(model, opt, cfg, step, vocab, loss_val)
-            save_ckpt(out_dir / "best.pt", ckpt)
-            print(f"[train] best save loss={loss_val:.4f} @ step={step} -> {out_dir / 'best.pt'}", flush=True)
+            best_streak += 1
+            if loss_val < pending_best:
+                pending_best = loss_val
+            if best_streak >= need:
+                best_loss = pending_best
+                ckpt = build_ckpt(model, opt, cfg, step, vocab, pending_best)
+                save_ckpt(out_dir / "best.pt", ckpt)
+                print(
+                    f"[train] best save loss={pending_best:.4f} stable={need} "
+                    f"@ step={step} -> {out_dir / 'best.pt'}",
+                    flush=True,
+                )
+                best_streak = 0
+                pending_best = float("inf")
+        else:
+            if best_streak > 0:
+                best_streak = 0
+                pending_best = float("inf")
 
     def maybe_save_step(step: int, loss_val: float) -> None:
         if args.save_every <= 0 or step % args.save_every != 0:
@@ -387,6 +482,8 @@ def main() -> None:
             opt.step()
             global_step += 1
             last_loss = float(loss.item())
+            if args.arch == "moe":
+                expert_window_steps += 1
 
             if global_step % args.log_every == 0 or global_step == 1:
                 if aux_loss is not None:
@@ -402,6 +499,14 @@ def main() -> None:
                         f"ppl={math.exp(min(last_loss, 20)):.2f} lr={cur_lr:.2e}",
                         flush=True,
                     )
+                if args.arch == "moe":
+                    _emit_expert_load_line(
+                        model=model,
+                        step=global_step,
+                        window_steps=expert_window_steps,
+                        cfg=cfg,
+                    )
+                    expert_window_steps = 0
 
             # loss milestones: need consecutive --stable-steps below each threshold
             for th in thresholds:

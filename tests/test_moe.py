@@ -83,3 +83,158 @@ def test_moelm_generate():
     ids = torch.randint(0, 6400, (1, 4))
     out = model.generate(ids, max_new_tokens=3, temperature=1.0, top_k=10)
     assert out.shape[1] == 7
+
+def _naive_moe_forward(layer, x: torch.Tensor):
+    """Reference: nested slot × expert Python loops (pre-sorted dispatch)."""
+    import torch.nn.functional as F
+
+    from model.moe import load_balance_loss
+
+    b, t, d = x.shape
+    flat = x.reshape(b * t, d)
+    shared_out = layer.shared(flat)
+    logits = layer.router(flat)
+    probs = F.softmax(logits, dim=-1)
+    topk_prob, topk_idx = torch.topk(probs, layer.top_k, dim=-1)
+    topk_prob = topk_prob / topk_prob.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+    routed = torch.zeros_like(flat)
+    for slot in range(layer.top_k):
+        idx = topk_idx[:, slot]
+        w = topk_prob[:, slot].unsqueeze(-1)
+        for e in range(layer.n_routed):
+            mask = idx == e
+            if not mask.any():
+                continue
+            routed[mask] = routed[mask] + w[mask] * layer.experts[e](flat[mask])
+    y = (shared_out + routed).view(b, t, d)
+    aux = load_balance_loss(probs, topk_idx, layer.n_routed)
+    return y, aux
+
+
+def test_moe_grouped_dispatch_matches_naive():
+    """Sorted/grouped GEMM dispatch must match nested-loop reference (atol 1e-4)."""
+    from model.moe import MoELayer
+
+    cfg = ModelConfig(
+        arch="moe",
+        d_model=32,
+        n_heads=1,
+        head_dim=32,
+        n_routed_experts=4,
+        num_experts_per_tok=2,
+        moe_intermediate_size=64,
+        vocab_size=100,
+        max_seq_len=64,
+        dropout=0.0,
+    )
+    layer = MoELayer(cfg)
+    layer.eval()
+    torch.manual_seed(0)
+    x = torch.randn(2, 8, cfg.d_model)
+
+    with torch.no_grad():
+        y_grouped, aux_grouped = layer(x)
+        y_naive, aux_naive = _naive_moe_forward(layer, x)
+
+    assert torch.allclose(y_grouped, y_naive, atol=1e-4, rtol=1e-4), (
+        (y_grouped - y_naive).abs().max().item()
+    )
+    assert torch.allclose(aux_grouped, aux_naive, atol=1e-4, rtol=1e-4)
+
+
+def test_moe_sorted_dispatch_32_experts():
+    """Same check at M0.1-ish expert count (1+32 top-2), float32 atol 1e-4."""
+    from model.moe import MoELayer
+
+    cfg = ModelConfig(
+        arch="moe",
+        d_model=64,
+        n_heads=2,
+        head_dim=32,
+        n_routed_experts=32,
+        num_experts_per_tok=2,
+        moe_intermediate_size=128,
+        vocab_size=100,
+        max_seq_len=64,
+        dropout=0.0,
+    )
+    layer = MoELayer(cfg)
+    layer.eval()
+    torch.manual_seed(1)
+    x = torch.randn(2, 16, cfg.d_model)
+
+    with torch.no_grad():
+        y_grouped, aux_grouped = layer(x)
+        y_naive, aux_naive = _naive_moe_forward(layer, x)
+
+    assert torch.allclose(y_grouped, y_naive, atol=1e-4, rtol=1e-4), (
+        (y_grouped - y_naive).abs().max().item()
+    )
+    assert torch.allclose(aux_grouped, aux_naive, atol=1e-4, rtol=1e-4)
+
+
+
+def test_probe_expert_load_counts_sum():
+    from model.moe import MoELM
+
+    cfg = ModelConfig(
+        arch="moe",
+        vocab_size=6400,
+        max_seq_len=64,
+        n_layers=2,
+        n_routed_experts=8,
+        num_experts_per_tok=2,
+        moe_intermediate_size=64,
+        d_model=64,
+        n_heads=2,
+        head_dim=32,
+        dropout=0.0,
+    )
+    model = MoELM(cfg).eval()
+    ids = torch.randint(0, 6400, (2, 16))
+    counts, n_tokens = model.probe_expert_load(ids)
+    assert n_tokens == 32
+    assert counts.shape == (8,)
+    # each token contributes top_k assignments per layer
+    assert int(counts.sum().item()) == 2 * 16 * 2 * 2
+
+
+def test_train_window_expert_usage_and_log_line(capsys):
+    """训练 log 窗口：begin → forward×N → end/emit expert_load= JSON。"""
+    import json
+    from model.moe import MoELM
+    from train_pretrain import _emit_expert_load_line
+
+    cfg = ModelConfig(
+        arch="moe",
+        vocab_size=6400,
+        max_seq_len=64,
+        n_layers=2,
+        n_routed_experts=8,
+        num_experts_per_tok=2,
+        moe_intermediate_size=64,
+        d_model=64,
+        n_heads=2,
+        head_dim=32,
+        dropout=0.0,
+    )
+    model = MoELM(cfg)
+    model.train()
+    model.begin_expert_usage()
+    b, t = 2, 8
+    for _ in range(3):
+        ids = torch.randint(0, 6400, (b, t))
+        labels = ids.clone()
+        _logits, _ce, _aux = model(ids, labels=labels)
+    _emit_expert_load_line(model=model, step=3, window_steps=3, cfg=cfg)
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out and out[-1].startswith("expert_load=")
+    payload = json.loads(out[-1].split("=", 1)[1])
+    assert payload["step"] == 3
+    assert payload["window_steps"] == 3
+    assert payload["n_routed"] == 8
+    assert len(payload["fractions"]) == 8
+    assert len(payload["counts"]) == 8
+    # 3 steps × layers × B × T × top_k
+    assert payload["total_assignments"] == 3 * 2 * b * t * 2
+    assert abs(sum(payload["fractions"]) - 1.0) < 1e-6

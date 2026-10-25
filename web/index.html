@@ -105,6 +105,19 @@
       border-color: var(--ink);
     }
     .mode-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .check-row input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      accent-color: var(--accent);
+    }
     details { margin-top: 8px; }
     summary { cursor: pointer; color: var(--muted); }
     .actions, .row { display: flex; gap: 8px; margin-top: 12px; }
@@ -298,6 +311,67 @@
     @media (max-width: 900px) {
       .chat-shell { grid-template-columns: 1fr; }
     }
+
+    /* Expert load bars */
+    #moe-load-summary {
+      white-space: pre-wrap;
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      min-height: 3em;
+    }
+    #moe-load-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: min(70vh, 720px);
+      overflow: auto;
+      padding: 4px 0;
+    }
+    .moe-bar-row {
+      display: grid;
+      grid-template-columns: 52px 1fr 64px;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .moe-bar-row .lab { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .moe-bar-row .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+    .moe-bar-track {
+      height: 10px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .moe-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+      min-width: 0;
+    }
+    .moe-bar-row.hot .moe-bar-fill { background: #b91c1c; }
+    .moe-bar-row.cold .moe-bar-fill { background: #9ca3af; }
+    .moe-bar-row.hot .lab, .moe-bar-row.hot .pct { color: #b91c1c; font-weight: 600; }
+    .moe-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
+    #live-expert-wrap { margin-top: 8px; }
+    #live-expert-wrap.hidden { display: none; }
+    #live-expert-summary {
+      white-space: pre-wrap;
+      color: var(--muted);
+      font-size: 12px;
+      margin: 4px 0 8px;
+      min-height: 1.2em;
+    }
+    #live-expert-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 280px;
+      overflow: auto;
+      padding: 2px 0;
+    }
   </style>
 </head>
 <body>
@@ -312,6 +386,7 @@
     <nav>
       <button type="button" class="active" data-tab="train">训练</button>
       <button type="button" data-tab="infer">对话</button>
+      <button type="button" data-tab="moe-load">专家负载</button>
       <button type="button" data-tab="env">环境</button>
     </nav>
 
@@ -350,13 +425,14 @@
             <summary>保存策略</summary>
             <label>Loss 里程碑阈值<input id="thresholds" value="20,15,12,10,9,8,7,6,5,4,3" /></label>
             <div class="grid">
-              <label>Stable Steps<input id="stable-steps" type="number" min="1" value="200" /></label>
+              <label>Stable Steps<input id="stable-steps" type="number" min="1" value="100" /></label>
               <label>Save Every（0 关闭）<input id="save-every" type="number" min="0" value="0" /></label>
             </div>
             <label>断点续训
               <select id="resume"><option value="">不续训</option></select>
             </label>
           </details>
+          <label class="check-row"><input id="compile" type="checkbox" /> torch.compile（首次会慢一点，之后步速通常更快）</label>
           <div class="actions">
             <button type="button" id="btn-start">启动训练</button>
             <button type="button" id="btn-stop">终止训练</button>
@@ -378,6 +454,12 @@
           <h2>Loss</h2>
           <p id="loss-caption" class="caption">每 200 步记录一个点</p>
           <canvas id="loss-chart"></canvas>
+          <div id="live-expert-wrap" class="hidden">
+            <h2>专家负载（实时）</h2>
+            <p id="live-expert-caption" class="caption">与训练 log 同步；跨层合计的路由专家 top-k 占比</p>
+            <div id="live-expert-summary">等待 MoE 训练日志…</div>
+            <div id="live-expert-bars"></div>
+          </div>
           <h2>训练日志</h2>
           <pre id="log-view">等待日志。</pre>
         </div>
@@ -423,6 +505,39 @@
             </div>
             <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 流式输出</div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="moe-load" class="panel">
+      <div class="layout">
+        <div class="card">
+          <h2>专家负载 (Expert Load)</h2>
+          <p class="mode-hint">在验证集上跑 MoE 路由探针，看每个路由专家被 top-k 选中的占比（DeepSeek 式负载图）。shared 专家始终启用，不计入下图。</p>
+          <label>Checkpoint
+            <select id="moe-ckpt-select"></select>
+          </label>
+          <div class="row">
+            <button type="button" id="btn-moe-refresh-ckpt">刷新</button>
+          </div>
+          <label>验证数据
+            <input id="moe-data" type="text" />
+          </label>
+          <div class="grid">
+            <label>样本数<input id="moe-samples" type="number" min="1" max="2048" value="64" /></label>
+            <label>Max Seq<input id="moe-seq" type="number" min="8" value="512" /></label>
+            <label>Batch<input id="moe-batch" type="number" min="1" max="16" value="4" /></label>
+          </div>
+          <div class="actions">
+            <button type="button" id="btn-moe-probe">跑验证探针</button>
+          </div>
+          <p id="moe-msg" class="caption">先选 MoE checkpoint，再点「跑验证探针」。训练占 GPU 时会自动用 CPU。</p>
+        </div>
+        <div class="card">
+          <h2>调用占比</h2>
+          <div id="moe-load-summary">尚未探针。</div>
+          <div id="moe-load-bars"></div>
+          <p class="moe-note" id="moe-note"></p>
         </div>
       </div>
     </section>
@@ -592,6 +707,65 @@
         `状态: ${state}\nStep: ${s.step || "-"}\nLoss: ${loss}\nPPL: ${ppl}\nLR: ${lr}\n硬件: ${s.gpu || "-"}`;
     }
 
+
+    function setLiveExpertVisible(show) {
+      const wrap = $("live-expert-wrap");
+      if (!wrap) return;
+      wrap.classList.toggle("hidden", !show);
+    }
+
+    function clearLiveExpert() {
+      const summary = $("live-expert-summary");
+      const bars = $("live-expert-bars");
+      if (summary) summary.textContent = trainArch === "moe"
+        ? "等待 MoE 训练日志（当前进程若未重启/续训则无实时行）…"
+        : "Dense：无路由专家负载（N/A）";
+      if (bars) bars.innerHTML = "";
+    }
+
+    function renderLiveExpertLoad(data) {
+      const summary = $("live-expert-summary");
+      const bars = $("live-expert-bars");
+      if (!summary || !bars) return;
+      if (!data || !Array.isArray(data.fractions) || !data.fractions.length) {
+        summary.textContent = (data && data.message) || "N/A";
+        bars.innerHTML = "";
+        return;
+      }
+      setLiveExpertVisible(true);
+      const maxF = Number(data.max_frac) || Math.max(...data.fractions, 0);
+      const step = data.step != null ? data.step : "-";
+      const win = data.window_steps != null ? data.window_steps : "?";
+      summary.textContent =
+        `step ${step} · 窗口 ${win} 步 · 路由 ${data.n_routed} · top-${data.top_k} · ${data.n_layers} 层\n` +
+        `最大 E${data.max_expert} = ${(Number(data.max_frac) * 100).toFixed(2)}% · ` +
+        `最小 E${data.min_expert} = ${(Number(data.min_frac) * 100).toFixed(2)}%`;
+      bars.innerHTML = "";
+      const scale = Math.max(maxF, 1e-9);
+      data.fractions.forEach((f, i) => {
+        const row = document.createElement("div");
+        row.className = "moe-bar-row";
+        if (i === data.max_expert) row.classList.add("hot");
+        if (i === data.min_expert) row.classList.add("cold");
+        const lab = document.createElement("div");
+        lab.className = "lab";
+        lab.textContent = `E${i}`;
+        const track = document.createElement("div");
+        track.className = "moe-bar-track";
+        const fill = document.createElement("div");
+        fill.className = "moe-bar-fill";
+        fill.style.width = `${(Number(f) / scale) * 100}%`;
+        track.appendChild(fill);
+        const pct = document.createElement("div");
+        pct.className = "pct";
+        pct.textContent = `${(Number(f) * 100).toFixed(2)}%`;
+        row.appendChild(lab);
+        row.appendChild(track);
+        row.appendChild(pct);
+        bars.appendChild(row);
+      });
+    }
+
     function connectLogs() {
       const es = new EventSource("/api/logs/stream");
       es.addEventListener("hello", (ev) => {
@@ -599,7 +773,10 @@
         clearLog();
         plotEvery = data.plot_every || 200;
         clearLoss();
+        clearLiveExpert();
+        setLiveExpertVisible(trainArch === "moe");
         for (const point of data.loss || []) addLossPoint(point.step, point.loss);
+        if (data.expert_load) renderLiveExpertLoad(data.expert_load);
         if (data.status) renderStatus(data.status);
         $("live-dot").classList.add("on");
         $("live-text").textContent = "日志已连接";
@@ -609,12 +786,17 @@
         if (data.plot_every) plotEvery = data.plot_every;
         clearLog();
         clearLoss();
+        clearLiveExpert();
+        setLiveExpertVisible(trainArch === "moe");
       });
       es.addEventListener("log", (ev) => pushLine(JSON.parse(ev.data).line));
       es.addEventListener("loss", (ev) => {
         const point = JSON.parse(ev.data);
         if (point.every) plotEvery = point.every;
         addLossPoint(point.step, point.loss);
+      });
+      es.addEventListener("expert_load", (ev) => {
+        renderLiveExpertLoad(JSON.parse(ev.data));
       });
       es.addEventListener("status", (ev) => renderStatus(JSON.parse(ev.data)));
       es.onerror = () => {
@@ -668,10 +850,14 @@
         const cfg = modeDefaults[key] || modeDefaults.pretrain || {};
         if (cfg.out_dir) $("out-dir").value = cfg.out_dir;
         if (cfg.data_path) $("data-path").value = cfg.data_path;
+        if (cfg.max_seq_len != null) $("seq-len").value = cfg.max_seq_len;
+        if (cfg.stable_steps != null) $("stable-steps").value = cfg.stable_steps;
       }
       $("arch-hint").textContent = trainArch === "moe"
         ? "MoE：MiniSeek-M0.1（1 shared + 32 routed, top-2, h=512）≈150M；默认写到 checkpoints/stage1。"
         : "Dense：MiniSeek-D FFN；预训练默认写到 checkpoints/stage0。";
+      setLiveExpertVisible(trainArch === "moe");
+      if (trainArch !== "moe") clearLiveExpert();
     }
 
     function applyMode(mode) {
@@ -684,6 +870,8 @@
       if (cfg.lr != null) $("lr").value = cfg.lr;
       if (cfg.min_lr != null) $("min-lr").value = cfg.min_lr;
       if (cfg.warmup_steps != null) $("warmup").value = cfg.warmup_steps;
+      if (cfg.max_seq_len != null) $("seq-len").value = cfg.max_seq_len;
+      if (cfg.stable_steps != null) $("stable-steps").value = cfg.stable_steps;
       if (cfg.save_loss_thresholds) $("thresholds").value = cfg.save_loss_thresholds;
       $("init-ckpt-wrap").style.display = trainMode === "sft" ? "block" : "none";
       $("mode-hint").textContent = trainMode === "sft"
@@ -764,6 +952,7 @@
           save_every: num("save-every"),
           resume: $("resume").value,
           init_ckpt: trainMode === "sft" ? $("init-ckpt").value : "",
+          compile: $("compile").checked,
         }),
       });
       $("action-msg").textContent = res.ok ? (await res.json()).message : await readError(res);
@@ -977,6 +1166,127 @@
       setInterval(refreshProcs, 5000);
     }
     boot();
+
+    // ---- MoE expert load probe ----
+    async function refreshMoeCheckpoints() {
+      const res = await fetch("/api/checkpoints");
+      const files = (await res.json()).files || [];
+      const sel = $("moe-ckpt-select");
+      const prev = sel.value;
+      sel.innerHTML = "";
+      for (const f of files) {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = f.replace(/^.*\/checkpoints\//, "checkpoints/");
+        sel.appendChild(opt);
+      }
+      if (!files.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "（无 checkpoint）";
+        sel.appendChild(opt);
+      } else if (prev && files.includes(prev)) {
+        sel.value = prev;
+      } else {
+        // Prefer stage1/best.pt for MoE
+        const prefer = files.find((f) => f.includes("/stage1/") && f.endsWith("best.pt"))
+          || files.find((f) => f.includes("best.pt"))
+          || files[0];
+        sel.value = prefer;
+      }
+    }
+
+    function renderMoeLoad(data) {
+      const summary = $("moe-load-summary");
+      const bars = $("moe-load-bars");
+      const note = $("moe-note");
+      bars.innerHTML = "";
+      if (!data || data.ok === false) {
+        summary.textContent = (data && data.message) || "N/A";
+        note.textContent = "";
+        return;
+      }
+      const maxF = data.max_frac || 0;
+      const lines = [
+        data.message || "",
+        `样本 ${data.num_samples} · tokens ${data.n_tokens} · 路由专家 ${data.n_routed} · top-${data.top_k} · ${data.n_layers} 层`,
+        `最大 E${data.max_expert} = ${(data.max_frac * 100).toFixed(2)}% · 最小 E${data.min_expert} = ${(data.min_frac * 100).toFixed(2)}%`,
+        `熵 ${Number(data.entropy_bits).toFixed(3)} bit（均匀=${Number(data.entropy_uniform_bits).toFixed(3)}） · 耗时 ${data.seconds}s`,
+      ];
+      summary.textContent = lines.filter(Boolean).join("\n");
+      note.textContent = data.note || "";
+      const fracs = data.fractions || [];
+      const scale = Math.max(maxF, 1e-9);
+      fracs.forEach((f, i) => {
+        const row = document.createElement("div");
+        row.className = "moe-bar-row";
+        if (i === data.max_expert) row.classList.add("hot");
+        if (i === data.min_expert) row.classList.add("cold");
+        const lab = document.createElement("div");
+        lab.className = "lab";
+        lab.textContent = `E${i}`;
+        const track = document.createElement("div");
+        track.className = "moe-bar-track";
+        const fill = document.createElement("div");
+        fill.className = "moe-bar-fill";
+        fill.style.width = `${(f / scale) * 100}%`;
+        track.appendChild(fill);
+        const pct = document.createElement("div");
+        pct.className = "pct";
+        pct.textContent = `${(f * 100).toFixed(2)}%`;
+        row.appendChild(lab);
+        row.appendChild(track);
+        row.appendChild(pct);
+        bars.appendChild(row);
+      });
+    }
+
+    async function runMoeProbe() {
+      const ckpt = $("moe-ckpt-select").value;
+      if (!ckpt) {
+        $("moe-msg").textContent = "请先选择 checkpoint";
+        return;
+      }
+      $("btn-moe-probe").disabled = true;
+      $("moe-msg").textContent = "正在跑验证探针（训练中会用 CPU，可能稍慢）…";
+      $("moe-load-summary").textContent = "计算中…";
+      $("moe-load-bars").innerHTML = "";
+      try {
+        const res = await fetch("/api/moe/expert-load", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ckpt_path: ckpt,
+            data_path: $("moe-data").value.trim(),
+            num_samples: Number($("moe-samples").value) || 64,
+            max_seq_len: Number($("moe-seq").value) || 512,
+            batch_size: Number($("moe-batch").value) || 4,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || res.statusText);
+        }
+        $("moe-msg").textContent = data.message || "完成";
+        renderMoeLoad(data);
+      } catch (err) {
+        $("moe-msg").textContent = "失败: " + (err.message || err);
+        $("moe-load-summary").textContent = "探针失败。";
+      } finally {
+        $("btn-moe-probe").disabled = false;
+      }
+    }
+
+    $("moe-data").value = "/home/wyf/miniseek/data/valid.jsonl";
+    $("btn-moe-refresh-ckpt").addEventListener("click", refreshMoeCheckpoints);
+    $("btn-moe-probe").addEventListener("click", runMoeProbe);
+    document.querySelectorAll("nav button").forEach((btn) => {
+      if (btn.dataset.tab === "moe-load") {
+        btn.addEventListener("click", () => { refreshMoeCheckpoints(); });
+      }
+    });
+    refreshMoeCheckpoints();
+
   </script>
 </body>
 </html>

@@ -66,10 +66,21 @@ class MoELayer(nn.Module):
             [ExpertMLP(d, h, drop) for _ in range(self.n_routed)]
         )
         self.router = nn.Linear(d, self.n_routed, bias=False)
+        # Probe-only: when True, accumulate top-k assignment counts (CPU long).
+        self._record_usage = False
+        self._usage_counts: Optional[torch.Tensor] = None
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Sorted / grouped expert dispatch (torch-only).
+
+        Flatten (token, slot) → sort by expert id → one contiguous GEMM per
+        expert with count>0 → scatter-add weighted outputs. Architecture is
+        unchanged (1 shared + N routed, top-k). megablocks / grouped_gemm are
+        not required; drop them in later if available for fused kernels.
+        """
         b, t, d = x.shape
-        flat = x.reshape(b * t, d)
+        flat = x.reshape(b * t, d)  # (T, D)
+        n_tok = flat.size(0)
         shared_out = self.shared(flat)
 
         logits = self.router(flat)
@@ -77,15 +88,54 @@ class MoELayer(nn.Module):
         topk_prob, topk_idx = torch.topk(probs, self.top_k, dim=-1)
         topk_prob = topk_prob / topk_prob.sum(dim=-1, keepdim=True).clamp_min(1e-9)
 
+        if self._record_usage:
+            batch_counts = torch.bincount(
+                topk_idx.reshape(-1), minlength=self.n_routed
+            ).detach().cpu()
+            if self._usage_counts is None:
+                self._usage_counts = batch_counts
+            else:
+                self._usage_counts += batch_counts
+
+        # (T, K) → (T*K,) assignments
+        k = self.top_k
+        expert_ids = topk_idx.reshape(-1)  # (T*K,)
+        weights = topk_prob.reshape(-1, 1)  # (T*K, 1)
+        # token id for each (token, slot) pair
+        token_ids = (
+            torch.arange(n_tok, device=flat.device)
+            .unsqueeze(1)
+            .expand(n_tok, k)
+            .reshape(-1)
+        )
+
+        # Sort by expert so each expert's tokens form a contiguous slice
+        order = torch.argsort(expert_ids, stable=True)
+        expert_sorted = expert_ids[order]
+        token_sorted = token_ids[order]
+        weight_sorted = weights[order]
+
+        counts = torch.bincount(expert_sorted, minlength=self.n_routed)
+        # offsets[e] = start index of expert e in the sorted list
+        offsets = torch.zeros(self.n_routed + 1, dtype=torch.long, device=flat.device)
+        offsets[1:] = counts.cumsum(0)
+
+        # Gather tokens once in expert order, then slice per expert
+        gathered = flat.index_select(0, token_sorted)  # (T*K, D)
+        expert_out = torch.empty_like(gathered)
+
+        # One contiguous mm (via ExpertMLP) per expert with tokens
+        # counts/offsets are tiny (n_routed); .item() is fine here
+        for e in range(self.n_routed):
+            start = int(offsets[e].item())
+            end = int(offsets[e + 1].item())
+            if start == end:
+                continue
+            expert_out[start:end] = self.experts[e](gathered[start:end])
+
+        weighted = expert_out * weight_sorted  # (T*K, D)
         routed = torch.zeros_like(flat)
-        for slot in range(self.top_k):
-            idx = topk_idx[:, slot]
-            w = topk_prob[:, slot].unsqueeze(-1)
-            for e in range(self.n_routed):
-                mask = idx == e
-                if not mask.any():
-                    continue
-                routed[mask] = routed[mask] + w[mask] * self.experts[e](flat[mask])
+        routed.index_add_(0, token_sorted, weighted)
 
         y = (shared_out + routed).view(b, t, d)
         aux = load_balance_loss(probs, topk_idx, self.n_routed)
@@ -191,6 +241,49 @@ class MoELM(nn.Module):
                 ignore_index=-100,
             )
         return logits, ce, aux_loss
+
+    def begin_expert_usage(self) -> None:
+        """Start recording routed top-k assignment counts (probe / eval only)."""
+        for block in self.layers:
+            block.moe._record_usage = True
+            block.moe._usage_counts = None
+
+    def end_expert_usage(self) -> torch.Tensor:
+        """Stop recording; return summed counts over layers, shape (n_routed,)."""
+        total: Optional[torch.Tensor] = None
+        for block in self.layers:
+            block.moe._record_usage = False
+            counts = block.moe._usage_counts
+            block.moe._usage_counts = None
+            if counts is None:
+                continue
+            counts = counts.detach().cpu().long()
+            total = counts if total is None else total + counts
+        if total is None:
+            return torch.zeros(self.cfg.n_routed_experts, dtype=torch.long)
+        return total
+
+    @torch.no_grad()
+    def probe_expert_load(
+        self, input_ids: torch.Tensor
+    ) -> Tuple[torch.Tensor, int]:
+        """One forward with usage recording.
+
+        Returns:
+            counts: (n_routed,) long — top-k slot assignments summed over layers
+            n_tokens: number of tokens in this batch (B*T)
+        """
+        was_training = self.training
+        self.eval()
+        self.begin_expert_usage()
+        try:
+            _logits, _ce, _aux = self.forward(input_ids)
+        finally:
+            counts = self.end_expert_usage()
+            if was_training:
+                self.train()
+        n_tokens = int(input_ids.numel())
+        return counts, n_tokens
 
     def _sample_next(
         self,

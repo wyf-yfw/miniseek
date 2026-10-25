@@ -54,6 +54,7 @@ STEP_RE = re.compile(
     r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
 )
 RESUME_RE = re.compile(r"resumed from .* step=(\d+)")
+EXPERT_LOAD_RE = re.compile(r"^expert_load=(\{.*\})$")
 
 
 def _training_pid_alive(pid: Optional[int]) -> bool:
@@ -165,6 +166,7 @@ class TrainingManager:
         self.current_lr: Optional[float] = None
         self.plot_every = 200
         self.loss_points: List[Tuple[int, float]] = []
+        self.latest_expert_load: Optional[dict] = None
         self._loss_bucket = 0
         self._lock = threading.Lock()
         self._subscribers: List[asyncio.Queue] = []
@@ -246,6 +248,7 @@ class TrainingManager:
             self.plot_every = max(1, int(plot_every))
             self.lines.clear()
             self.loss_points.clear()
+            self.latest_expert_load = None
             self._loss_bucket = 0
             self.current_step = 0
             self.current_loss = None
@@ -294,6 +297,7 @@ class TrainingManager:
             self.current_lr = None
             self.plot_every = max(1, int(req.plot_every))
             self.loss_points.clear()
+            self.latest_expert_load = None
             self._loss_bucket = 0
             plot_every = self.plot_every
             subs = list(self._subscribers)
@@ -344,6 +348,8 @@ class TrainingManager:
             cmd.extend(["--arch", arch, "--aux-coef", str(float(req.aux_coef))])
         elif arch == "moe":
             raise ValueError("SFT 暂不支持 MoE，请先用 Dense 或等 M0.1 SFT")
+        if getattr(req, "compile", False):
+            cmd.append("--compile")
         resume = (req.resume or "").strip()
         init_ckpt = (req.init_ckpt or "").strip()
         if mode == "sft":
@@ -374,6 +380,7 @@ class TrainingManager:
                 stderr=subprocess.STDOUT,
                 cwd=str(PROJECT_ROOT),
                 env=env,
+                start_new_session=True,
             )
         except Exception:
             self._starting = False
@@ -422,6 +429,7 @@ class TrainingManager:
                 "ok": True,
                 "plot_every": self.plot_every,
                 "loss": [{"step": step, "loss": loss} for step, loss in self.loss_points],
+                "expert_load": self.latest_expert_load,
                 "status": {
                     "running": running,
                     "pid": self._pid if running else None,
@@ -519,6 +527,7 @@ class TrainingManager:
     def _emit_log(self, line: str) -> None:
         status_payload = None
         point: Optional[Tuple[int, float]] = None
+        expert_payload: Optional[dict] = None
         with self._lock:
             self.lines.append(line)
             resumed = RESUME_RE.search(line)
@@ -529,6 +538,7 @@ class TrainingManager:
                 step = int(matched.group(1))
                 if self.current_step and step + 20 < self.current_step:
                     self.loss_points.clear()
+                    self.latest_expert_load = None
                     self._loss_bucket = 0
                 self.current_step = step
                 self.current_loss = float(matched.group(2))
@@ -536,6 +546,18 @@ class TrainingManager:
                 self.current_lr = float(matched.group(4))
                 point = self._record_loss_locked(self.current_step, self.current_loss)
                 status_payload = self._status_locked()
+            el = EXPERT_LOAD_RE.match(line)
+            if el:
+                try:
+                    payload = json.loads(el.group(1))
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict):
+                    fracs = payload.get("fractions")
+                    n_routed = int(payload.get("n_routed") or 0)
+                    if isinstance(fracs, list) and n_routed > 0 and len(fracs) == n_routed:
+                        self.latest_expert_load = payload
+                        expert_payload = payload
             every = self.plot_every
             subs = list(self._subscribers)
         self._fanout(subs, ("log", {"line": line}))
@@ -548,6 +570,8 @@ class TrainingManager:
                 "loss": point[1],
                 "every": every,
             }))
+        if expert_payload is not None:
+            self._fanout(subs, ("expert_load", expert_payload))
 
     def _broadcast_status(self) -> None:
         payload = self.status_dict()
@@ -687,6 +711,135 @@ class InferenceEngine:
             f"{speed:.1f} tokens/s"
         )
 
+    def expert_load(
+        self,
+        *,
+        data_path: str,
+        num_samples: int = 64,
+        max_seq_len: int = 512,
+        batch_size: int = 4,
+        ckpt_path: str = "",
+    ) -> dict:
+        """Run a validation probe and return routed-expert assignment load."""
+        import math
+
+        ckpt_path = (ckpt_path or "").strip()
+        if ckpt_path:
+            if self.loaded_ckpt != ckpt_path or self.model is None:
+                self.load_model(ckpt_path)
+        if self.model is None:
+            raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
+
+        cfg = getattr(self.model, "cfg", None)
+        arch = getattr(cfg, "arch", "dense") if cfg is not None else "dense"
+        use_moe = bool(getattr(cfg, "use_moe", False)) if cfg is not None else False
+        if arch != "moe" and not use_moe:
+            return {
+                "arch": "dense",
+                "ok": False,
+                "message": "当前是 Dense 模型，无路由专家负载（N/A）",
+            }
+        if not hasattr(self.model, "probe_expert_load"):
+            raise HTTPException(status_code=400, detail="该 MoE 权重不支持专家负载探针")
+
+        data_p = Path(data_path.strip() or str(PROJECT_ROOT / "data" / "valid.jsonl"))
+        if not data_p.is_absolute():
+            data_p = (PROJECT_ROOT / data_p).resolve()
+        if not data_p.exists():
+            raise HTTPException(status_code=404, detail=f"找不到数据: {data_p}")
+
+        num_samples = max(1, int(num_samples))
+        max_seq_len = max(8, int(max_seq_len))
+        batch_size = max(1, min(int(batch_size), 16))
+        n_routed = int(getattr(cfg, "n_routed_experts", 0))
+        top_k = int(getattr(cfg, "num_experts_per_tok", 2))
+        n_layers = int(getattr(cfg, "n_layers", 0))
+        n_shared = int(getattr(cfg, "n_shared_experts", 1))
+
+        texts: List[str] = []
+        with data_p.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                text = obj.get("text") or obj.get("content") or ""
+                if text:
+                    texts.append(text)
+                if len(texts) >= num_samples:
+                    break
+        if not texts:
+            raise HTTPException(status_code=400, detail="验证数据为空")
+
+        total_counts = torch.zeros(n_routed, dtype=torch.long)
+        n_tokens = 0
+        t0 = time.time()
+        with self._gen_lock:
+            for start in range(0, len(texts), batch_size):
+                chunk = texts[start : start + batch_size]
+                encoded = [
+                    self.tokenizer.encode(t, add_special_tokens=True)[:max_seq_len]
+                    for t in chunk
+                ]
+                encoded = [ids if ids else [0] for ids in encoded]
+                max_len = max(len(ids) for ids in encoded)
+                pad_id = int(getattr(self.tokenizer, "pad_token_id", 0) or 0)
+                batch = torch.full(
+                    (len(encoded), max_len), pad_id, dtype=torch.long, device=self.device
+                )
+                for i, ids in enumerate(encoded):
+                    batch[i, : len(ids)] = torch.tensor(
+                        ids, dtype=torch.long, device=self.device
+                    )
+                counts, tok = self.model.probe_expert_load(batch)
+                total_counts += counts.cpu().long()
+                n_tokens += int(tok)
+
+        counts_list = [int(x) for x in total_counts.tolist()]
+        total_assign = int(sum(counts_list))
+        fractions = [
+            (c / total_assign if total_assign > 0 else 0.0) for c in counts_list
+        ]
+        max_frac = max(fractions) if fractions else 0.0
+        min_frac = min(fractions) if fractions else 0.0
+        # Shannon entropy (bits) over assignment distribution
+        entropy = 0.0
+        for f in fractions:
+            if f > 0:
+                entropy -= f * math.log(f, 2)
+        uniform = math.log(max(n_routed, 1), 2)
+        cost = time.time() - t0
+        return {
+            "arch": "moe",
+            "ok": True,
+            "ckpt": self.loaded_ckpt,
+            "data_path": str(data_p),
+            "num_samples": len(texts),
+            "n_tokens": n_tokens,
+            "n_routed": n_routed,
+            "n_shared": n_shared,
+            "top_k": top_k,
+            "n_layers": n_layers,
+            "counts": counts_list,
+            "fractions": fractions,
+            "total_assignments": total_assign,
+            "max_frac": max_frac,
+            "min_frac": min_frac,
+            "max_expert": int(max(range(n_routed), key=lambda i: fractions[i])) if n_routed else -1,
+            "min_expert": int(min(range(n_routed), key=lambda i: fractions[i])) if n_routed else -1,
+            "entropy_bits": entropy,
+            "entropy_uniform_bits": uniform,
+            "seconds": round(cost, 2),
+            "note": "shared 专家对每个 token 始终启用；下图为路由专家 top-k 槽位占比（跨层合计）",
+            "message": (
+                f"验证探针完成：{len(texts)} 条 / {n_tokens} tokens，"
+                f"最大负载 {max_frac * 100:.1f}% (E{int(max(range(n_routed), key=lambda i: fractions[i])) if n_routed else -1})"
+            ),
+        }
+
     def build_chat_prompt(self, messages: List[dict]) -> str:
         cleaned: List[dict] = []
         for m in messages:
@@ -772,12 +925,13 @@ class TrainRequest(BaseModel):
     max_steps: int = 0
     grad_clip: float = 1.0
     save_loss_thresholds: str = "20,15,12,10,9,8,7,6,5,4,3"
-    stable_steps: int = 200
+    stable_steps: int = 100
     save_every: int = 0
     resume: str = ""
     init_ckpt: str = ""  # SFT：从预训练 base 初始化
     log_every: int = Field(default=1, ge=1)
     plot_every: int = Field(default=200, ge=1)
+    compile: bool = False
 
 
 class AttachRequest(BaseModel):
@@ -787,6 +941,14 @@ class AttachRequest(BaseModel):
 
 class LoadRequest(BaseModel):
     ckpt_path: str
+
+
+class ExpertLoadRequest(BaseModel):
+    ckpt_path: str = ""
+    data_path: str = str(PROJECT_ROOT / "data" / "valid.jsonl")
+    num_samples: int = Field(default=64, ge=1, le=2048)
+    max_seq_len: int = Field(default=512, ge=8, le=4096)
+    batch_size: int = Field(default=4, ge=1, le=16)
 
 
 class GenerateRequest(BaseModel):
@@ -860,6 +1022,8 @@ def defaults() -> dict:
             "lr": 1e-4,
             "min_lr": 3e-5,
             "warmup_steps": 200,
+            "max_seq_len": 512,
+            "stable_steps": 100,
             "save_loss_thresholds": "20,15,12,10,9,8,7,6,5,4,3",
             "init_ckpt": "",
             "resume": "",
@@ -872,6 +1036,8 @@ def defaults() -> dict:
             "lr": 1e-4,
             "min_lr": 3e-5,
             "warmup_steps": 200,
+            "max_seq_len": 512,
+            "stable_steps": 100,
             "save_loss_thresholds": "20,15,12,10,9,8,7,6,5,4,3",
             "init_ckpt": "",
             "resume": "",
@@ -884,6 +1050,8 @@ def defaults() -> dict:
             "lr": 5e-5,
             "min_lr": 1e-5,
             "warmup_steps": 100,
+            "max_seq_len": 512,
+            "stable_steps": 100,
             "save_loss_thresholds": "5,4,3,2.5,2,1.5,1",
             "init_ckpt": str(best) if best.exists() else "",
             "resume": "",
@@ -996,6 +1164,17 @@ def infer_generate(req: GenerateRequest) -> dict:
         top_k=req.top_k,
         seed=req.seed,
     )}
+
+
+@app.post("/api/moe/expert-load")
+def moe_expert_load(req: ExpertLoadRequest) -> dict:
+    return infer_engine.expert_load(
+        data_path=req.data_path,
+        num_samples=req.num_samples,
+        max_seq_len=req.max_seq_len,
+        batch_size=req.batch_size,
+        ckpt_path=req.ckpt_path,
+    )
 
 
 class ChatMessage(BaseModel):
