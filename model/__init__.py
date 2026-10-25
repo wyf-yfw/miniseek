@@ -1,7 +1,7 @@
 """MiniSeek 模型包。
 
 - Dense（MiniSeek-D*）：`from model.dense import DenseLM`
-- MoE（MiniSeek-M*）：`from model.moe import MoELM`（尚未实现）
+- MoE（MiniSeek-M*）：`from model.moe import MoELM`
 """
 
 from .config import ModelConfig
