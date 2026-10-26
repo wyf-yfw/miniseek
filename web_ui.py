@@ -30,7 +30,14 @@ from model.config import ModelConfig
 from model.dense import DenseLM
 from model.tokenizer import load_tokenizer
 from web import tasks_store as ts
+from web import bench_store as bs
 from web.task_runner import pid_alive, reconcile_task, start_task, stop_task
+from web.bench_runner import (
+    reconcile_run,
+    start_run as bench_start_run,
+    stop_run as bench_stop_run,
+    read_log as bench_read_log,
+)
 from web.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -357,6 +364,12 @@ class ArchDesignRequest(BaseModel):
     arch: str = "dense"  # tiny | dense | moe
 
 
+class BenchStartRequest(BaseModel):
+    ckpt_path: str
+    tasks: List[str] = Field(default_factory=lambda: ["ceval-valid", "cmmlu", "gsm8k"])
+    limit: Optional[int] = None
+
+
 class GenerateRequest(BaseModel):
     prompt: str
     max_new_tokens: int = 64
@@ -423,6 +436,9 @@ async def lifespan(app: FastAPI):
     for row in ts.list_tasks():
         if row.get("status") == "running":
             reconcile_task(ts.load_task(row["id"]))
+    for row in bs.list_runs():
+        if row.get("status") == "running":
+            reconcile_run(bs.load_run(row["id"]))
     yield
 
 
@@ -888,6 +904,71 @@ def status() -> dict:
 
 
 
+
+
+
+def _get_bench_or_404(run_id: str) -> dict:
+    try:
+        return reconcile_run(bs.load_run(run_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"bench run not found: {run_id}") from exc
+
+
+@app.get("/api/bench/runs")
+def api_bench_list() -> dict:
+    rows = []
+    for row in bs.list_runs():
+        if row.get("status") == "running":
+            row = reconcile_run(bs.load_run(row["id"]))
+        rows.append(row)
+    return {"runs": rows}
+
+
+@app.post("/api/bench/runs")
+def api_bench_start(req: BenchStartRequest) -> dict:
+    path = (req.ckpt_path or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="ckpt_path 不能为空")
+    try:
+        return bench_start_run(
+            ckpt_path=path,
+            tasks=list(req.tasks or []),
+            limit=req.limit,
+            training_busy=_any_training_running(),
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"找不到 checkpoint: {path}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/bench/runs/{run_id}")
+def api_bench_get(run_id: str) -> dict:
+    return _get_bench_or_404(run_id)
+
+
+@app.get("/api/bench/runs/{run_id}/logs")
+def api_bench_logs(run_id: str, tail: int = 200) -> dict:
+    _get_bench_or_404(run_id)
+    return {"text": bench_read_log(run_id, tail=tail)}
+
+
+@app.get("/api/bench/runs/{run_id}/results")
+def api_bench_results(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    rp = bs.run_dir(run_id) / "results.json"
+    if not rp.is_file():
+        raise HTTPException(status_code=404, detail="results.json 尚未生成")
+    import json as _json
+    return _json.loads(rp.read_text(encoding="utf-8"))
+
+
+@app.post("/api/bench/runs/{run_id}/stop")
+def api_bench_stop(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    return bench_stop_run(run_id)
 
 
 @app.get("/api/arch/design")

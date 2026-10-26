@@ -12,7 +12,7 @@
 
 超参与训练步数在阶段 0–5 保持一致，便于 Dense → MoE → SWA → CSA2 → CED 公平 A/B。
 
-## C-Eval / CMMLU（后续阶段）
+## C-Eval / CMMLU / GSM8K
 
 安装 [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)：
 
@@ -37,3 +37,20 @@ lm_eval --model hf \
 - MoE（混合专家）：路由负载、专家激活占比
 - SWA / CSA2：有效感受野、稀疏命中率
 - CED（因果编码器-解码器）：encoder/decoder 梯度与表示探针
+
+
+## Web / CLI（一期默认套件）
+
+默认任务：`ceval-valid`, `cmmlu`, `gsm8k`（Agent / MATH 二期）。
+
+```bash
+pip install 'lm-eval>=0.4.5'
+python -m eval.run_benchmark \
+  --ckpt checkpoints/hf/MiniSeek-D0.1-base.pt \
+  --tasks ceval-valid,cmmlu,gsm8k \
+  --out eval/runs/manual-1 \
+  --device cuda \
+  --limit 8
+```
+
+Web「评测」Tab 调用同一 CLI；跑次落在 `eval/runs/<id>/`（`run.json` + `results.json` + `run.log`）。
