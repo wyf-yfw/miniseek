@@ -164,6 +164,15 @@
       background: white;
     }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .path-row { display: flex; gap: 8px; margin-top: 4px; align-items: stretch; }
+    .path-row input { margin-top: 0; flex: 1; min-width: 0; }
+    .path-row .btn-browse {
+      flex: 0 0 auto; margin-top: 0; padding: 8px 12px;
+      border: 1px solid var(--line); border-radius: 8px;
+      background: #f9fafb; cursor: pointer; font: inherit; white-space: nowrap;
+    }
+    .path-row .btn-browse:hover { background: #f3f4f6; }
+    .path-row .btn-browse:disabled { opacity: 0.5; cursor: not-allowed; }
     .mode-row { display: flex; gap: 8px; margin-bottom: 4px; }
     .mode-row button {
       flex: 1;
@@ -304,7 +313,7 @@
               </div>
               <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：尚未实现；Tiny：d=64 L=2 冒烟档。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
-              <label><span class="field-title">数据路径</span><span class="field-hint">训练用 jsonl 文件路径（每行一条文本样本）。</span><input id="data-path" type="text" /></label>
+              <label><span class="field-title">数据路径</span><span class="field-hint">训练用 jsonl 文件路径（每行一条文本样本）。</span><div class="path-row"><input id="data-path" type="text" /><button type="button" class="btn-browse" data-for="data-path">浏览</button></div></label>
               <div class="grid">
                 <label><span class="field-title">Batch</span><span class="field-hint">每次更新用多少条样本；越大越稳但更吃显存/内存。</span><input id="batch-size" type="number" min="1" /></label>
                 <label><span class="field-title">Max Seq Len</span><span class="field-hint">单条样本截断/填充的最大 token 长度。</span><input id="max-seq-len" type="number" min="8" /></label>
@@ -324,8 +333,8 @@
                   <label><span class="field-title">Stable Steps</span><span class="field-hint">某个阈值需连续多少步 loss≤阈值才写入对应 checkpoint。</span><input id="stable-steps" type="number" min="1" /></label>
                   <label><span class="field-title">Save Every</span><span class="field-hint">每 N 步额外存 step-N.pt；0=关闭，只靠里程碑与结束时的 last.pt。</span><input id="save-every" type="number" min="0" /></label>
                   <label><span class="field-title">Aux Coef</span><span class="field-hint">MoE 负载均衡辅助损失系数；Dense/Tiny 可忽略。</span><input id="aux-coef" type="number" step="any" /></label>
-                  <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态），填 .pt 路径。</span><input id="resume" type="text" placeholder="可选 .pt" /></label>
-                  <label><span class="field-title">Init Ckpt (SFT)</span><span class="field-hint">SFT 时从该预训练权重初始化（非断点续训）。</span><input id="init-ckpt" type="text" placeholder="可选 .pt" /></label>
+                  <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态），填 .pt 路径。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
+                  <label><span class="field-title">Init Ckpt (SFT)</span><span class="field-hint">SFT 时从该预训练权重初始化（非断点续训）。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
                 </div>
               </details>
               <div class="actions">
@@ -365,10 +374,16 @@
       <div class="chat-shell">
         <aside class="chat-side">
           <h2>模型</h2>
-          <label>Checkpoint
+          <label><span class="field-title">Checkpoint</span>
+            <span class="field-hint">打开系统文件对话框选择 .pt，或从下方列表点选。</span>
+            <div class="path-row">
+              <input id="ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
+              <button type="button" class="btn-browse" data-for="ckpt-manual" id="btn-pick-ckpt">打开选择</button>
+            </div>
+          </label>
+          <label>最近/扫描到的列表
             <select id="ckpt-select"></select>
           </label>
-          <label>或粘贴路径<input id="ckpt-manual" type="text" placeholder="/path/to/best.pt" /></label>
           <div class="row">
             <button type="button" id="btn-refresh-ckpt">刷新列表</button>
             <button type="button" id="btn-load">加载</button>
@@ -447,13 +462,53 @@
       return ({ draft: "draft", running: "running", stopped: "stopped", finished: "finished", failed: "failed" })[st] || "";
     }
 
-    function setFormEnabled(editable) {
+    const PATH_PICK = {
+      "data-path": { title: "选择训练数据", filetypes: "JSONL|*.jsonl;All|*.*" },
+      "resume": { title: "选择 Resume checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+    };
+
+    async function pickPath(inputId) {
+      const el = $(inputId);
+      if (!el || el.disabled) return;
+      const cfg = PATH_PICK[inputId] || { title: "选择文件", filetypes: "All|*.*" };
+      try {
+        const r = await fetch("/api/pick-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: "file",
+            title: cfg.title,
+            initial: el.value.trim(),
+            filetypes: cfg.filetypes,
+          }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(typeof data.detail === "string" ? data.detail : "打开文件选择失败");
+          return;
+        }
+        if (data.path) el.value = data.path;
+      } catch (err) {
+        alert("打开文件选择失败：" + err);
+      }
+    }
+
+    document.querySelectorAll(".btn-browse").forEach((btn) => {
+      btn.addEventListener("click", () => pickPath(btn.dataset.for));
+    });
+
+        function setFormEnabled(editable) {
       ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",
        "max-steps","log-every","plot-every","grad-clip","save-loss-thresholds","stable-steps",
        "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
         $(id).disabled = !editable && id !== "task-name";
       });
       $("task-name").disabled = false;
+      document.querySelectorAll("#phase-config .btn-browse").forEach((btn) => {
+        btn.disabled = !editable;
+      });
       $("mode-pretrain").disabled = !editable;
       $("mode-sft").disabled = !editable;
       $("arch-dense").disabled = !editable;
@@ -1050,6 +1105,13 @@
     }
 
     $("btn-refresh-ckpt").addEventListener("click", refreshCheckpoints);
+    
+    // ckpt-select-sync: choosing from list fills the path box
+    $("ckpt-select").addEventListener("change", () => {
+      const v = $("ckpt-select").value;
+      if (v) $("ckpt-manual").value = v;
+    });
+
     $("btn-load").addEventListener("click", loadCheckpoint);
     $("btn-clear-chat").addEventListener("click", () => {
       if (chatState.streaming && chatState.abort) chatState.abort.abort();

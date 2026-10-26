@@ -329,6 +329,98 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MiniSeek", lifespan=lifespan)
 
 
+
+class PickFileBody(BaseModel):
+    kind: str = "file"  # file | dir
+    title: str = "选择文件"
+    initial: str = ""
+    filetypes: str = ""  # e.g. "JSONL|*.jsonl;Checkpoint|*.pt;All|*.*"
+
+
+def _parse_filetypes(spec: str):
+    """'JSONL|*.jsonl;Checkpoint|*.pt' -> tkinter filetypes list."""
+    pairs = []
+    for part in (spec or "").split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        if "|" in part:
+            label, pattern = part.split("|", 1)
+        else:
+            label, pattern = part, part
+        pairs.append((label.strip() or pattern, pattern.strip()))
+    if not pairs:
+        pairs = [("All files", "*.*")]
+    # Always allow all as last option if not present
+    if not any(p[1] == "*.*" for p in pairs):
+        pairs.append(("All files", "*.*"))
+    return pairs
+
+
+@app.post("/api/pick-file")
+def api_pick_file(body: PickFileBody) -> dict:
+    """Open a native OS file/folder dialog on the machine running this UI.
+
+    Browser <input type=file> cannot expose absolute paths; for local training
+    we need real filesystem paths, so the server pops the system dialog.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail=f"无法打开系统文件对话框：{exc}") from exc
+
+    initial = (body.initial or "").strip()
+    init_dir = ""
+    init_file = ""
+    if initial:
+        p = Path(initial)
+        if p.is_dir():
+            init_dir = str(p)
+        else:
+            init_dir = str(p.parent) if p.parent.exists() else ""
+            init_file = p.name
+
+    result: dict = {"path": None, "cancelled": True}
+
+    def _open() -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        root.update()
+        try:
+            if body.kind == "dir":
+                path = filedialog.askdirectory(
+                    parent=root,
+                    title=body.title or "选择目录",
+                    initialdir=init_dir or str(PROJECT_ROOT),
+                )
+            else:
+                path = filedialog.askopenfilename(
+                    parent=root,
+                    title=body.title or "选择文件",
+                    initialdir=init_dir or str(PROJECT_ROOT),
+                    initialfile=init_file or "",
+                    filetypes=_parse_filetypes(body.filetypes),
+                )
+        finally:
+            root.destroy()
+        if path:
+            result["path"] = str(Path(path))
+            result["cancelled"] = False
+
+    # tkinter must run on a dedicated thread with its own loop on some setups;
+    # call directly first (uvicorn worker thread is fine for local single-process).
+    try:
+        _open()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"文件选择失败：{exc}") from exc
+    return result
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(
