@@ -31,6 +31,7 @@ from model.dense import DenseLM
 from model.tokenizer import load_tokenizer
 from web import tasks_store as ts
 from web.task_runner import pid_alive, reconcile_task, start_task, stop_task
+from web.arch_inspect import inspect_path as arch_inspect_path
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 WEB_DIR = PROJECT_ROOT / "web"
@@ -345,6 +346,10 @@ class TaskPatch(BaseModel):
 
 
 class LoadRequest(BaseModel):
+    ckpt_path: str
+
+
+class ArchInspectRequest(BaseModel):
     ckpt_path: str
 
 
@@ -876,6 +881,23 @@ def status() -> dict:
             "gpu": _gpu_text(),
         }
     return {"running": False, "pid": None, "task_id": None, "gpu": _gpu_text()}
+
+
+
+
+@app.post("/api/arch/inspect")
+def api_arch_inspect(req: ArchInspectRequest) -> dict:
+    path = (req.ckpt_path or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="ckpt_path 不能为空")
+    try:
+        return arch_inspect_path(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"找不到 checkpoint: {path}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"解析失败: {exc}") from exc
 
 
 @app.post("/api/infer/load")
