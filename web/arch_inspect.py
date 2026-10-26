@@ -39,14 +39,21 @@ def _expert_ffn_params(d: int, moe_intermediate: int) -> int:
     return d * moe_intermediate + moe_intermediate * d
 
 
-def _shape(*, vocab: bool = False, tokens: bool = False) -> str:
-    """Compact activation shape labels: [b,t], [b,t,d], or [b,t,v]."""
+def _shape(
+    cfg: ModelConfig,
+    *,
+    vocab: bool = False,
+    tokens: bool = False,
+) -> str:
+    """Activation shapes with concrete dims from ModelConfig; batch stays symbolic b."""
+    t = int(cfg.max_seq_len)
+    d = int(cfg.d_model)
+    v = int(cfg.vocab_size)
     if tokens:
-        return "[b,t]"
+        return f"[b,{t}]"
     if vocab:
-        return "[b,t,v]"
-    return "[b,t,d]"
-
+        return f"[b,{t},{v}]"
+    return f"[b,{t},{d}]"
 
 
 def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str, Any]:
@@ -59,9 +66,9 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
     is_moe = bool(cfg.arch == "moe" or cfg.use_moe)
 
     embed_params = vocab * d
-    bt = _shape(tokens=True)
-    btd = _shape()
-    btv = _shape(vocab=True)
+    bt = _shape(cfg, tokens=True)
+    btd = _shape(cfg)
+    btv = _shape(cfg, vocab=True)
 
     blocks: List[Dict[str, Any]] = [
         {

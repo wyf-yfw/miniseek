@@ -20,13 +20,14 @@ def test_design_tiny_matches_denselm():
         {"id": "ffn", "from": "post_attn", "to": "add_ffn", "label": "x"},
     ]
     by_id = {p["id"]: p for p in layer["parts"]}
-    assert by_id["attn"]["shape_in"] == "[b,t,d]"
-    assert by_id["ffn"]["shape_in"] == "[b,t,d]"
-    assert by_id["attn_norm"]["shape_in"] == "[b,t,d]"
+    # tiny: max_seq_len=256, d_model=64, vocab_size=6400
+    assert by_id["attn"]["shape_in"] == "[b,256,64]"
+    assert by_id["ffn"]["shape_in"] == "[b,256,64]"
+    assert by_id["attn_norm"]["shape_in"] == "[b,256,64]"
     emb = next(b for b in out["blocks"] if b["kind"] == "embedding")
-    assert emb["shape_in"] == "[b,t]" and emb["shape_out"] == "[b,t,d]"
+    assert emb["shape_in"] == "[b,256]" and emb["shape_out"] == "[b,256,64]"
     lm = next(b for b in out["tail"] if b["id"] == "lm_head")
-    assert lm["shape_in"] == "[b,t,d]" and lm["shape_out"] == "[b,t,v]"
+    assert lm["shape_in"] == "[b,256,64]" and lm["shape_out"] == "[b,256,6400]"
 
 
 def test_design_dense_matches_denselm():
@@ -35,9 +36,14 @@ def test_design_dense_matches_denselm():
     assert out["total_params"] == count_parameters(DenseLM(ModelConfig()))
     layer = next(b for b in out["blocks"] if b["kind"] == "layer")
     by_id = {p["id"]: p for p in layer["parts"]}
-    assert by_id["attn"]["shape_in"] == "[b,t,d]"
-    assert by_id["ffn"]["shape_in"] == "[b,t,d]"
-    assert by_id["ffn"]["shape_out"] == "[b,t,d]"
+    # dense defaults: max_seq_len=2048, d_model=512, vocab_size=6400
+    assert by_id["attn"]["shape_in"] == "[b,2048,512]"
+    assert by_id["ffn"]["shape_in"] == "[b,2048,512]"
+    assert by_id["ffn"]["shape_out"] == "[b,2048,512]"
+    emb = next(b for b in out["blocks"] if b["kind"] == "embedding")
+    assert emb["shape_in"] == "[b,2048]" and emb["shape_out"] == "[b,2048,512]"
+    lm = next(b for b in out["tail"] if b["id"] == "lm_head")
+    assert lm["shape_in"] == "[b,2048,512]" and lm["shape_out"] == "[b,2048,6400]"
 
 
 def test_design_moe_has_experts():
