@@ -1663,8 +1663,10 @@
       defs.appendChild(marker);
       svg.appendChild(defs);
       // Logical residual sources map to visible block edges (style A).
+      // Attn: x = layer input (anchored at attn_norm right). FFN: x = post-attn add output (add_attn).
+      // Separate gutter X so the two verticals are not one continuous bus from the top.
       const fromNode = { layer_in: "attn_norm", post_attn: "add_attn" };
-      list.forEach((r) => {
+      list.forEach((r, i) => {
         const fromId = fromNode[r.from] || r.from;
         const fromEl = group.querySelector(`[data-node="${fromId}"]`);
         const toEl = group.querySelector(`[data-node="${r.to}"]`);
@@ -1675,17 +1677,20 @@
         const startY = fr.top - gRect.top + fr.height / 2;
         const endX = tr.left - gRect.left + tr.width / 2;
         const endY = tr.top - gRect.top + tr.height / 2;
+        // Outer trunk for attn residual; inner parallel trunk for FFN (starts at ⊕).
+        const gx = gutterX - i * 16;
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        const d = `M ${startX} ${startY} H ${gutterX} V ${endY} H ${endX}`;
+        const d = `M ${startX} ${startY} H ${gx} V ${endY} H ${endX}`;
         path.setAttribute("d", d);
         path.setAttribute("fill", "none");
         path.setAttribute("stroke", "#f0a030");
         path.setAttribute("stroke-width", "2.5");
         path.setAttribute("marker-end", `url(#${markerId})`);
+        path.setAttribute("data-residual", r.id || String(i));
         svg.appendChild(path);
         const midY = (startY + endY) / 2;
         const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        label.setAttribute("x", String(gutterX + 8));
+        label.setAttribute("x", String(gx + 8));
         label.setAttribute("y", String(midY));
         label.setAttribute("fill", "#f0a030");
         label.setAttribute("font-size", "12");
