@@ -74,11 +74,11 @@
     main { padding: 16px 24px 32px; }
     .page-tabs {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 4px;
       margin: 0 0 20px;
       padding: 5px;
-      max-width: 420px;
+      max-width: 560px;
       background: #e8eaee;
       border: 1px solid var(--line);
       border-radius: 14px;
@@ -301,6 +301,48 @@
       .task-sidebar { width: 100%; max-height: 220px; }
       .chat-shell { grid-template-columns: 1fr; }
     }
+
+    .arch-shell { display: grid; grid-template-columns: 280px 1fr; gap: 16px; min-height: 560px; }
+    .arch-side { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+    .arch-main { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; min-width: 0; }
+    .arch-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .arch-canvas-wrap { position: relative; flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 0; min-height: 420px; }
+    .arch-canvas { overflow: auto; padding: 8px 4px 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .arch-block {
+      width: min(420px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: #f8fafc;
+      cursor: default;
+      text-align: center;
+    }
+    .arch-block.layer { cursor: pointer; }
+    .arch-block.layer:hover, .arch-block.layer.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+    .arch-block .lbl { font-weight: 600; }
+    .arch-block .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .arch-connector { width: 2px; height: 12px; background: var(--line); }
+    .arch-drawer {
+      width: 280px;
+      border-left: 1px solid var(--line);
+      padding: 12px;
+      background: #fbfbfc;
+      overflow: auto;
+    }
+    .arch-drawer[hidden] { display: none; }
+    .arch-drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .arch-msg { color: var(--muted); font-size: 13px; min-height: 1.2em; }
+    .arch-msg.err { color: var(--fail); }
+    .arch-summary { font-size: 13px; line-height: 1.5; color: var(--ink); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .arch-part { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: #fff; }
+    @media (max-width: 900px) {
+      .arch-shell { grid-template-columns: 1fr; }
+      .arch-canvas-wrap { grid-template-columns: 1fr; }
+      .arch-drawer { width: auto; border-left: 0; border-top: 1px solid var(--line); }
+    }
   </style>
 </head>
 <body>
@@ -324,6 +366,7 @@
       <button type="button" class="active" role="tab" aria-selected="true" data-tab="train">训练</button>
       <button type="button" role="tab" aria-selected="false" data-tab="infer">对话</button>
       <button type="button" role="tab" aria-selected="false" data-tab="continue">续写</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="arch">架构</button>
     </nav>
 
     <section id="train" class="panel active">
@@ -506,6 +549,49 @@
       </div>
     </section>
 
+
+    <section id="arch" class="panel">
+      <div class="arch-shell">
+        <aside class="arch-side">
+          <h2>Checkpoint</h2>
+          <label><span class="field-title">路径</span>
+            <span class="field-hint">训练产出的 .pt，或 HF 目录 / pytorch_model.bin。</span>
+            <div class="path-row">
+              <input id="arch-ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
+              <button type="button" class="btn-browse" data-for="arch-ckpt-manual" id="btn-pick-arch-ckpt">打开选择</button>
+            </div>
+          </label>
+          <label>最近/扫描到的列表
+            <select id="arch-ckpt-select"></select>
+          </label>
+          <div class="row">
+            <button type="button" id="btn-arch-refresh-ckpt">刷新列表</button>
+            <button type="button" id="btn-arch-inspect">解析</button>
+          </div>
+          <p id="arch-msg" class="arch-msg"></p>
+          <div id="arch-summary" class="arch-summary" style="display:none"></div>
+        </aside>
+        <div class="arch-main">
+          <div class="arch-toolbar">
+            <div class="title">结构图</div>
+            <div id="arch-status" class="live"><span class="dot" id="arch-dot"></span><span id="arch-status-text">未解析</span></div>
+          </div>
+          <div class="arch-canvas-wrap">
+            <div id="arch-canvas" class="arch-canvas">
+              <span class="chat-empty" id="arch-empty">选择 checkpoint 后点「解析」。</span>
+            </div>
+            <aside id="arch-drawer" class="arch-drawer" hidden>
+              <div class="arch-drawer-head">
+                <strong id="arch-drawer-title">层详情</strong>
+                <button type="button" id="btn-arch-drawer-close" aria-label="关闭">×</button>
+              </div>
+              <div id="arch-drawer-body"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <script>
@@ -553,6 +639,7 @@
       "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
       "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
       "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "arch-ckpt-manual": { title: "选择架构 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
     };
 
     async function pickPath(inputId) {
@@ -1401,6 +1488,155 @@
       renderContOut();
     });
     refreshContCheckpoints().catch(() => {});
+
+    // --- 架构可视化 ---
+    let archData = null;
+    let archSelectedLayer = null;
+
+    function fmtParams(n) {
+      if (n == null) return "-";
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+      return String(n);
+    }
+
+    function setArchMsg(text, isErr) {
+      const el = $("arch-msg");
+      el.textContent = text || "";
+      el.classList.toggle("err", !!isErr);
+    }
+
+    async function refreshArchCkpts() {
+      const sel = $("arch-ckpt-select");
+      if (!sel) return;
+      let list = [];
+      try {
+        const res = await fetch("/api/checkpoints");
+        if (res.ok) list = (await res.json()).files || [];
+      } catch (_) { list = []; }
+      const cur = sel.value;
+      sel.innerHTML = "";
+      if (!list.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = "无可用 checkpoint";
+        sel.appendChild(o);
+      } else {
+        for (const f of list) {
+          const path = typeof f === "string" ? f : (f.path || f);
+          const o = document.createElement("option");
+          o.value = path;
+          o.textContent = path;
+          sel.appendChild(o);
+        }
+        if (cur) sel.value = cur;
+      }
+    }
+
+    function closeArchDrawer() {
+      archSelectedLayer = null;
+      const drawer = $("arch-drawer");
+      if (drawer) drawer.hidden = true;
+      document.querySelectorAll(".arch-block.layer").forEach((el) => el.classList.remove("selected"));
+    }
+
+    function openArchDrawer(block) {
+      archSelectedLayer = block.id;
+      const drawer = $("arch-drawer");
+      drawer.hidden = false;
+      $("arch-drawer-title").textContent = block.label || block.id;
+      const body = $("arch-drawer-body");
+      const parts = block.parts || [];
+      body.innerHTML = `<p class="field-hint">本层参数 ${fmtParams(block.params)}</p>` +
+        parts.map((p) => {
+          const detail = p.detail ? Object.entries(p.detail).filter(([,v]) => v != null)
+            .map(([k,v]) => `${k}: ${v}`).join(" · ") : "";
+          return `<div class="arch-part"><div class="lbl">${p.label}</div>
+            <div class="sub">${fmtParams(p.params)}${detail ? " · " + detail : ""}</div></div>`;
+        }).join("");
+      document.querySelectorAll(".arch-block.layer").forEach((el) => {
+        el.classList.toggle("selected", el.dataset.id === block.id);
+      });
+    }
+
+    function renderArch(data) {
+      archData = data;
+      const canvas = $("arch-canvas");
+      canvas.innerHTML = "";
+      const cfg = data.config || {};
+      const meta = data.meta || {};
+      $("arch-summary").style.display = "block";
+      $("arch-summary").innerHTML =
+        `<div><b>${cfg.arch || "-"}</b> · d=${cfg.d_model || "-"} · L=${cfg.n_layers || "-"} · heads=${cfg.n_heads || "-"}</div>` +
+        `<div>总参数 ${fmtParams(data.total_params)}${data.tie_word_embeddings ? " · tie embeddings" : ""}</div>` +
+        `<div class="field-hint">step=${meta.step ?? "-"} · loss=${meta.loss ?? "-"}</div>`;
+
+      const nodes = [...(data.blocks || []), ...(data.tail || [])];
+      nodes.forEach((b, idx) => {
+        if (idx) {
+          const c = document.createElement("div");
+          c.className = "arch-connector";
+          canvas.appendChild(c);
+        }
+        const el = document.createElement("div");
+        el.className = "arch-block" + (b.kind === "layer" ? " layer" : "");
+        el.dataset.id = b.id;
+        el.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)}${b.tied ? " · tied" : ""}</div>`;
+        if (b.kind === "layer") {
+          el.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            openArchDrawer(b);
+          });
+        }
+        canvas.appendChild(el);
+      });
+      $("arch-status-text").textContent = "已解析";
+      $("arch-dot").className = "dot finished";
+      closeArchDrawer();
+    }
+
+    $("btn-arch-refresh-ckpt").addEventListener("click", refreshArchCkpts);
+    $("arch-ckpt-select").addEventListener("change", () => {
+      if ($("arch-ckpt-select").value) $("arch-ckpt-manual").value = $("arch-ckpt-select").value;
+    });
+    $("btn-arch-drawer-close").addEventListener("click", closeArchDrawer);
+    $("arch-canvas").addEventListener("click", () => closeArchDrawer());
+
+    $("btn-arch-inspect").addEventListener("click", async () => {
+      const path = ($("arch-ckpt-manual").value || "").trim() || ($("arch-ckpt-select").value || "").trim();
+      if (!path) {
+        setArchMsg("请先选择或粘贴 checkpoint 路径", true);
+        return;
+      }
+      setArchMsg("解析中…");
+      $("arch-status-text").textContent = "解析中…";
+      $("arch-dot").className = "dot running";
+      $("btn-arch-inspect").disabled = true;
+      try {
+        const res = await fetch("/api/arch/inspect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ckpt_path: path }),
+        });
+        if (!res.ok) throw new Error(await readError(res));
+        const data = await res.json();
+        renderArch(data);
+        setArchMsg("解析完成");
+      } catch (e) {
+        setArchMsg(String(e.message || e), true);
+        $("arch-status-text").textContent = "失败";
+        $("arch-dot").className = "dot failed";
+      } finally {
+        $("btn-arch-inspect").disabled = false;
+      }
+    });
+
+    document.querySelectorAll(".page-tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.tab === "arch") refreshArchCkpts();
+      });
+    });
+
 </script>
 </body>
 </html>
