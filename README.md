@@ -30,6 +30,20 @@ Ultra-small trainable LM scaffold aligned with DeepSeek-V4.1-Flash ideas. Stage 
 - Tokenizer：**MiniMind 实测 vocab=6400**（不是旧 mistral ~32k）
 - 参数量：init 时打印；6400 词表下约 **26–32M**（早期 ~58M 估算对应 ~32k 词表）
 
+## Web UI（Task 驱动）
+
+```bash
+.venv/bin/python -m uvicorn web_ui:app --host 127.0.0.1 --port 7860
+```
+
+打开浏览器后：左侧 **新建 Task** → 选 **Tiny** → Start。每个 task 的配置/日志/指标/ckpt 在 `tasks/<id>/`（已 gitignore）。同时最多一个 running。对话页默认列出当前 task 的 checkpoint。
+
+CPU 冒烟整条链路：
+
+```bash
+.venv/bin/python scripts/smoke_tiny_task.py
+```
+
 ## 快速开始
 
 ```bash
