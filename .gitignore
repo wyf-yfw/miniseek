@@ -45,3 +45,5 @@ release/
 .worktrees/
 tasks/
 hf/
+
+.superpowers/
