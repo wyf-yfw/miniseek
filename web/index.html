@@ -40,15 +40,31 @@
     h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
     header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
     .hdr-right {
-      display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
-      text-align: right; max-width: min(520px, 55vw);
-    }
-    .hdr-env {
-      color: var(--muted); font-size: 12px; line-height: 1.45;
-      white-space: pre-line; font-variant-numeric: tabular-nums;
+      display: flex; align-items: center; gap: 10px;
     }
     .live { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .dot-wrap {
+      position: relative; display: inline-flex; align-items: center;
+      width: 14px; height: 14px; justify-content: center; cursor: default;
+    }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+    .hdr-env-tip {
+      display: none;
+      position: absolute; top: calc(100% + 10px); right: 0;
+      z-index: 50; min-width: 260px; max-width: min(420px, 80vw);
+      padding: 10px 12px; border-radius: 10px;
+      background: #111827; color: #f9fafb;
+      font-size: 12px; line-height: 1.5; text-align: left;
+      white-space: pre-line; font-variant-numeric: tabular-nums;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      pointer-events: none;
+    }
+    .hdr-env-tip::before {
+      content: ""; position: absolute; top: -6px; right: 8px;
+      border: 6px solid transparent; border-top: 0; border-bottom-color: #111827;
+    }
+    .dot-wrap:hover .hdr-env-tip,
+    .dot-wrap:focus-within .hdr-env-tip { display: block; }
     .dot.on { background: var(--ok); }
     .dot.running { background: var(--ok); }
     .dot.draft { background: #9ca3af; }
@@ -294,8 +310,13 @@
       <p>Task 驱动训练 · Tiny / Dense / MoE</p>
     </div>
     <div class="hdr-right">
-      <div class="live"><span class="dot" id="hdr-dot"></span><span id="hdr-status">空闲</span></div>
-      <div class="hdr-env" id="hdr-env">环境加载中…</div>
+      <div class="live">
+        <span class="dot-wrap" tabindex="0" title="悬停查看环境">
+          <span class="dot" id="hdr-dot"></span>
+          <span class="hdr-env-tip" id="hdr-env">环境加载中…</span>
+        </span>
+        <span id="hdr-status">空闲</span>
+      </div>
     </div>
   </header>
   <main>
