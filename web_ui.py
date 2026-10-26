@@ -364,9 +364,17 @@ class ArchDesignRequest(BaseModel):
     arch: str = "dense"  # tiny | dense | moe
 
 
-class BenchStartRequest(BaseModel):
-    ckpt_path: str
+class BenchCreate(BaseModel):
+    name: str = ""
+    ckpt_path: str = ""
     tasks: List[str] = Field(default_factory=lambda: ["ceval-valid", "cmmlu", "gsm8k"])
+    limit: Optional[int] = None
+
+
+class BenchPatch(BaseModel):
+    name: Optional[str] = None
+    ckpt_path: Optional[str] = None
+    tasks: Optional[List[str]] = None
     limit: Optional[int] = None
 
 
@@ -911,52 +919,124 @@ def _get_bench_or_404(run_id: str) -> dict:
     try:
         return reconcile_run(bs.load_run(run_id))
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"bench run not found: {run_id}") from exc
+        raise HTTPException(status_code=404, detail=f"bench task not found: {run_id}") from exc
 
 
-@app.get("/api/bench/runs")
-def api_bench_list() -> dict:
+def _bench_with_progress(run: dict) -> dict:
+    out = dict(run)
+    try:
+        out["progress"] = bs.read_progress(run["id"])
+    except Exception:  # noqa: BLE001
+        out["progress"] = None
+    return out
+
+
+# ---- Bench Tasks API (symmetric with /api/tasks) ----
+
+@app.get("/api/bench/tasks")
+def api_bench_list_tasks() -> dict:
     rows = []
     for row in bs.list_runs():
         if row.get("status") == "running":
             row = reconcile_run(bs.load_run(row["id"]))
-        rows.append(row)
-    return {"runs": rows}
+        rows.append({
+            "id": row["id"],
+            "name": row.get("name") or row["id"],
+            "status": row.get("status"),
+            "ckpt_path": row.get("ckpt_path"),
+            "tasks": row.get("tasks"),
+            "limit": row.get("limit"),
+            "device": row.get("device"),
+            "created_at": row.get("created_at"),
+            "started_at": row.get("started_at"),
+            "ended_at": row.get("ended_at"),
+            "pid": row.get("pid"),
+            "scores": row.get("scores"),
+        })
+    return {"tasks": rows}
 
 
-@app.post("/api/bench/runs")
-def api_bench_start(req: BenchStartRequest) -> dict:
-    path = (req.ckpt_path or "").strip()
-    if not path:
-        raise HTTPException(status_code=400, detail="ckpt_path 不能为空")
+@app.post("/api/bench/tasks")
+def api_bench_create_task(body: BenchCreate) -> dict:
     try:
-        return bench_start_run(
-            ckpt_path=path,
-            tasks=list(req.tasks or []),
-            limit=req.limit,
-            training_busy=_any_training_running(),
+        return bs.create_run(
+            name=body.name or "",
+            ckpt_path=body.ckpt_path or "",
+            tasks=list(body.tasks or ["ceval-valid", "cmmlu", "gsm8k"]),
+            limit=body.limit,
+            device="cpu",
         )
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"找不到 checkpoint: {path}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/bench/tasks/{run_id}")
+def api_bench_get_task(run_id: str) -> dict:
+    return _bench_with_progress(_get_bench_or_404(run_id))
+
+
+@app.patch("/api/bench/tasks/{run_id}")
+def api_bench_patch_task(run_id: str, body: BenchPatch) -> dict:
+    _get_bench_or_404(run_id)
+    try:
+        kwargs = {}
+        if body.name is not None:
+            kwargs["name"] = body.name
+        if body.ckpt_path is not None:
+            kwargs["ckpt_path"] = body.ckpt_path
+        if body.tasks is not None:
+            kwargs["tasks"] = body.tasks
+        if "limit" in body.model_fields_set:
+            kwargs["limit"] = body.limit
+        run = bs.patch_run(run_id, **kwargs)
+        return _bench_with_progress(run)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+
+@app.delete("/api/bench/tasks/{run_id}")
+def api_bench_delete_task(run_id: str) -> dict:
+    run = _get_bench_or_404(run_id)
+    if run.get("status") == "running" and pid_alive(run.get("pid")):
+        raise HTTPException(status_code=409, detail="running task 不能删除，请先 Stop")
+    try:
+        bs.delete_run(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "id": run_id}
+
+
+@app.post("/api/bench/tasks/{run_id}/start")
+def api_bench_start_task(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    try:
+        run = bench_start_run(run_id, training_busy=_any_training_running())
+        return _bench_with_progress(run)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@app.get("/api/bench/runs/{run_id}")
-def api_bench_get(run_id: str) -> dict:
-    return _get_bench_or_404(run_id)
+@app.post("/api/bench/tasks/{run_id}/stop")
+def api_bench_stop_task(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    return _bench_with_progress(bench_stop_run(run_id))
 
 
-@app.get("/api/bench/runs/{run_id}/logs")
-def api_bench_logs(run_id: str, tail: int = 200) -> dict:
+@app.get("/api/bench/tasks/{run_id}/logs")
+def api_bench_task_logs(run_id: str, tail: int = 200) -> dict:
     _get_bench_or_404(run_id)
     return {"text": bench_read_log(run_id, tail=tail)}
 
 
-@app.get("/api/bench/runs/{run_id}/results")
-def api_bench_results(run_id: str) -> dict:
+@app.get("/api/bench/tasks/{run_id}/results")
+def api_bench_task_results(run_id: str) -> dict:
     _get_bench_or_404(run_id)
     rp = bs.run_dir(run_id) / "results.json"
     if not rp.is_file():
@@ -965,10 +1045,29 @@ def api_bench_results(run_id: str) -> dict:
     return _json.loads(rp.read_text(encoding="utf-8"))
 
 
-@app.post("/api/bench/runs/{run_id}/stop")
-def api_bench_stop(run_id: str) -> dict:
+@app.get("/api/bench/tasks/{run_id}/progress")
+def api_bench_task_progress(run_id: str) -> dict:
     _get_bench_or_404(run_id)
-    return bench_stop_run(run_id)
+    return bs.read_progress(run_id)
+
+
+def _bench_runs_gone() -> None:
+    raise HTTPException(status_code=410, detail="已改为 /api/bench/tasks；请刷新页面")
+
+
+@app.get("/api/bench/runs")
+@app.post("/api/bench/runs")
+def api_bench_runs_gone() -> None:
+    _bench_runs_gone()
+
+
+@app.get("/api/bench/runs/{run_id}")
+@app.get("/api/bench/runs/{run_id}/logs")
+@app.get("/api/bench/runs/{run_id}/results")
+@app.post("/api/bench/runs/{run_id}/stop")
+@app.delete("/api/bench/runs/{run_id}")
+def api_bench_runs_id_gone(run_id: str) -> None:
+    _bench_runs_gone()
 
 
 @app.get("/api/arch/design")

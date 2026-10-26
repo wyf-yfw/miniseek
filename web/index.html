@@ -109,6 +109,21 @@
     }
 
     .bench-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+    .bench-progress { margin: 10px 0 14px; }
+    .bench-progress .bar-label { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:4px; }
+    .bench-progress .bar-track { height:8px; background:var(--line); border-radius:999px; overflow:hidden; }
+    .bench-progress .bar-fill { height:100%; width:0%; background:var(--accent); border-radius:999px; transition:width .2s ease; }
+    #btn-new-bench-task { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); width: 100%; }
+    #bench-task-list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+    #bench-task-list li {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 8px; border-radius: 8px; cursor: pointer; margin-bottom: 4px;
+    }
+    #bench-task-list li:hover { background: rgba(127,127,127,.12); }
+    #bench-task-list li.active { background: rgba(127,127,127,.2); }
+    #bench-task-list .name { font-size: 13px; font-weight: 600; }
+    #bench-task-list .sub { font-size: 11px; color: var(--muted); }
+
     .bench-tasks { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 8px 0 12px; }
     .bench-tasks label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
     .bench-scores { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -687,42 +702,70 @@
     </section>
 
     <section id="bench" class="panel">
-      <div class="bench-grid">
-        <div class="card">
-          <h2>开始评测</h2>
-          <p class="field-hint">一期默认：C-Eval valid + CMMLU + GSM8K（选择题 / 数学应用题准确率）。</p>
-          <label for="bench-ckpt">Checkpoint</label>
-          <div class="path-row">
-            <input id="bench-ckpt" type="text" placeholder="选择或粘贴 .pt / HF 目录" />
-            <button type="button" class="btn-browse" data-for="bench-ckpt">浏览</button>
+      <div class="train-layout">
+        <aside class="task-sidebar">
+          <h2>评测 Tasks</h2>
+          <button type="button" id="btn-new-bench-task">新建 Task</button>
+          <ul id="bench-task-list"></ul>
+        </aside>
+        <div class="task-main">
+          <div class="card" id="bench-detail-empty">
+            <p class="empty-hint">请新建或选择一个评测 Task</p>
           </div>
-          <div class="bench-tasks" id="bench-task-checks">
-            <label><input type="checkbox" value="ceval-valid" checked /> ceval-valid</label>
-            <label><input type="checkbox" value="cmmlu" checked /> cmmlu</label>
-            <label><input type="checkbox" value="gsm8k" checked /> gsm8k</label>
+          <div class="card" id="bench-detail" style="display:none">
+            <h2><span id="bench-detail-title">Task</span><span class="phase-badge" id="bench-phase-badge">配置</span></h2>
+            <p id="bench-msg"></p>
+
+            <div id="bench-phase-config">
+              <p class="config-note">配置阶段：设好 checkpoint / 子集后点 Start。旧 runs 也会出现在左侧列表里。</p>
+              <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名；可空，默认用 checkpoint 文件名。</span><input id="bench-name" type="text" /></label>
+              <label for="bench-ckpt"><span class="field-title">Checkpoint</span><span class="field-hint">本地 .pt 或 HF 导出目录。</span></label>
+              <div class="path-row">
+                <input id="bench-ckpt" type="text" placeholder="选择权重 .pt / HF 目录" />
+                <button type="button" class="btn-browse" data-for="bench-ckpt">浏览</button>
+              </div>
+              <div class="bench-tasks" id="bench-task-checks">
+                <label><input type="checkbox" value="ceval-valid" checked /> ceval-valid</label>
+                <label><input type="checkbox" value="cmmlu" checked /> cmmlu</label>
+                <label><input type="checkbox" value="gsm8k" checked /> gsm8k</label>
+              </div>
+              <label for="bench-limit"><span class="field-title">Limit</span><span class="field-hint">每子集最多样本；空=全量。</span></label>
+              <input id="bench-limit" type="number" min="1" step="1" placeholder="例如 8 冒烟" />
+              <div class="actions" style="margin-top:12px">
+                <button type="button" id="btn-bench-save">保存配置</button>
+                <button type="button" id="btn-bench-start">Start</button>
+                <button type="button" id="btn-bench-delete-draft">删除</button>
+              </div>
+            </div>
+
+            <div id="bench-phase-run" style="display:none">
+              <div class="title-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+                <div class="title">运行中 / 结果</div>
+                <div class="live"><span class="dot" id="bench-dot"></span><span id="bench-status-text">未开始</span></div>
+              </div>
+              <p id="bench-run-meta" class="field-hint"></p>
+              <div class="bench-progress">
+                <div class="bar-label"><span>总任务</span><span id="bench-suite-label">0/0</span></div>
+                <div class="bar-track"><div class="bar-fill" id="bench-suite-bar"></div></div>
+              </div>
+              <div class="bench-progress">
+                <div class="bar-label"><span id="bench-sample-title">当前子集</span><span id="bench-sample-label">0/0</span></div>
+                <div class="bar-track"><div class="bar-fill" id="bench-sample-bar"></div></div>
+              </div>
+              <div class="run-actions" style="margin:10px 0">
+                <button type="button" id="btn-bench-stop" class="danger" disabled>Stop</button>
+                
+                <button type="button" id="btn-bench-delete">删除</button>
+                <button type="button" id="btn-bench-edit">改配置再跑</button>
+              </div>
+              <table class="bench-scores" id="bench-score-table">
+                <thead><tr><th>子集</th><th>acc</th><th>stderr</th></tr></thead>
+                <tbody id="bench-score-body"><tr><td colspan="3">尚无分数</td></tr></tbody>
+              </table>
+              <h2 style="margin-top:18px">日志</h2>
+              <pre class="bench-log" id="bench-log">（空）</pre>
+            </div>
           </div>
-          <label for="bench-limit">Limit（每任务最多题数，空=全量）</label>
-          <input id="bench-limit" type="number" min="1" step="1" placeholder="例如 8 冒烟" />
-          <div class="actions" style="margin-top:12px">
-            <button type="button" id="btn-bench-start">开始评测</button>
-            <button type="button" id="btn-bench-stop" class="danger" disabled>停止</button>
-          </div>
-          <p id="bench-msg"></p>
-        </div>
-        <div class="card">
-          <div class="title-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-            <div class="title">当前 / 选中跑次</div>
-            <div class="live"><span class="dot" id="bench-dot"></span><span id="bench-status-text">未开始</span></div>
-          </div>
-          <p id="bench-run-meta" class="field-hint"></p>
-          <table class="bench-scores" id="bench-score-table">
-            <thead><tr><th>任务</th><th>acc</th><th>stderr</th></tr></thead>
-            <tbody id="bench-score-body"><tr><td colspan="3">尚无分数</td></tr></tbody>
-          </table>
-          <h2 style="margin-top:18px">历史</h2>
-          <ul class="bench-hist" id="bench-hist"></ul>
-          <h2 style="margin-top:18px">日志</h2>
-          <pre class="bench-log" id="bench-log">（空）</pre>
         </div>
       </div>
     </section>
@@ -1965,9 +2008,10 @@
     });
 
 
-    // --- 评测（lm-eval）---
+    // --- 评测 Task（lm-eval）---
     let benchSelectedId = null;
     let benchPollTimer = null;
+    let benchCurrent = null;
 
     function fmtAcc(v) {
       if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
@@ -1991,65 +2035,113 @@
       }
     }
 
-    function setBenchStatus(st) {
-      const map = { queued: "draft", running: "running", finished: "finished", failed: "failed", stopped: "stopped" };
-      $("bench-dot").className = "dot " + (map[st] || "");
-      $("bench-status-text").textContent = st || "未开始";
-      $("btn-bench-stop").disabled = st !== "running";
+    function renderBenchProgress(p) {
+      p = p || {};
+      const sd = Number(p.suite_done || 0);
+      const st = Number(p.suite_total || 0) || 0;
+      const cd = Number(p.sample_done || 0);
+      const ct = Number(p.sample_total || 0) || 0;
+      const suitePct = st > 0 ? Math.min(100, (sd / st) * 100) : 0;
+      const samplePct = ct > 0 ? Math.min(100, (cd / ct) * 100) : 0;
+      $("bench-suite-bar").style.width = suitePct + "%";
+      $("bench-sample-bar").style.width = samplePct + "%";
+      $("bench-suite-label").textContent = `${sd}/${st}`;
+      $("bench-sample-label").textContent = `${cd}/${ct}`;
+      $("bench-sample-title").textContent = p.current_task
+        ? `当前子集 · ${p.current_task}`
+        : "当前子集";
     }
 
-    async function loadBenchDetail(id) {
+    function isBenchConfigPhase(status) {
+      return !status || status === "draft";
+    }
+
+    function applyBenchPhase(t) {
+      const config = isBenchConfigPhase(t && t.status);
+      $("bench-phase-config").style.display = config ? "" : "none";
+      $("bench-phase-run").style.display = config ? "none" : "";
+      $("bench-phase-badge").textContent = config ? "配置" : "执行";
+      $("btn-bench-stop").disabled = !(t && t.status === "running");
+  const delOn = !(t && t.status === "running");
+  if ($("btn-bench-delete")) $("btn-bench-delete").disabled = !delOn;
+  if ($("btn-bench-delete-draft")) $("btn-bench-delete-draft").disabled = !delOn;
+      $("btn-bench-edit").style.display = (!config && t && t.status !== "running") ? "" : "none";
+    }
+
+    function fillBenchForm(t) {
+      $("bench-name").value = t.name || "";
+      $("bench-ckpt").value = t.ckpt_path || "";
+      $("bench-limit").value = t.limit != null ? t.limit : "";
+      const selected = new Set(t.tasks || []);
+      document.querySelectorAll("#bench-task-checks input").forEach((el) => {
+        el.checked = selected.size ? selected.has(el.value) : el.checked;
+      });
+    }
+
+    function setBenchFormEnabled(on) {
+      ["bench-name", "bench-ckpt", "bench-limit"].forEach((id) => {
+        $(id).disabled = !on;
+      });
+      document.querySelectorAll("#bench-task-checks input").forEach((el) => {
+        el.disabled = !on;
+      });
+      $("btn-bench-save").disabled = !on;
+      $("btn-bench-start").disabled = !on;
+    }
+
+    async function refreshBenchTasks() {
+      const r = await fetch("/api/bench/tasks");
+      if (!r.ok) return;
+      const data = await r.json();
+      const ul = $("bench-task-list");
+      ul.innerHTML = "";
+      const tasks = data.tasks || [];
+      if (!tasks.length) {
+        ul.innerHTML = '<li class="meta" style="cursor:default;opacity:.7">暂无评测 Task</li>';
+        return;
+      }
+      for (const t of tasks) {
+        const li = document.createElement("li");
+        if (t.id === benchSelectedId) li.classList.add("active");
+        li.innerHTML = `<span class="dot ${statusDotClass(t.status)}"></span>
+          <div class="meta"><div class="name"></div><div class="sub"></div></div>`;
+        li.querySelector(".name").textContent = t.name || t.id;
+        const ckpt = (t.ckpt_path || "").split(/[/\\\\]/).pop() || "-";
+        li.querySelector(".sub").textContent = `${t.status || "-"} · ${ckpt}`;
+        li.addEventListener("click", () => selectBenchTask(t.id));
+        ul.appendChild(li);
+      }
+    }
+
+    async function selectBenchTask(id, opts = {}) {
       benchSelectedId = id;
-      const r = await fetch(`/api/bench/runs/${id}`);
+      const r = await fetch(`/api/bench/tasks/${id}`);
       if (!r.ok) {
         $("bench-msg").textContent = await readError(r);
         return;
       }
-      const run = await r.json();
-      setBenchStatus(run.status);
-      const ckpt = (run.ckpt_path || "").split(/[/\\\\]/).pop();
-      $("bench-run-meta").textContent = `${run.id} · ${ckpt} · tasks=${(run.tasks || []).join(",")} · device=${run.device || "?"}` +
-        (run.limit != null ? ` · limit=${run.limit}` : "");
-      renderBenchScores(run.scores);
-      const lr = await fetch(`/api/bench/runs/${id}/logs?tail=200`);
+      const t = await r.json();
+      benchCurrent = t;
+      $("bench-detail-empty").style.display = "none";
+      $("bench-detail").style.display = "";
+      $("bench-detail-title").textContent = t.name || t.id;
+      fillBenchForm(t);
+      setBenchFormEnabled(isBenchConfigPhase(t.status));
+      applyBenchPhase(t);
+      const ckpt = (t.ckpt_path || "").split(/[/\\\\]/).pop();
+      $("bench-status-text").textContent = t.status || "未开始";
+      $("bench-dot").className = "dot " + statusDotClass(t.status);
+      $("bench-run-meta").textContent =
+        `${t.id} · ${ckpt || "-"} · tasks=${(t.tasks || []).join(",") || "-"} · device=${t.device || "?"}` +
+        (t.limit != null ? ` · limit=${t.limit}` : "");
+      renderBenchScores(t.scores);
+      renderBenchProgress(t.progress);
+      const lr = await fetch(`/api/bench/tasks/${id}/logs?tail=300`);
       const lj = await lr.json().catch(() => ({ text: "" }));
       $("bench-log").textContent = lj.text || "（空）";
-      document.querySelectorAll("#bench-hist li").forEach((li) => {
-        li.classList.toggle("active", li.dataset.id === id);
-      });
-      if (run.status === "running") startBenchPoll();
+      if (t.status === "running") startBenchPoll();
       else stopBenchPoll();
-    }
-
-    async function refreshBenchHist() {
-      const r = await fetch("/api/bench/runs");
-      if (!r.ok) return;
-      const data = await r.json();
-      const ul = $("bench-hist");
-      ul.innerHTML = "";
-      const runs = data.runs || [];
-      if (!runs.length) {
-        ul.innerHTML = '<li class="meta">暂无历史跑次</li>';
-        return;
-      }
-      for (const run of runs) {
-        const li = document.createElement("li");
-        li.dataset.id = run.id;
-        if (run.id === benchSelectedId) li.classList.add("active");
-        const ckpt = (run.ckpt_path || "").split(/[/\\\\]/).pop();
-        const scoreBits = run.scores
-          ? Object.entries(run.scores).map(([k, v]) => `${k}:${fmtAcc(v && v.acc)}`).join(" ")
-          : "";
-        li.innerHTML = `<strong>${run.status}</strong> ${ckpt}<div class="meta">${run.id} ${scoreBits}</div>`;
-        li.addEventListener("click", () => loadBenchDetail(run.id));
-        ul.appendChild(li);
-      }
-      const running = runs.find((x) => x.status === "running");
-      if (running) {
-        if (!benchSelectedId) await loadBenchDetail(running.id);
-        else if (benchSelectedId === running.id) await loadBenchDetail(running.id);
-        startBenchPoll();
-      }
+      await refreshBenchTasks();
     }
 
     function stopBenchPoll() {
@@ -2063,29 +2155,49 @@
       if (benchPollTimer) return;
       benchPollTimer = setInterval(async () => {
         if (!benchSelectedId) return;
-        await loadBenchDetail(benchSelectedId);
-        await refreshBenchHist();
-      }, 2000);
+        await selectBenchTask(benchSelectedId, { silent: true });
+      }, 1500);
     }
 
-    $("btn-bench-start").addEventListener("click", async () => {
-      const ckpt = $("bench-ckpt").value.trim();
+    function readBenchForm() {
+      const name = $("bench-name").value.trim();
+      const ckpt_path = $("bench-ckpt").value.trim();
       const tasks = [...document.querySelectorAll("#bench-task-checks input:checked")].map((x) => x.value);
       const limitRaw = $("bench-limit").value.trim();
       const limit = limitRaw ? Number(limitRaw) : null;
+      return { name, ckpt_path, tasks, limit };
+    }
+
+    $("btn-new-bench-task").addEventListener("click", async () => {
       $("bench-msg").textContent = "";
-      if (!ckpt) {
-        $("bench-msg").textContent = "请先选择 checkpoint";
-        return;
-      }
-      if (!tasks.length) {
-        $("bench-msg").textContent = "至少勾选一个任务";
-        return;
-      }
-      const body = { ckpt_path: ckpt, tasks };
-      if (limit != null && !Number.isNaN(limit)) body.limit = limit;
-      const r = await fetch("/api/bench/runs", {
+      const r = await fetch("/api/bench/tasks", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "",
+          ckpt_path: "",
+          tasks: ["ceval-valid", "cmmlu", "gsm8k"],
+          limit: null,
+        }),
+      });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      const t = await r.json();
+      await refreshBenchTasks();
+      await selectBenchTask(t.id);
+    });
+
+    $("btn-bench-save").addEventListener("click", async () => {
+      if (!benchSelectedId) return;
+      const body = readBenchForm();
+      if (!body.tasks.length) {
+        $("bench-msg").textContent = "至少勾选一个子集";
+        return;
+      }
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -2093,29 +2205,100 @@
         $("bench-msg").textContent = await readError(r);
         return;
       }
-      const run = await r.json();
-      $("bench-msg").textContent = "已开始 " + run.id;
-      await refreshBenchHist();
-      await loadBenchDetail(run.id);
+      $("bench-msg").textContent = "已保存";
+      await selectBenchTask(benchSelectedId);
     });
 
-    $("btn-bench-stop").addEventListener("click", async () => {
+    $("btn-bench-start").addEventListener("click", async () => {
       if (!benchSelectedId) return;
-      const r = await fetch(`/api/bench/runs/${benchSelectedId}/stop`, { method: "POST" });
+      const body = readBenchForm();
+      $("bench-msg").textContent = "";
+      if (!body.ckpt_path) {
+        $("bench-msg").textContent = "请先选择 checkpoint";
+        return;
+      }
+      if (!body.tasks.length) {
+        $("bench-msg").textContent = "至少勾选一个子集";
+        return;
+      }
+      let r = await fetch(`/api/bench/tasks/${benchSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       if (!r.ok) {
         $("bench-msg").textContent = await readError(r);
         return;
       }
-      await loadBenchDetail(benchSelectedId);
-      await refreshBenchHist();
+      r = await fetch(`/api/bench/tasks/${benchSelectedId}/start`, { method: "POST" });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      $("bench-msg").textContent = "已启动";
+      await selectBenchTask(benchSelectedId);
+    });
+
+    $("btn-bench-stop").addEventListener("click", async () => {
+      if (!benchSelectedId) return;
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}/stop`, { method: "POST" });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      await selectBenchTask(benchSelectedId);
+    });
+
+    
+    async function deleteSelectedBenchTask() {
+      if (!benchSelectedId) return;
+      if (!confirm("确认删除该评测 Task 目录？不可恢复。")) return;
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}`, { method: "DELETE" });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      stopBenchPoll();
+      benchSelectedId = null;
+      benchCurrent = null;
+      $("bench-detail").style.display = "none";
+      $("bench-detail-empty").style.display = "";
+      $("bench-msg").textContent = "已删除";
+      await refreshBenchTasks();
+    }
+    $("btn-bench-delete").addEventListener("click", deleteSelectedBenchTask);
+    $("btn-bench-delete-draft").addEventListener("click", deleteSelectedBenchTask);
+
+$("btn-bench-edit").addEventListener("click", async () => {
+      if (!benchSelectedId || !benchCurrent) return;
+      // Re-open as draft by patching current fields (store flips stopped/failed/finished -> draft on config change)
+      const body = {
+        name: benchCurrent.name || "",
+        ckpt_path: benchCurrent.ckpt_path || "",
+        tasks: benchCurrent.tasks || ["ceval-valid", "cmmlu", "gsm8k"],
+        limit: benchCurrent.limit == null ? null : benchCurrent.limit,
+      };
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      await selectBenchTask(benchSelectedId);
     });
 
     document.querySelectorAll(".page-tabs button").forEach((btn) => {
       btn.addEventListener("click", () => {
-        if (btn.dataset.tab === "bench") refreshBenchHist();
+        if (btn.dataset.tab === "bench") refreshBenchTasks();
       });
     });
 
-</script>
+    // boot: if train already boots elsewhere; also refresh bench list quietly
+    refreshBenchTasks().catch(() => {});
+
+  </script>
 </body>
 </html>

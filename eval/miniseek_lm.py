@@ -17,6 +17,26 @@ from model.dense import DenseLM
 from model.tokenizer import load_tokenizer
 
 
+
+def _update_sample_progress(done: int, total: int) -> None:
+    """Best-effort sample progress for the Web UI (eval/runs/<id>/progress.json)."""
+    import os
+    import json
+    p = os.environ.get("BENCH_PROGRESS_PATH")
+    if not p:
+        return
+    path = Path(p)
+    try:
+        data = {}
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+        data["sample_done"] = int(done)
+        data["sample_total"] = int(total)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def load_miniseek_blob(path: Union[str, Path]):
     path = Path(path)
     if not path.exists():
@@ -145,11 +165,14 @@ class MiniSeekLM(TemplateLM):
         **kwargs: Any,
     ) -> list[tuple[float, bool]]:
         results: list[tuple[float, bool]] = []
-        for _key, context_enc, continuation_enc in tqdm(
-            requests, disable=disable_tqdm, desc="loglikelihood"
+        total = len(requests)
+        _update_sample_progress(0, total)
+        for i, (_key, context_enc, continuation_enc) in enumerate(
+            tqdm(requests, disable=disable_tqdm, desc="loglikelihood")
         ):
             if not continuation_enc:
                 results.append((0.0, True))
+                _update_sample_progress(i + 1, total)
                 continue
             inp = (context_enc + continuation_enc)[-(self.max_length + 1) :]
             # Leave at least one continuation token for scoring
@@ -170,6 +193,7 @@ class MiniSeekLM(TemplateLM):
             greedy = logits.argmax(dim=-1)
             is_greedy = bool(torch.equal(greedy, target))
             results.append((ll, is_greedy))
+            _update_sample_progress(i + 1, total)
         return results
 
     def loglikelihood_rolling(self, requests, disable_tqdm: bool = False):
@@ -177,19 +201,23 @@ class MiniSeekLM(TemplateLM):
 
     def generate_until(self, requests, disable_tqdm: bool = False):
         res: list[str] = []
-        for req in tqdm(requests, disable=disable_tqdm, desc="generate_until"):
+        total = len(requests)
+        _update_sample_progress(0, total)
+        for i, req in enumerate(tqdm(requests, disable=disable_tqdm, desc="generate_until")):
             context, gen_kwargs = req.args
             until = gen_kwargs.get("until") or []
             if isinstance(until, str):
                 until = [until]
             max_gen = int(gen_kwargs.get("max_gen_toks", 64))
             ctx_ids = self.tok_encode(context, add_special_tokens=True)
-            # Keep room for generation
+            # Keep room for at least one new token on the first step
             ctx_ids = ctx_ids[-(self.max_length - 1) :]
             ids = list(ctx_ids)
             eos = self.eot_token_id
             for _ in range(max_gen):
-                input_ids = torch.tensor([ids], dtype=torch.long, device=self._device)
+                # Sliding window: never feed more than max_seq_len (ids can grow)
+                window = ids[-self.max_length :]
+                input_ids = torch.tensor([window], dtype=torch.long, device=self._device)
                 with torch.no_grad():
                     logits, _ = self.model(input_ids)
                 next_id = int(logits[0, -1, :].argmax().item())
@@ -206,4 +234,5 @@ class MiniSeekLM(TemplateLM):
                     break
             else:
                 res.append(self.tok_decode(ids[len(ctx_ids) :]))
+            _update_sample_progress(i + 1, total)
         return res

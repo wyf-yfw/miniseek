@@ -36,32 +36,59 @@ def choose_device(*, training_busy: bool) -> str:
     return "cpu"
 
 
+
+def _ingest_results(run: Dict[str, Any]) -> bool:
+    """If results.json present, attach scores. Return True when file exists."""
+    results_path = bs.run_dir(run["id"]) / "results.json"
+    if not results_path.is_file():
+        return False
+    try:
+        payload = json.loads(results_path.read_text(encoding="utf-8"))
+        run["scores"] = payload.get("metrics")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        run["error"] = run.get("error") or f"bad results.json: {exc}"
+        return True
+
+
 def reconcile_run(run: Dict[str, Any]) -> Dict[str, Any]:
     if run.get("status") != "running":
         return run
     pid = run.get("pid")
-    if pid_alive(pid):
+    owned = _owned_procs.get(run["id"])
+    alive = pid_alive(pid)
+    if owned is not None and owned.poll() is not None:
+        alive = False
+    has_results = (bs.run_dir(run["id"]) / "results.json").is_file()
+    # Results already on disk: treat as done even if a worker thread keeps the PID alive.
+    if alive and not has_results:
         return run
-    owned = _owned_procs.pop(run["id"], None)
+    if alive and has_results:
+        try:
+            if pid is not None:
+                os.kill(int(pid), signal.SIGTERM)
+        except OSError:
+            pass
+        alive = False
+    _owned_procs.pop(run["id"], None)
     exit_code = run.get("exit_code")
     if owned is not None:
         try:
             exit_code = owned.poll()
         except Exception:  # noqa: BLE001
             pass
+    if exit_code is None and has_results:
+        exit_code = 0
     now = datetime.now().isoformat(timespec="seconds")
     run["pid"] = None
     run["ended_at"] = now
     run["exit_code"] = exit_code
-    results_path = bs.run_dir(run["id"]) / "results.json"
-    if results_path.is_file() and exit_code == 0:
-        try:
-            payload = json.loads(results_path.read_text(encoding="utf-8"))
-            run["scores"] = payload.get("metrics")
-            run["status"] = "finished"
-        except Exception as exc:  # noqa: BLE001
+    if _ingest_results(run) and (exit_code in (0, None)):
+        if run.get("error") and "bad results.json" in str(run.get("error")):
             run["status"] = "failed"
-            run["error"] = run.get("error") or f"bad results.json: {exc}"
+        else:
+            run["status"] = "finished"
+            run["error"] = None
     elif exit_code == 0:
         run["status"] = "failed"
         run["error"] = run.get("error") or "exit 0 but results.json missing"
@@ -72,13 +99,7 @@ def reconcile_run(run: Dict[str, Any]) -> Dict[str, Any]:
     return run
 
 
-def start_run(
-    *,
-    ckpt_path: str,
-    tasks: List[str],
-    limit: Optional[int],
-    training_busy: bool,
-) -> Dict[str, Any]:
+def start_run(run_id: str, *, training_busy: bool) -> Dict[str, Any]:
     for row in bs.list_runs():
         if row.get("status") == "running":
             reconcile_run(bs.load_run(row["id"]))
@@ -86,18 +107,41 @@ def start_run(
     if busy:
         raise RuntimeError(f"another bench run is already running: {busy}")
 
+    run = bs.load_run(run_id)
+    st = run.get("status")
+    if st not in {"draft", "stopped", "failed", "finished"}:
+        raise RuntimeError(f"只能从 draft/stopped/failed 启动，当前 status={st}")
+
+    ckpt_path = (run.get("ckpt_path") or "").strip()
+    if not ckpt_path:
+        raise ValueError("ckpt_path 不能为空")
     ckpt = Path(ckpt_path)
     if not ckpt.exists():
         raise FileNotFoundError(str(ckpt_path))
 
+    tasks = list(run.get("tasks") or [])
+    if not tasks:
+        raise ValueError("tasks must be non-empty")
+    limit = run.get("limit")
+
     device = choose_device(training_busy=training_busy)
-    run = bs.create_run(
-        ckpt_path=str(ckpt_path),
-        tasks=tasks,
-        limit=limit,
-        device=device,
-    )
-    out_dir = bs.run_dir(run["id"])
+    out_dir = bs.run_dir(run_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # reset progress / results for a fresh start
+    results_path = out_dir / "results.json"
+    if results_path.is_file():
+        try:
+            results_path.unlink()
+        except OSError:
+            pass
+    bs.write_progress(run_id, {
+        "suite_done": 0,
+        "suite_total": len(tasks),
+        "current_task": None,
+        "sample_done": 0,
+        "sample_total": 0,
+    })
+
     cmd = [
         sys.executable,
         "-u",
@@ -106,7 +150,7 @@ def start_run(
         "--ckpt",
         str(ckpt_path),
         "--tasks",
-        ",".join(run["tasks"]),
+        ",".join(tasks),
         "--out",
         str(out_dir),
         "--device",
@@ -121,28 +165,39 @@ def start_run(
     env.pop("all_proxy", None)
     env.pop("ALL_PROXY", None)
     env["PYTHONUNBUFFERED"] = "1"
-    fd = os.open(log_path, os.O_WRONLY | os.O_CREAT, 0o644)
+    env["BENCH_PROGRESS_PATH"] = str(out_dir / "progress.json")
+    env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+    log_fh = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
     try:
         proc = subprocess.Popen(
             cmd,
-            stdout=fd,
+            stdout=log_fh,
             stderr=subprocess.STDOUT,
             cwd=str(PROJECT_ROOT),
             env=env,
+            creationflags=creationflags,
         )
     finally:
-        os.close(fd)
+        log_fh.close()
 
     now = datetime.now().isoformat(timespec="seconds")
     run["status"] = "running"
+    run["device"] = device
     run["pid"] = proc.pid
     run["started_at"] = now
     run["ended_at"] = None
     run["exit_code"] = None
     run["error"] = None
+    run["scores"] = None
     bs.save_run(run)
-    _owned_procs[run["id"]] = proc
-    return bs.load_run(run["id"])
+    _owned_procs[run_id] = proc
+    return bs.load_run(run_id)
 
 
 def stop_run(run_id: str) -> Dict[str, Any]:
@@ -184,10 +239,16 @@ def stop_run(run_id: str) -> Dict[str, Any]:
             code = owned.poll()
 
     run = bs.load_run(run_id)
-    run["status"] = "stopped"
     run["pid"] = None
     run["exit_code"] = code
     run["ended_at"] = datetime.now().isoformat(timespec="seconds")
+    if _ingest_results(run) and not (run.get("error") and "bad results.json" in str(run.get("error"))):
+        run["status"] = "finished"
+        run["error"] = None
+        if run.get("exit_code") is None:
+            run["exit_code"] = 0
+    else:
+        run["status"] = "stopped"
     bs.save_run(run)
     return run
 
