@@ -202,6 +202,21 @@ class DenseLM(nn.Module):
             )
         return logits, loss
 
+    def _sample_next(
+        self,
+        ids: torch.Tensor,
+        temperature: float = 1.0,
+        top_k: Optional[int] = 50,
+    ) -> torch.Tensor:
+        ctx = ids[:, -self.cfg.max_seq_len :]
+        logits, _ = self.forward(ctx)
+        logits = logits[:, -1, :] / max(temperature, 1e-6)
+        if top_k is not None and top_k > 0:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits = logits.masked_fill(logits < v[:, [-1]], float("-inf"))
+        probs = F.softmax(logits, dim=-1)
+        return torch.multinomial(probs, num_samples=1)
+
     @torch.no_grad()
     def generate(
         self,
@@ -214,14 +229,7 @@ class DenseLM(nn.Module):
         self.eval()
         ids = input_ids
         for _ in range(max_new_tokens):
-            ctx = ids[:, -self.cfg.max_seq_len :]
-            logits, _ = self.forward(ctx)
-            logits = logits[:, -1, :] / max(temperature, 1e-6)
-            if top_k is not None and top_k > 0:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits = logits.masked_fill(logits < v[:, [-1]], float("-inf"))
-            probs = F.softmax(logits, dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1)
+            next_id = self._sample_next(ids, temperature=temperature, top_k=top_k)
             ids = torch.cat([ids, next_id], dim=1)
             if eos_token_id is not None and (next_id == eos_token_id).all():
                 break
@@ -236,18 +244,11 @@ class DenseLM(nn.Module):
         top_k: Optional[int] = 50,
         eos_token_id: Optional[int] = None,
     ):
-        """Yield newly generated token ids one by one (for Web UI streaming)."""
+        """逐 token 产出 next_id（CPU int）；遇到 eos 后停止。"""
         self.eval()
         ids = input_ids
         for _ in range(max_new_tokens):
-            ctx = ids[:, -self.cfg.max_seq_len :]
-            logits, _ = self.forward(ctx)
-            logits = logits[:, -1, :] / max(temperature, 1e-6)
-            if top_k is not None and top_k > 0:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits = logits.masked_fill(logits < v[:, [-1]], float("-inf"))
-            probs = F.softmax(logits, dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1)
+            next_id = self._sample_next(ids, temperature=temperature, top_k=top_k)
             ids = torch.cat([ids, next_id], dim=1)
             token = int(next_id.item())
             yield token
