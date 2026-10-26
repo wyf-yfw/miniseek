@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""MiniSeek 控制台。
+"""MiniSeek 控制台 — task 驱动训练 + 对话/续写。
 
-Gradio 的定时轮询盖不住训练日志：子进程把 stdout 重定向到文件时会块缓冲，
-页面上要攒够一大块才刷新一次。这里改成 FastAPI 页面，训练进程每打印一行，
-后台立刻通过 SSE 推到浏览器。
+训练以 tasks/<id>/ 为真相源；不再扫描 /proc、不再 attach。
 """
 
 from __future__ import annotations
@@ -12,17 +10,13 @@ import asyncio
 import glob
 import json
 import os
-from datetime import datetime
 import re
-import signal
-import subprocess
 import sys
 import threading
 import time
-from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Deque, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 os.environ.pop("all_proxy", None)
 os.environ.pop("ALL_PROXY", None)
@@ -34,7 +28,17 @@ from pydantic import BaseModel, Field
 
 from model.config import ModelConfig
 from model.dense import DenseLM
-from model.tokenizer import detect_vocab_size, load_tokenizer
+from model.tokenizer import load_tokenizer
+from web import tasks_store as ts
+from web import bench_store as bs
+from web.task_runner import pid_alive, reconcile_task, start_task, stop_task
+from web.bench_runner import (
+    reconcile_run,
+    start_run as bench_start_run,
+    stop_run as bench_stop_run,
+    read_log as bench_read_log,
+)
+from web.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 WEB_DIR = PROJECT_ROOT / "web"
@@ -43,551 +47,6 @@ DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "sft_t2t_mini.jsonl")
 DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "checkpoints" / "stage0")
 DEFAULT_SFT_OUT = str(PROJECT_ROOT / "checkpoints" / "sft")
 DEFAULT_MOE_OUT = str(PROJECT_ROOT / "checkpoints" / "stage1")
-# 兼容旧字段
-DEFAULT_DATA = DEFAULT_PRETRAIN_DATA
-DEFAULT_CKPT_DIR = DEFAULT_PRETRAIN_OUT
-LOG_FILE = PROJECT_ROOT / "train_web.log"
-STATE_FILE = PROJECT_ROOT / "train_web.json"
-TRAIN_SCRIPTS = ("train_pretrain.py", "train_sft.py")
-STEP_RE = re.compile(
-    # MoE logs insert ce=/aux= between loss and ppl; dense has none.
-    r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
-)
-RESUME_RE = re.compile(r"resumed from .* step=(\d+)")
-EXPERT_LOAD_RE = re.compile(r"^expert_load=(\{.*\})$")
-
-
-def _training_pid_alive(pid: Optional[int]) -> bool:
-    """进程还在，且确实是本仓库的训练脚本。pid 被系统复用时不会误认。
-
-    只认「python … train_*.py」真训练进程；带 while/pgrep 的等待 shell
-    即使命令行里写了脚本名，也不算。
-    """
-    if not pid:
-        return False
-    stat_path = Path(f"/proc/{pid}/stat")
-    cmd_path = Path(f"/proc/{pid}/cmdline")
-    try:
-        stat = stat_path.read_text()
-        raw = cmd_path.read_bytes()
-        parts = [p.decode(errors="replace") for p in raw.split(b"\x00") if p]
-        cmdline = " ".join(parts)
-    except OSError:
-        return False
-    rparen = stat.rfind(")")
-    if rparen < 0 or rparen + 2 >= len(stat):
-        return False
-    if stat[rparen + 2] in {"Z", "X"}:
-        return False
-    # shell / 等待循环：命令行含 while/pgrep/grep 等，不算训练
-    low = cmdline.lower()
-    if any(tok in low for tok in (" while ", "pgrep ", "grep -", "/bin/zsh", "/bin/bash", "/usr/bin/zsh")):
-        # 允许 python 路径里碰巧有这些字时仍继续往下；但纯 shell 直接否
-        exe0 = Path(parts[0]).name if parts else ""
-        if exe0 in {"zsh", "bash", "sh", "dash"} or parts and parts[0].endswith(("/zsh", "/bash", "/sh")):
-            return False
-    # 必须是 python 解释器在跑 train_*.py
-    if not parts:
-        return False
-    exe = Path(parts[0]).name
-    if not (exe.startswith("python") or exe == "python3"):
-        # 也可能是 /usr/bin/python3 -u train_xxx.py
-        if not any(Path(p).name.startswith("python") for p in parts[:3]):
-            return False
-    joined = " ".join(parts)
-    return any(
-        (f" {name}" in f" {joined}") or joined.endswith(name) or f"/{name}" in joined
-        for name in TRAIN_SCRIPTS
-    )
-
-
-def _cmdline(pid: int) -> str:
-    try:
-        return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode(errors="replace").strip()
-    except OSError:
-        return ""
-
-
-def _stdout_path(pid: int) -> Optional[str]:
-    try:
-        target = os.readlink(f"/proc/{pid}/fd/1")
-    except OSError:
-        return None
-    if target.startswith("/") and Path(target).is_file():
-        return target
-    return None
-
-
-def _flag(cmd: str, name: str) -> str:
-    parts = cmd.split()
-    if name not in parts:
-        return ""
-    idx = parts.index(name)
-    if idx + 1 >= len(parts):
-        return ""
-    return parts[idx + 1]
-
-
-def _proc_start_text(pid: int) -> str:
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-        fields = stat[stat.rfind(")") + 2 :].split()
-        ticks = int(fields[19])
-        clk = os.sysconf("SC_CLK_TCK")
-        btime = 0
-        for line in Path("/proc/stat").read_text().splitlines():
-            if line.startswith("btime "):
-                btime = int(line.split()[1])
-                break
-        if not btime:
-            return ""
-        return datetime.fromtimestamp(btime + ticks / clk).strftime("%m-%d %H:%M:%S")
-    except (OSError, IndexError, ValueError):
-        return ""
-
-
-def _put(queue: asyncio.Queue, msg: Tuple[str, dict]) -> None:
-    try:
-        queue.put_nowait(msg)
-    except asyncio.QueueFull:
-        pass
-
-
-class TrainingManager:
-    """后台训练进程。日志按行读出，再推给所有 SSE 连接。"""
-
-    def __init__(self) -> None:
-        self.process: Optional[subprocess.Popen] = None
-        self.log_file = LOG_FILE
-        self.lines: Deque[str] = deque(maxlen=2000)
-        self.current_step = 0
-        self.current_loss: Optional[float] = None
-        self.current_ppl: Optional[float] = None
-        self.current_lr: Optional[float] = None
-        self.plot_every = 200
-        self.loss_points: List[Tuple[int, float]] = []
-        self.latest_expert_load: Optional[dict] = None
-        self._loss_bucket = 0
-        self._lock = threading.Lock()
-        self._subscribers: List[asyncio.Queue] = []
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._tail_token = 0
-        self._starting = False
-        self._pid: Optional[int] = None
-
-    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
-        self._loop = loop
-
-    def is_running(self) -> bool:
-        return _training_pid_alive(self._pid)
-
-    def try_adopt(self) -> None:
-        """只恢复上一次手动接入的进程。没选过的，留给页面上的列表。"""
-        if not STATE_FILE.exists():
-            return
-        try:
-            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-            pid = int(data.get("pid") or 0)
-            plot_every = max(1, int(data.get("plot_every") or 200))
-        except (OSError, ValueError, TypeError):
-            return
-        if _training_pid_alive(pid):
-            try:
-                self.attach(pid, plot_every)
-            except LookupError:
-                return
-
-    def list_processes(self) -> List[dict]:
-        rows: List[dict] = []
-        attached = self._pid if _training_pid_alive(self._pid) else None
-        for entry in Path("/proc").iterdir():
-            if not entry.name.isdigit():
-                continue
-            pid = int(entry.name)
-            if not _training_pid_alive(pid):
-                continue
-            cmd = _cmdline(pid)
-            out_dir = _flag(cmd, "--out-dir")
-            data = _flag(cmd, "--data")
-            started = _proc_start_text(pid)
-            log_path = _stdout_path(pid)
-            out_name = Path(out_dir).name if out_dir else "训练"
-            data_name = Path(data).name if data else ""
-            label = f"PID {pid} · {out_name}"
-            if data_name:
-                label += f" · {data_name}"
-            if started:
-                label += f" · {started}"
-            if not log_path:
-                label += " · 无日志文件"
-            rows.append({
-                "pid": pid,
-                "cmd": cmd,
-                "label": label,
-                "log_path": log_path or "",
-                "log_readable": bool(log_path),
-                "started": started,
-                "attached": pid == attached,
-            })
-        rows.sort(key=lambda row: row["pid"])
-        return rows
-
-    def attach(self, pid: int, plot_every: int) -> str:
-        """把页面接到一个已经在跑的训练进程上，不重启它。"""
-        if not _training_pid_alive(pid):
-            raise LookupError(f"训练进程 {pid} 已经不在了")
-        log_path = _stdout_path(pid)
-        if not log_path:
-            raise LookupError(f"进程 {pid} 的输出不是日志文件，页面读不到")
-        with self._lock:
-            self._tail_token += 1
-            token = self._tail_token
-            self._pid = pid
-            self.process = None
-            self.log_file = Path(log_path)
-            self.plot_every = max(1, int(plot_every))
-            self.lines.clear()
-            self.loss_points.clear()
-            self.latest_expert_load = None
-            self._loss_bucket = 0
-            self.current_step = 0
-            self.current_loss = None
-            self.current_ppl = None
-            self.current_lr = None
-            every = self.plot_every
-            subs = list(self._subscribers)
-        self._write_state()
-        self._fanout(subs, ("reset", {"ok": True, "plot_every": every}))
-        threading.Thread(target=self._tail, args=(token, pid), daemon=True).start()
-        self._broadcast_status()
-        return f"已接入训练进程 (PID: {pid})"
-
-    def _write_state(self) -> None:
-        if not self._pid:
-            return
-        STATE_FILE.write_text(
-            json.dumps({"pid": self._pid, "plot_every": self.plot_every}),
-            encoding="utf-8",
-        )
-
-    def _clear_state(self, pid: int) -> None:
-        try:
-            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-            if int(data.get("pid") or 0) != pid:
-                return
-            STATE_FILE.unlink()
-        except (OSError, ValueError, TypeError):
-            return
-
-    def start(self, req: "TrainRequest") -> str:
-        running = self.list_processes()
-        if running:
-            return f"训练已在运行中 (PID: {running[0]['pid']})。请在列表里接入，或先终止该进程"
-        self.log_file = LOG_FILE
-        with self._lock:
-            if self._starting or _training_pid_alive(self._pid):
-                return f"训练已在运行中 (PID: {self._pid})。请在列表里接入，或先终止该进程"
-            self._starting = True
-            self._tail_token += 1
-            token = self._tail_token
-            self.lines.clear()
-            self.current_step = 0
-            self.current_loss = None
-            self.current_ppl = None
-            self.current_lr = None
-            self.plot_every = max(1, int(req.plot_every))
-            self.loss_points.clear()
-            self.latest_expert_load = None
-            self._loss_bucket = 0
-            plot_every = self.plot_every
-            subs = list(self._subscribers)
-
-        self._fanout(subs, ("reset", {"ok": True, "plot_every": plot_every}))
-
-        mode = (req.mode or "pretrain").strip().lower()
-        if mode not in {"pretrain", "sft"}:
-            raise ValueError(f"未知训练模式: {mode}")
-        script = "train_sft.py" if mode == "sft" else "train_pretrain.py"
-        cmd = [
-            sys.executable,
-            "-u",
-            str(PROJECT_ROOT / script),
-            "--data",
-            req.data_path.strip(),
-            "--out-dir",
-            req.out_dir.strip(),
-            "--batch-size",
-            str(int(req.batch_size)),
-            "--max-seq-len",
-            str(int(req.max_seq_len)),
-            "--lr",
-            str(float(req.lr)),
-            "--min-lr",
-            str(float(req.min_lr)),
-            "--warmup-steps",
-            str(int(req.warmup_steps)),
-            "--epochs",
-            str(int(req.epochs)),
-            "--grad-clip",
-            str(float(req.grad_clip)),
-            "--save-loss-thresholds",
-            req.save_loss_thresholds.strip(),
-            "--stable-steps",
-            str(int(req.stable_steps)),
-            "--save-every",
-            str(int(req.save_every)),
-            "--log-every",
-            str(max(1, int(req.log_every))),
-        ]
-        if req.max_steps and int(req.max_steps) > 0:
-            cmd.extend(["--max-steps", str(int(req.max_steps))])
-        arch = (req.arch or "dense").strip().lower()
-        if arch not in {"dense", "moe"}:
-            raise ValueError(f"未知架构: {arch}")
-        if mode == "pretrain":
-            cmd.extend(["--arch", arch, "--aux-coef", str(float(req.aux_coef))])
-        elif arch == "moe":
-            raise ValueError("SFT 暂不支持 MoE，请先用 Dense 或等 M0.1 SFT")
-        if getattr(req, "compile", False):
-            cmd.append("--compile")
-        resume = (req.resume or "").strip()
-        init_ckpt = (req.init_ckpt or "").strip()
-        if mode == "sft":
-            # SFT：优先断点续训；否则用预训练 base 做 --init-ckpt
-            if resume and Path(resume).exists():
-                cmd.extend(["--resume", resume])
-            elif init_ckpt and Path(init_ckpt).exists():
-                cmd.extend(["--init-ckpt", init_ckpt])
-            elif resume:
-                raise FileNotFoundError(f"找不到 resume: {resume}")
-            elif init_ckpt:
-                raise FileNotFoundError(f"找不到 init_ckpt: {init_ckpt}")
-        else:
-            if resume and Path(resume).exists():
-                cmd.extend(["--resume", resume])
-
-        env = os.environ.copy()
-        env.pop("all_proxy", None)
-        env.pop("ALL_PROXY", None)
-        env["PYTHONUNBUFFERED"] = "1"
-
-        self.log_file.write_bytes(b"")
-        fd = os.open(self.log_file, os.O_WRONLY | os.O_CREAT, 0o644)
-        try:
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=fd,
-                stderr=subprocess.STDOUT,
-                cwd=str(PROJECT_ROOT),
-                env=env,
-                start_new_session=True,
-            )
-        except Exception:
-            self._starting = False
-            raise
-        finally:
-            os.close(fd)
-        self._pid = self.process.pid
-        self._starting = False
-        self._write_state()
-
-        threading.Thread(target=self._tail, args=(token, self._pid), daemon=True).start()
-        self._broadcast_status()
-        return f"训练已启动 (PID: {self._pid})"
-
-    def stop(self) -> str:
-        pid = self._pid
-        if not _training_pid_alive(pid):
-            return "当前没有正在运行的训练进程"
-        assert pid is not None
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            return "当前没有正在运行的训练进程"
-        for _ in range(50):
-            if not _training_pid_alive(pid):
-                break
-            time.sleep(0.1)
-        else:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-        if self.process is not None and self.process.pid == pid:
-            try:
-                self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                pass
-        return f"训练进程 (PID: {pid}) 已终止"
-
-    def subscribe(self) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue()
-        gpu = _gpu_text()
-        with self._lock:
-            running = _training_pid_alive(self._pid)
-            queue.put_nowait(("hello", {
-                "ok": True,
-                "plot_every": self.plot_every,
-                "loss": [{"step": step, "loss": loss} for step, loss in self.loss_points],
-                "expert_load": self.latest_expert_load,
-                "status": {
-                    "running": running,
-                    "pid": self._pid if running else None,
-                    "step": self.current_step,
-                    "loss": self.current_loss,
-                    "ppl": self.current_ppl,
-                    "lr": self.current_lr,
-                    "gpu": gpu,
-                },
-            }))
-            for line in self.lines:
-                queue.put_nowait(("log", {"line": line}))
-            self._subscribers.append(queue)
-        return queue
-
-    def unsubscribe(self, queue: asyncio.Queue) -> None:
-        with self._lock:
-            if queue in self._subscribers:
-                self._subscribers.remove(queue)
-
-    def status_dict(self) -> dict:
-        with self._lock:
-            payload = self._status_locked()
-        payload["gpu"] = _gpu_text()
-        return payload
-
-    def _status_locked(self) -> dict:
-        running = _training_pid_alive(self._pid)
-        return {
-            "running": running,
-            "pid": self._pid if running else None,
-            "step": self.current_step,
-            "loss": self.current_loss,
-            "ppl": self.current_ppl,
-            "lr": self.current_lr,
-        }
-
-    def _tail(self, token: int, pid: int) -> None:
-        """跟着日志文件走。训练进程不挂在当前服务上时，刷新页面也能继续读。"""
-        try:
-            with open(self.log_file, "r", encoding="utf-8", errors="replace") as fh:
-                while True:
-                    if token != self._tail_token:
-                        return
-                    line = fh.readline()
-                    if token != self._tail_token:
-                        return
-                    if line:
-                        clean = line.replace("\x00", "").strip()
-                        if clean:
-                            self._emit_log(clean)
-                        continue
-                    if not _training_pid_alive(pid):
-                        rest = fh.read().replace("\x00", "")
-                        for extra in rest.splitlines():
-                            if token != self._tail_token:
-                                return
-                            extra = extra.strip()
-                            if extra:
-                                self._emit_log(extra)
-                        if token != self._tail_token:
-                            return
-                        code = self.process.returncode if self.process is not None and self.process.pid == pid else None
-                        if code is None and self.process is not None and self.process.pid == pid:
-                            try:
-                                code = self.process.wait(timeout=0.2)
-                            except subprocess.TimeoutExpired:
-                                code = None
-                        suffix = f" (exit={code})" if code is not None else ""
-                        self._emit_log(f"[web] 训练进程已结束{suffix}")
-                        with self._lock:
-                            if self._pid == pid:
-                                self._pid = None
-                                self.process = None
-                        self._clear_state(pid)
-                        self._broadcast_status()
-                        return
-                    time.sleep(0.05)
-        except Exception as exc:
-            self._emit_log(f"[web] 日志读取失败: {exc}")
-
-    def _record_loss_locked(self, step: int, loss: float) -> Optional[Tuple[int, float]]:
-        """每 plot_every 步记一个点。续训时对齐到已完成的区间，不补历史。"""
-        every = max(1, self.plot_every)
-        bucket = step // every
-        if bucket < 1 or bucket <= self._loss_bucket:
-            return None
-        self._loss_bucket = bucket
-        point = (step, loss)
-        self.loss_points.append(point)
-        if len(self.loss_points) > 5000:
-            del self.loss_points[:-5000]
-        return point
-
-    def _emit_log(self, line: str) -> None:
-        status_payload = None
-        point: Optional[Tuple[int, float]] = None
-        expert_payload: Optional[dict] = None
-        with self._lock:
-            self.lines.append(line)
-            resumed = RESUME_RE.search(line)
-            if resumed:
-                self._loss_bucket = int(resumed.group(1)) // max(1, self.plot_every)
-            matched = STEP_RE.search(line)
-            if matched:
-                step = int(matched.group(1))
-                if self.current_step and step + 20 < self.current_step:
-                    self.loss_points.clear()
-                    self.latest_expert_load = None
-                    self._loss_bucket = 0
-                self.current_step = step
-                self.current_loss = float(matched.group(2))
-                self.current_ppl = float(matched.group(3))
-                self.current_lr = float(matched.group(4))
-                point = self._record_loss_locked(self.current_step, self.current_loss)
-                status_payload = self._status_locked()
-            el = EXPERT_LOAD_RE.match(line)
-            if el:
-                try:
-                    payload = json.loads(el.group(1))
-                except json.JSONDecodeError:
-                    payload = None
-                if isinstance(payload, dict):
-                    fracs = payload.get("fractions")
-                    n_routed = int(payload.get("n_routed") or 0)
-                    if isinstance(fracs, list) and n_routed > 0 and len(fracs) == n_routed:
-                        self.latest_expert_load = payload
-                        expert_payload = payload
-            every = self.plot_every
-            subs = list(self._subscribers)
-        self._fanout(subs, ("log", {"line": line}))
-        if status_payload is not None:
-            status_payload["gpu"] = _gpu_text()
-            self._fanout(subs, ("status", status_payload))
-        if point is not None:
-            self._fanout(subs, ("loss", {
-                "step": point[0],
-                "loss": point[1],
-                "every": every,
-            }))
-        if expert_payload is not None:
-            self._fanout(subs, ("expert_load", expert_payload))
-
-    def _broadcast_status(self) -> None:
-        payload = self.status_dict()
-        with self._lock:
-            subs = list(self._subscribers)
-        self._fanout(subs, ("status", payload))
-
-    def _fanout(self, subs: List[asyncio.Queue], msg: Tuple[str, dict]) -> None:
-        loop = self._loop
-        if loop is None or loop.is_closed():
-            return
-        for queue in subs:
-            try:
-                loop.call_soon_threadsafe(_put, queue, msg)
-            except RuntimeError:
-                return
 
 
 def _gpu_text() -> str:
@@ -598,11 +57,17 @@ def _gpu_text() -> str:
     return f"{torch.cuda.get_device_name(0)} | 显存 {used:.1f}/{total / (1024**3):.1f} GB"
 
 
-manager = TrainingManager()
+def _any_training_running() -> bool:
+    for row in ts.list_tasks():
+        if row.get("status") != "running":
+            continue
+        t = reconcile_task(ts.load_task(row["id"]))
+        if t.get("status") == "running" and pid_alive(t.get("pid")):
+            return True
+    return False
 
 
 def format_chat_messages(messages: List[dict]) -> str:
-    """与 train_sft.format_chat 对齐：每轮 <|im_start|>role\ncontent<|im_end|>。"""
     parts: List[str] = []
     for turn in messages:
         role = (turn.get("role") or "").strip().lower()
@@ -629,7 +94,34 @@ class InferenceEngine:
             raise HTTPException(status_code=404, detail=f"找不到 checkpoint: {ckpt_path}")
         if self.tokenizer is None:
             self.tokenizer = load_tokenizer(allow_fallback=True)
-        blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        path = Path(ckpt_path)
+        # HF export dir or pytorch_model.bin → normalize to training blob shape
+        if path.is_dir() and (path / "pytorch_model.bin").exists():
+            weight_path = path / "pytorch_model.bin"
+            cfg_path = path / "config.json"
+        elif path.name == "pytorch_model.bin":
+            weight_path = path
+            cfg_path = path.parent / "config.json"
+        else:
+            weight_path = None
+            cfg_path = None
+        if weight_path is not None:
+            import json
+            sd = torch.load(weight_path, map_location="cpu", weights_only=False)
+            if isinstance(sd, dict) and "model" in sd:
+                blob = sd
+            else:
+                cfg_raw = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path and cfg_path.exists() else {}
+                allowed = set(ModelConfig.__annotations__)
+                cfg_dict = {k: v for k, v in cfg_raw.items() if k in allowed}
+                blob = {
+                    "model": sd,
+                    "config": cfg_dict,
+                    "step": cfg_raw.get("train_step", "?"),
+                    "loss": cfg_raw.get("train_loss", "?"),
+                }
+        else:
+            blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         cfg = ModelConfig.from_dict(blob["config"])
         if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
             from model.moe import MoELM
@@ -637,20 +129,13 @@ class InferenceEngine:
         else:
             model = DenseLM(cfg)
         model.load_state_dict(blob["model"], strict=True)
-        # 训练占 GPU / 显存紧张时直接 CPU，避免把 Web UI OOM 掉
         device = torch.device("cpu")
         if torch.cuda.is_available():
-            train_busy = _training_pid_alive(manager._pid)
-            if not train_busy:
-                # Web UI 重启后可能未 attach，再扫一遍训练进程
-                for proc in manager.list_processes():
-                    train_busy = True
-                    break
+            train_busy = _any_training_running()
             try:
                 free, total = torch.cuda.mem_get_info(0)
             except Exception:
                 free, total = 0, 1
-            # 训练中一律 CPU；空闲时也至少留约 4GB
             if (not train_busy) and free > 4 * (1024 ** 3):
                 device = torch.device("cuda")
         if device.type == "cuda":
@@ -869,12 +354,12 @@ class InferenceEngine:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
 
-        # chat 模板已含 <|im_start|>，不要再自动塞 bos
         ids = self.tokenizer.encode(prompt, add_special_tokens=False)
         input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
         eos_id = getattr(self.tokenizer, "eos_token_id", None)
         t0 = time.time()
-        pieces: List[str] = []
+        token_ids: List[int] = []
+        prev_text = ""
         n = 0
         with self._gen_lock:
             for token in self.model.generate_stream(
@@ -887,19 +372,90 @@ class InferenceEngine:
                 n += 1
                 if eos_id is not None and token == int(eos_id):
                     break
-                piece = self.tokenizer.decode([token], skip_special_tokens=False)
-                # 跳过纯特殊符碎片
-                if piece in {"<|im_start|>", "<|im_end|>", "<|endoftext|>"}:
+                token_ids.append(int(token))
+                full = self.tokenizer.decode(token_ids, skip_special_tokens=False)
+                for special in ("<|im_start|>", "<|im_end|>", "<|endoftext|>"):
+                    full = full.replace(special, "")
+                if "\ufffd" in full:
                     continue
-                pieces.append(piece)
+                if full.startswith(prev_text):
+                    piece = full[len(prev_text):]
+                else:
+                    piece = full
+                prev_text = full
+                if not piece:
+                    continue
                 yield {"event": "token", "data": {"text": piece}}
         cost = time.time() - t0
-        full = "".join(pieces)
         speed = n / max(cost, 1e-6)
         yield {
             "event": "done",
             "data": {
-                "text": full,
+                "text": prev_text,
+                "tokens": n,
+                "seconds": round(cost, 2),
+                "tokens_per_s": round(speed, 1),
+            },
+        }
+
+
+
+    def stream_continue(
+        self,
+        prompt: str,
+        max_new_tokens: int = 128,
+        temperature: float = 0.8,
+        top_k: int = 50,
+        seed: int = 42,
+    ):
+        """Raw prefix continuation for pretrained LMs (no chat template)."""
+        if self.model is None:
+            raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
+        if not str(prompt).strip():
+            raise HTTPException(status_code=400, detail="请输入前缀")
+
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+        ids = self.tokenizer.encode(prompt, add_special_tokens=True)
+        input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
+        eos_id = getattr(self.tokenizer, "eos_token_id", None)
+        t0 = time.time()
+        token_ids: List[int] = []
+        prev_text = ""
+        n = 0
+        with self._gen_lock:
+            for token in self.model.generate_stream(
+                input_ids,
+                max_new_tokens=int(max_new_tokens),
+                temperature=float(temperature),
+                top_k=int(top_k),
+                eos_token_id=eos_id,
+            ):
+                n += 1
+                if eos_id is not None and token == int(eos_id):
+                    break
+                token_ids.append(int(token))
+                full = self.tokenizer.decode(token_ids, skip_special_tokens=False)
+                for special in ("<|im_start|>", "<|im_end|>", "<|endoftext|>"):
+                    full = full.replace(special, "")
+                if "\ufffd" in full:
+                    continue
+                if full.startswith(prev_text):
+                    piece = full[len(prev_text):]
+                else:
+                    piece = full
+                prev_text = full
+                if not piece:
+                    continue
+                yield {"event": "token", "data": {"text": piece}}
+        cost = time.time() - t0
+        speed = n / max(cost, 1e-6)
+        yield {
+            "event": "done",
+            "data": {
+                "text": prev_text,
                 "tokens": n,
                 "seconds": round(cost, 2),
                 "tokens_per_s": round(speed, 1),
@@ -910,33 +466,19 @@ class InferenceEngine:
 infer_engine = InferenceEngine()
 
 
-class TrainRequest(BaseModel):
-    mode: str = "pretrain"  # pretrain | sft
-    arch: str = "dense"  # dense | moe（预训练）；SFT 暂仅 dense
-    aux_coef: float = 0.01
-    data_path: str
-    out_dir: str
-    batch_size: int = 8
-    max_seq_len: int = 512
-    lr: float = 1e-4
-    min_lr: float = 3e-5
-    warmup_steps: int = 200
-    epochs: int = 1
-    max_steps: int = 0
-    grad_clip: float = 1.0
-    save_loss_thresholds: str = "20,15,12,10,9,8,7,6,5,4,3"
-    stable_steps: int = 100
-    save_every: int = 0
-    resume: str = ""
-    init_ckpt: str = ""  # SFT：从预训练 base 初始化
-    log_every: int = Field(default=1, ge=1)
-    plot_every: int = Field(default=200, ge=1)
-    compile: bool = False
+class TaskCreate(BaseModel):
+    name: str = ""
+    arch: str = "dense"
+    mode: str = "pretrain"
+    hparams: Dict[str, Any] = Field(default_factory=dict)
+    uniquify: bool = False
 
 
-class AttachRequest(BaseModel):
-    pid: int
-    plot_every: int = Field(default=200, ge=1)
+class TaskPatch(BaseModel):
+    name: Optional[str] = None
+    arch: Optional[str] = None
+    mode: Optional[str] = None
+    hparams: Optional[Dict[str, Any]] = None
 
 
 class LoadRequest(BaseModel):
@@ -951,6 +493,28 @@ class ExpertLoadRequest(BaseModel):
     batch_size: int = Field(default=4, ge=1, le=16)
 
 
+class ArchInspectRequest(BaseModel):
+    ckpt_path: str
+
+
+class ArchDesignRequest(BaseModel):
+    arch: str = "dense"  # tiny | dense | moe
+
+
+class BenchCreate(BaseModel):
+    name: str = ""
+    ckpt_path: str = ""
+    tasks: List[str] = Field(default_factory=lambda: ["ceval-valid", "cmmlu", "gsm8k"])
+    limit: Optional[int] = None
+
+
+class BenchPatch(BaseModel):
+    name: Optional[str] = None
+    ckpt_path: Optional[str] = None
+    tasks: Optional[List[str]] = None
+    limit: Optional[int] = None
+
+
 class GenerateRequest(BaseModel):
     prompt: str
     max_new_tokens: int = 64
@@ -959,7 +523,20 @@ class GenerateRequest(BaseModel):
     seed: int = 42
 
 
-def list_checkpoints() -> List[str]:
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    max_new_tokens: int = 256
+    temperature: float = 0.8
+    top_k: int = 50
+    seed: int = 42
+
+
+def list_checkpoints_global() -> List[str]:
     files = glob.glob(str(PROJECT_ROOT / "checkpoints" / "**" / "*.pt"), recursive=True)
     files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return files
@@ -991,14 +568,118 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _get_task_or_404(task_id: str) -> dict:
+    try:
+        return ts.load_task(task_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"task not found: {task_id}") from exc
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    manager.bind_loop(asyncio.get_running_loop())
-    manager.try_adopt()
+    # Reconcile any stale running tasks on boot
+    for row in ts.list_tasks():
+        if row.get("status") == "running":
+            reconcile_task(ts.load_task(row["id"]))
+    for row in bs.list_runs():
+        if row.get("status") == "running":
+            reconcile_run(bs.load_run(row["id"]))
     yield
 
 
 app = FastAPI(title="MiniSeek", lifespan=lifespan)
+
+
+
+class PickFileBody(BaseModel):
+    kind: str = "file"  # file | dir
+    title: str = "选择文件"
+    initial: str = ""
+    filetypes: str = ""  # e.g. "JSONL|*.jsonl;Checkpoint|*.pt;All|*.*"
+
+
+def _parse_filetypes(spec: str):
+    """'JSONL|*.jsonl;Checkpoint|*.pt' -> tkinter filetypes list."""
+    pairs = []
+    for part in (spec or "").split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        if "|" in part:
+            label, pattern = part.split("|", 1)
+        else:
+            label, pattern = part, part
+        pairs.append((label.strip() or pattern, pattern.strip()))
+    if not pairs:
+        pairs = [("All files", "*.*")]
+    # Always allow all as last option if not present
+    if not any(p[1] == "*.*" for p in pairs):
+        pairs.append(("All files", "*.*"))
+    return pairs
+
+
+@app.post("/api/pick-file")
+def api_pick_file(body: PickFileBody) -> dict:
+    """Open a native OS file/folder dialog on the machine running this UI.
+
+    Browser <input type=file> cannot expose absolute paths; for local training
+    we need real filesystem paths, so the server pops the system dialog.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail=f"无法打开系统文件对话框：{exc}") from exc
+
+    initial = (body.initial or "").strip()
+    init_dir = ""
+    init_file = ""
+    if initial:
+        p = Path(initial)
+        if p.is_dir():
+            init_dir = str(p)
+        else:
+            init_dir = str(p.parent) if p.parent.exists() else ""
+            init_file = p.name
+
+    result: dict = {"path": None, "cancelled": True}
+
+    def _open() -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        root.update()
+        try:
+            if body.kind == "dir":
+                path = filedialog.askdirectory(
+                    parent=root,
+                    title=body.title or "选择目录",
+                    initialdir=init_dir or str(PROJECT_ROOT),
+                )
+            else:
+                path = filedialog.askopenfilename(
+                    parent=root,
+                    title=body.title or "选择文件",
+                    initialdir=init_dir or str(PROJECT_ROOT),
+                    initialfile=init_file or "",
+                    filetypes=_parse_filetypes(body.filetypes),
+                )
+        finally:
+            root.destroy()
+        if path:
+            result["path"] = str(Path(path))
+            result["cancelled"] = False
+
+    # tkinter must run on a dedicated thread with its own loop on some setups;
+    # call directly first (uvicorn worker thread is fine for local single-process).
+    try:
+        _open()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"文件选择失败：{exc}") from exc
+    return result
 
 
 @app.get("/")
@@ -1015,6 +696,69 @@ def defaults() -> dict:
     return {
         "mode": "pretrain",
         "arch": "dense",
+        "dense": {
+            "arch": "dense",
+            "mode": "pretrain",
+            "data_path": DEFAULT_PRETRAIN_DATA,
+            "batch_size": 8,
+            "max_seq_len": 512,
+            "lr": 1e-4,
+            "min_lr": 3e-5,
+            "warmup_steps": 200,
+            "epochs": 1,
+            "max_steps": 0,
+            "grad_clip": 1.0,
+            "save_loss_thresholds": "20,15,12,10,9,8,7,6,5,4,3",
+            "stable_steps": 200,
+            "save_every": 0,
+            "log_every": 1,
+            "plot_every": 200,
+            "init_ckpt": "",
+            "resume": "",
+            "aux_coef": 0.01,
+        },
+        "moe": {
+            "arch": "moe",
+            "mode": "pretrain",
+            "data_path": DEFAULT_PRETRAIN_DATA,
+            "batch_size": 8,
+            "max_seq_len": 512,
+            "lr": 1e-4,
+            "min_lr": 3e-5,
+            "warmup_steps": 200,
+            "epochs": 1,
+            "max_steps": 0,
+            "grad_clip": 1.0,
+            "save_loss_thresholds": "20,15,12,10,9,8,7,6,5,4,3",
+            "stable_steps": 200,
+            "save_every": 0,
+            "log_every": 1,
+            "plot_every": 200,
+            "init_ckpt": "",
+            "resume": "",
+            "aux_coef": 0.01,
+        },
+        "tiny": {
+            "arch": "tiny",
+            "mode": "pretrain",
+            "data_path": DEFAULT_PRETRAIN_DATA,
+            "batch_size": 4,
+            "max_seq_len": 128,
+            "lr": 1e-4,
+            "min_lr": 3e-5,
+            "warmup_steps": 0,
+            "epochs": 1,
+            "max_steps": 20,
+            "grad_clip": 1.0,
+            "save_loss_thresholds": "20,15,12,10",
+            "stable_steps": 200,
+            "save_every": 0,
+            "log_every": 1,
+            "plot_every": 1,
+            "init_ckpt": "",
+            "resume": "",
+            "aux_coef": 0.01,
+        },
         "pretrain": {
             "arch": "dense",
             "data_path": DEFAULT_PRETRAIN_DATA,
@@ -1022,8 +766,6 @@ def defaults() -> dict:
             "lr": 1e-4,
             "min_lr": 3e-5,
             "warmup_steps": 200,
-            "max_seq_len": 512,
-            "stable_steps": 100,
             "save_loss_thresholds": "20,15,12,10,9,8,7,6,5,4,3",
             "init_ckpt": "",
             "resume": "",
@@ -1036,8 +778,6 @@ def defaults() -> dict:
             "lr": 1e-4,
             "min_lr": 3e-5,
             "warmup_steps": 200,
-            "max_seq_len": 512,
-            "stable_steps": 100,
             "save_loss_thresholds": "20,15,12,10,9,8,7,6,5,4,3",
             "init_ckpt": "",
             "resume": "",
@@ -1045,32 +785,20 @@ def defaults() -> dict:
         },
         "sft": {
             "arch": "dense",
+            "mode": "sft",
             "data_path": DEFAULT_SFT_DATA,
             "out_dir": DEFAULT_SFT_OUT,
             "lr": 5e-5,
             "min_lr": 1e-5,
             "warmup_steps": 100,
-            "max_seq_len": 512,
-            "stable_steps": 100,
             "save_loss_thresholds": "5,4,3,2.5,2,1.5,1",
             "init_ckpt": str(best) if best.exists() else "",
             "resume": "",
             "aux_coef": 0.01,
         },
-        # 兼容旧前端
         "data_path": DEFAULT_PRETRAIN_DATA,
         "out_dir": DEFAULT_PRETRAIN_OUT,
     }
-
-
-@app.get("/api/status")
-def status() -> dict:
-    return manager.status_dict()
-
-
-@app.get("/api/checkpoints")
-def checkpoints() -> dict:
-    return {"files": list_checkpoints()}
 
 
 @app.get("/api/env")
@@ -1078,66 +806,197 @@ def environment() -> dict:
     return {"text": env_text()}
 
 
-@app.post("/api/train/start")
-def train_start(req: TrainRequest) -> dict:
-    if not req.data_path.strip() or not req.out_dir.strip():
-        raise HTTPException(status_code=400, detail="数据路径和输出目录不能为空")
-    if int(req.batch_size) < 1 or int(req.max_seq_len) < 2:
-        raise HTTPException(status_code=400, detail="batch size 和序列长度不合法")
-    mode = (req.mode or "pretrain").strip().lower()
-    if mode == "sft":
-        data_p = Path(req.data_path.strip())
-        if not data_p.exists():
-            raise HTTPException(status_code=400, detail=f"找不到 SFT 数据: {data_p}")
-        if not (req.resume or "").strip() and not (req.init_ckpt or "").strip():
-            raise HTTPException(
-                status_code=400,
-                detail="SFT 需要选择「从 Checkpoint 初始化」（一般用 stage0/best.pt），或断点续训",
-            )
+@app.get("/api/checkpoints")
+def checkpoints() -> dict:
+    """Global fallback list (legacy paths). Prefer /api/tasks/{id}/checkpoints."""
+    return {"files": list_checkpoints_global()}
+
+
+# ---- Tasks API ----
+
+@app.get("/api/tasks")
+def api_list_tasks() -> dict:
+    rows = []
+    for row in ts.list_tasks():
+        try:
+            full = reconcile_task(ts.load_task(row["id"]))
+            rows.append({
+                "id": full["id"],
+                "name": full.get("name"),
+                "status": full.get("status"),
+                "arch": full.get("arch"),
+                "mode": full.get("mode"),
+                "created_at": full.get("created_at"),
+                "started_at": full.get("started_at"),
+                "ended_at": full.get("ended_at"),
+                "pid": full.get("pid"),
+            })
+        except FileNotFoundError:
+            continue
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return {"tasks": rows}
+
+
+@app.post("/api/tasks")
+def api_create_task(body: TaskCreate) -> dict:
+    arch = (body.arch or "dense").strip().lower()
+    mode = (body.mode or "pretrain").strip().lower()
+    if arch not in {"dense", "moe", "tiny"}:
+        raise HTTPException(status_code=400, detail=f"未知架构: {arch}")
+    if mode not in {"pretrain", "sft"}:
+        raise HTTPException(status_code=400, detail=f"未知模式: {mode}")
+    defaults_map = defaults()
+    base = dict(defaults_map.get(arch) or defaults_map["dense"])
+    base.update(body.hparams or {})
+    base["arch"] = arch
+    base.pop("out_dir", None)  # out_dir forced by store
+    name = (body.name or "").strip() or f"{arch}-{mode}"
     try:
-        message = manager.start(req)
-    except (ValueError, FileNotFoundError) as exc:
+        return ts.create_task(name=name, arch=arch, mode=mode, hparams=base, uniquify=bool(body.uniquify))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/tasks/{task_id}")
+def api_get_task(task_id: str) -> dict:
+    return reconcile_task(_get_task_or_404(task_id))
+
+
+@app.patch("/api/tasks/{task_id}")
+def api_patch_task(task_id: str, body: TaskPatch) -> dict:
+    task = reconcile_task(_get_task_or_404(task_id))
+    if body.name is not None:
+        new_name = body.name.strip() or task["name"]
+        if ts.name_taken(new_name, exclude_id=task_id):
+            raise HTTPException(status_code=409, detail=f"已存在同名 Task：{new_name}")
+        task["name"] = new_name
+    if task.get("status") == "draft":
+        if body.arch is not None:
+            arch = body.arch.strip().lower()
+            if arch not in {"dense", "moe", "tiny"}:
+                raise HTTPException(status_code=400, detail=f"未知架构: {arch}")
+            task["arch"] = arch
+        if body.mode is not None:
+            mode = body.mode.strip().lower()
+            if mode not in {"pretrain", "sft"}:
+                raise HTTPException(status_code=400, detail=f"未知模式: {mode}")
+            task["mode"] = mode
+        if body.hparams is not None:
+            hp = dict(task.get("hparams") or {})
+            hp.update(body.hparams)
+            hp.pop("out_dir", None)
+            task["hparams"] = hp
+    elif body.hparams is not None or body.arch is not None or body.mode is not None:
+        raise HTTPException(status_code=400, detail="只有 draft 可改 arch/mode/hparams")
+    ts.save_task(task)
+    return task
+
+
+@app.delete("/api/tasks/{task_id}")
+def api_delete_task(task_id: str) -> dict:
+    task = reconcile_task(_get_task_or_404(task_id))
+    if task.get("status") == "running" and pid_alive(task.get("pid")):
+        raise HTTPException(status_code=409, detail="running task 不能删除，请先 Stop")
+    ts.delete_task(task_id)
+    return {"ok": True, "id": task_id}
+
+
+@app.post("/api/tasks/{task_id}/start")
+def api_start_task(task_id: str) -> dict:
+    _get_task_or_404(task_id)
+    try:
+        return start_task(task_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, FileNotFoundError, NotImplementedError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if message.startswith("训练已在运行中"):
-        raise HTTPException(status_code=409, detail=message)
-    return {"message": message, "status": manager.status_dict()}
 
 
-@app.get("/api/train/processes")
-def train_processes() -> dict:
-    attached = manager._pid if _training_pid_alive(manager._pid) else None
-    return {"attached_pid": attached, "processes": manager.list_processes()}
+@app.post("/api/tasks/{task_id}/stop")
+def api_stop_task(task_id: str) -> dict:
+    _get_task_or_404(task_id)
+    return stop_task(task_id)
 
 
-@app.post("/api/train/attach")
-def train_attach(req: AttachRequest) -> dict:
-    try:
-        message = manager.attach(req.pid, req.plot_every)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"message": message, "status": manager.status_dict()}
+@app.get("/api/tasks/{task_id}/metrics")
+def api_task_metrics(task_id: str) -> dict:
+    _get_task_or_404(task_id)
+    return ts.read_metrics(task_id)
 
 
-@app.post("/api/train/stop")
-def train_stop() -> dict:
-    return {"message": manager.stop(), "status": manager.status_dict()}
+@app.get("/api/tasks/{task_id}/checkpoints")
+def api_task_checkpoints(task_id: str) -> dict:
+    _get_task_or_404(task_id)
+    ckpt_dir = ts.task_dir(task_id) / "checkpoints"
+    files = sorted(ckpt_dir.glob("*.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return {"files": [str(p) for p in files]}
 
 
-@app.get("/api/logs/stream")
-async def log_stream() -> StreamingResponse:
-    queue = manager.subscribe()
+@app.get("/api/tasks/{task_id}/logs")
+async def api_task_logs(task_id: str, tail: int = 200) -> StreamingResponse:
+    """SSE: stream new lines from tasks/<id>/train.log; also emit metrics snapshots."""
+    _get_task_or_404(task_id)
+    log_path = ts.task_dir(task_id) / "train.log"
 
     async def events():
+        # Initial dump of last `tail` lines
         try:
-            while True:
-                try:
-                    event, data = await asyncio.wait_for(queue.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield ": ping\n\n"
+            text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+        except OSError:
+            text = ""
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        for ln in lines[-max(1, tail):]:
+            yield _sse("log", {"line": ln})
+        metrics = ts.read_metrics(task_id)
+        yield _sse("metrics", metrics)
+        task = reconcile_task(ts.load_task(task_id))
+        yield _sse("status", {
+            "id": task["id"],
+            "status": task.get("status"),
+            "pid": task.get("pid"),
+        })
+
+        pos = log_path.stat().st_size if log_path.exists() else 0
+        idle = 0
+        while True:
+            await asyncio.sleep(0.4)
+            try:
+                if not log_path.exists():
                     continue
-                yield _sse(event, data)
-        finally:
-            manager.unsubscribe(queue)
+                size = log_path.stat().st_size
+                if size < pos:
+                    pos = 0
+                if size > pos:
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                        fh.seek(pos)
+                        chunk = fh.read()
+                        pos = fh.tell()
+                    for ln in chunk.splitlines():
+                        clean = ln.replace("\x00", "").strip()
+                        if clean:
+                            yield _sse("log", {"line": clean})
+                    metrics = ts.read_metrics(task_id)
+                    yield _sse("metrics", metrics)
+                    idle = 0
+                else:
+                    idle += 1
+                    if idle % 10 == 0:
+                        yield ": ping\n\n"
+                        task = reconcile_task(ts.load_task(task_id))
+                        yield _sse("status", {
+                            "id": task["id"],
+                            "status": task.get("status"),
+                            "pid": task.get("pid"),
+                        })
+                        if task.get("status") not in {"running"}:
+                            # Final metrics flush then end stream after a short grace
+                            metrics = ts.read_metrics(task_id)
+                            yield _sse("metrics", metrics)
+                            if idle > 25:
+                                break
+            except Exception as exc:  # noqa: BLE001
+                yield _sse("error", {"message": str(exc)})
+                break
 
     return StreamingResponse(
         events(),
@@ -1149,6 +1008,245 @@ async def log_stream() -> StreamingResponse:
         },
     )
 
+
+# Deprecated train endpoints → 410
+def _train_gone() -> None:
+    raise HTTPException(status_code=410, detail="已改为 /api/tasks；请刷新页面")
+
+
+@app.post("/api/train/start")
+def train_start_gone() -> None:
+    _train_gone()
+
+
+@app.post("/api/train/stop")
+def train_stop_gone() -> None:
+    _train_gone()
+
+
+@app.get("/api/train/processes")
+def train_processes_gone() -> None:
+    _train_gone()
+
+
+@app.post("/api/train/attach")
+def train_attach_gone() -> None:
+    _train_gone()
+
+
+@app.get("/api/status")
+def status() -> dict:
+    rid = ts.find_running_task_id()
+    if rid:
+        t = reconcile_task(ts.load_task(rid))
+        return {
+            "running": t.get("status") == "running",
+            "pid": t.get("pid"),
+            "task_id": rid,
+            "gpu": _gpu_text(),
+        }
+    return {"running": False, "pid": None, "task_id": None, "gpu": _gpu_text()}
+
+
+
+
+
+
+def _get_bench_or_404(run_id: str) -> dict:
+    try:
+        return reconcile_run(bs.load_run(run_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"bench task not found: {run_id}") from exc
+
+
+def _bench_with_progress(run: dict) -> dict:
+    out = dict(run)
+    try:
+        out["progress"] = bs.read_progress(run["id"])
+    except Exception:  # noqa: BLE001
+        out["progress"] = None
+    return out
+
+
+# ---- Bench Tasks API (symmetric with /api/tasks) ----
+
+@app.get("/api/bench/tasks")
+def api_bench_list_tasks() -> dict:
+    rows = []
+    for row in bs.list_runs():
+        if row.get("status") == "running":
+            row = reconcile_run(bs.load_run(row["id"]))
+        rows.append({
+            "id": row["id"],
+            "name": row.get("name") or row["id"],
+            "status": row.get("status"),
+            "ckpt_path": row.get("ckpt_path"),
+            "tasks": row.get("tasks"),
+            "limit": row.get("limit"),
+            "device": row.get("device"),
+            "created_at": row.get("created_at"),
+            "started_at": row.get("started_at"),
+            "ended_at": row.get("ended_at"),
+            "pid": row.get("pid"),
+            "scores": row.get("scores"),
+        })
+    return {"tasks": rows}
+
+
+@app.post("/api/bench/tasks")
+def api_bench_create_task(body: BenchCreate) -> dict:
+    try:
+        return bs.create_run(
+            name=body.name or "",
+            ckpt_path=body.ckpt_path or "",
+            tasks=list(body.tasks or ["ceval-valid", "cmmlu", "gsm8k"]),
+            limit=body.limit,
+            device="cpu",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/bench/tasks/{run_id}")
+def api_bench_get_task(run_id: str) -> dict:
+    return _bench_with_progress(_get_bench_or_404(run_id))
+
+
+@app.patch("/api/bench/tasks/{run_id}")
+def api_bench_patch_task(run_id: str, body: BenchPatch) -> dict:
+    _get_bench_or_404(run_id)
+    try:
+        kwargs = {}
+        if body.name is not None:
+            kwargs["name"] = body.name
+        if body.ckpt_path is not None:
+            kwargs["ckpt_path"] = body.ckpt_path
+        if body.tasks is not None:
+            kwargs["tasks"] = body.tasks
+        if "limit" in body.model_fields_set:
+            kwargs["limit"] = body.limit
+        run = bs.patch_run(run_id, **kwargs)
+        return _bench_with_progress(run)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+
+@app.delete("/api/bench/tasks/{run_id}")
+def api_bench_delete_task(run_id: str) -> dict:
+    run = _get_bench_or_404(run_id)
+    if run.get("status") == "running" and pid_alive(run.get("pid")):
+        raise HTTPException(status_code=409, detail="running task 不能删除，请先 Stop")
+    try:
+        bs.delete_run(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "id": run_id}
+
+
+@app.post("/api/bench/tasks/{run_id}/start")
+def api_bench_start_task(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    try:
+        run = bench_start_run(run_id, training_busy=_any_training_running())
+        return _bench_with_progress(run)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/bench/tasks/{run_id}/stop")
+def api_bench_stop_task(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    return _bench_with_progress(bench_stop_run(run_id))
+
+
+@app.get("/api/bench/tasks/{run_id}/logs")
+def api_bench_task_logs(run_id: str, tail: int = 200) -> dict:
+    _get_bench_or_404(run_id)
+    return {"text": bench_read_log(run_id, tail=tail)}
+
+
+@app.get("/api/bench/tasks/{run_id}/results")
+def api_bench_task_results(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    rp = bs.run_dir(run_id) / "results.json"
+    if not rp.is_file():
+        raise HTTPException(status_code=404, detail="results.json 尚未生成")
+    import json as _json
+    return _json.loads(rp.read_text(encoding="utf-8"))
+
+
+@app.get("/api/bench/tasks/{run_id}/progress")
+def api_bench_task_progress(run_id: str) -> dict:
+    _get_bench_or_404(run_id)
+    return bs.read_progress(run_id)
+
+
+def _bench_runs_gone() -> None:
+    raise HTTPException(status_code=410, detail="已改为 /api/bench/tasks；请刷新页面")
+
+
+@app.get("/api/bench/runs")
+@app.post("/api/bench/runs")
+def api_bench_runs_gone() -> None:
+    _bench_runs_gone()
+
+
+@app.get("/api/bench/runs/{run_id}")
+@app.get("/api/bench/runs/{run_id}/logs")
+@app.get("/api/bench/runs/{run_id}/results")
+@app.post("/api/bench/runs/{run_id}/stop")
+@app.delete("/api/bench/runs/{run_id}")
+def api_bench_runs_id_gone(run_id: str) -> None:
+    _bench_runs_gone()
+
+
+@app.get("/api/arch/design")
+def api_arch_design_get(arch: str = "dense") -> dict:
+    try:
+        return arch_inspect_design(arch)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/arch/design")
+def api_arch_design(req: ArchDesignRequest) -> dict:
+    try:
+        return arch_inspect_design(req.arch)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/arch/inspect")
+def api_arch_inspect(req: ArchInspectRequest) -> dict:
+    path = (req.ckpt_path or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="ckpt_path 不能为空")
+    try:
+        return arch_inspect_path(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"找不到 checkpoint: {path}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"解析失败: {exc}") from exc
+
+
+@app.post("/api/moe/expert-load")
+def moe_expert_load(req: ExpertLoadRequest) -> dict:
+    return infer_engine.expert_load(
+        data_path=req.data_path,
+        num_samples=req.num_samples,
+        max_seq_len=req.max_seq_len,
+        batch_size=req.batch_size,
+        ckpt_path=req.ckpt_path,
+    )
 
 @app.post("/api/infer/load")
 def infer_load(req: LoadRequest) -> dict:
@@ -1164,30 +1262,6 @@ def infer_generate(req: GenerateRequest) -> dict:
         top_k=req.top_k,
         seed=req.seed,
     )}
-
-
-@app.post("/api/moe/expert-load")
-def moe_expert_load(req: ExpertLoadRequest) -> dict:
-    return infer_engine.expert_load(
-        data_path=req.data_path,
-        num_samples=req.num_samples,
-        max_seq_len=req.max_seq_len,
-        batch_size=req.batch_size,
-        ckpt_path=req.ckpt_path,
-    )
-
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-
-class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    max_new_tokens: int = 256
-    temperature: float = 0.8
-    top_k: int = 50
-    seed: int = 42
 
 
 @app.post("/api/infer/chat/stream")
@@ -1221,6 +1295,39 @@ async def infer_chat_stream(req: ChatRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+
+@app.post("/api/infer/continue/stream")
+async def infer_continue_stream(req: GenerateRequest) -> StreamingResponse:
+    """Prefix continuation stream for pretrained models (no chat template)."""
+
+    def event_iter():
+        try:
+            for item in infer_engine.stream_continue(
+                req.prompt,
+                max_new_tokens=req.max_new_tokens,
+                temperature=req.temperature,
+                top_k=req.top_k,
+                seed=req.seed,
+            ):
+                yield _sse(item["event"], item["data"])
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            yield _sse("error", {"message": detail})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 
 if __name__ == "__main__":

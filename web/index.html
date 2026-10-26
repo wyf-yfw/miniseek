@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MiniSeek 训练控制台</title>
+  <title>MiniSeek Task 控制台</title>
   <style>
     :root {
       color-scheme: light;
@@ -16,6 +16,8 @@
       --accent-ink: #ffffff;
       --stop: #b91c1c;
       --ok: #047857;
+      --warn: #d97706;
+      --fail: #b91c1c;
       --log-bg: #111827;
       --log-fg: #e5e7eb;
     }
@@ -31,29 +33,113 @@
       justify-content: space-between;
       gap: 16px;
       align-items: center;
-      padding: 16px 24px;
+      padding: 18px 28px;
       background: var(--card);
       border-bottom: 1px solid var(--line);
     }
-    h1 { font-size: 18px; margin: 0; }
-    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
-    .live {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 13px;
+    h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    .hdr-right {
+      display: flex; align-items: center; gap: 10px;
     }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #9ca3af;
+    .live { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .dot-wrap {
+      position: relative; display: inline-flex; align-items: center;
+      width: 14px; height: 14px; justify-content: center; cursor: default;
     }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+    .hdr-env-tip {
+      display: none;
+      position: absolute; top: calc(100% + 10px); right: 0;
+      z-index: 50; min-width: 260px; max-width: min(420px, 80vw);
+      padding: 10px 12px; border-radius: 10px;
+      background: #111827; color: #f9fafb;
+      font-size: 12px; line-height: 1.5; text-align: left;
+      white-space: pre-line; font-variant-numeric: tabular-nums;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      pointer-events: none;
+    }
+    .hdr-env-tip::before {
+      content: ""; position: absolute; top: -6px; right: 8px;
+      border: 6px solid transparent; border-top: 0; border-bottom-color: #111827;
+    }
+    .dot-wrap:hover .hdr-env-tip,
+    .dot-wrap:focus-within .hdr-env-tip { display: block; }
     .dot.on { background: var(--ok); }
+    .dot.running { background: var(--ok); }
+    .dot.draft { background: #9ca3af; }
+    .dot.stopped { background: var(--warn); }
+    .dot.finished { background: var(--accent); }
+    .dot.failed { background: var(--fail); }
     main { padding: 16px 24px 32px; }
-    nav { display: flex; gap: 8px; margin-bottom: 16px; }
-    nav button, .actions button, .row button {
+    .page-tabs {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 4px;
+      margin: 0 0 20px;
+      padding: 5px;
+      max-width: 820px;
+      background: #e8eaee;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    .page-tabs button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-height: 44px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--muted);
+      transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+    }
+    .page-tabs button:hover:not(.active) {
+      color: var(--ink);
+      background: rgba(255,255,255,0.45);
+    }
+    .page-tabs button.active {
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: 0 1px 2px rgba(17,24,39,0.06), 0 4px 12px rgba(17,24,39,0.08);
+    }
+
+    .bench-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+    .bench-progress { margin: 10px 0 14px; }
+    .bench-progress .bar-label { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:4px; }
+    .bench-progress .bar-track { height:8px; background:var(--line); border-radius:999px; overflow:hidden; }
+    .bench-progress .bar-fill { height:100%; width:0%; background:var(--accent); border-radius:999px; transition:width .2s ease; }
+    #btn-new-bench-task { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); width: 100%; }
+    #bench-task-list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+    #bench-task-list li {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 8px; border-radius: 8px; cursor: pointer; margin-bottom: 4px;
+    }
+    #bench-task-list li:hover { background: rgba(127,127,127,.12); }
+    #bench-task-list li.active { background: rgba(127,127,127,.2); }
+    #bench-task-list .name { font-size: 13px; font-weight: 600; }
+    #bench-task-list .sub { font-size: 11px; color: var(--muted); }
+
+    .bench-tasks { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 8px 0 12px; }
+    .bench-tasks label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+    .bench-scores { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .bench-scores th, .bench-scores td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+    .bench-scores th { color: var(--muted); font-weight: 600; }
+    .bench-hist { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+    .bench-hist li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; cursor: pointer; background: #fafbfc; }
+    .bench-hist li:hover, .bench-hist li.active { border-color: var(--accent); background: #fff; }
+    .bench-hist .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .bench-log { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; max-height: 220px; overflow: auto; background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 10px; }
+    @media (max-width: 960px) { .bench-grid { grid-template-columns: 1fr; } }
+    .page-tabs button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .actions button, .row button, .task-sidebar button {
       border: 1px solid var(--line);
       background: var(--card);
       border-radius: 8px;
@@ -61,15 +147,54 @@
       cursor: pointer;
       font: inherit;
     }
-    nav button.active { background: var(--ink); color: white; border-color: var(--ink); }
     .panel { display: none; }
     .panel.active { display: block; }
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(280px, 380px) 1fr;
+    .train-layout {
+      display: flex;
       gap: 16px;
-      align-items: start;
+      align-items: stretch;
+      min-height: 70vh;
     }
+    .task-sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .task-sidebar h2 { margin: 0; font-size: 14px; }
+    #btn-new-task {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+      width: 100%;
+    }
+    #task-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      flex: 1;
+    }
+    #task-list li {
+      padding: 10px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      border: 1px solid transparent;
+    }
+    #task-list li:hover { background: #f9fafb; }
+    #task-list li.active { background: #eff6ff; border-color: #bfdbfe; }
+    #task-list .meta { flex: 1; min-width: 0; }
+    #task-list .name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #task-list .sub { color: var(--muted); font-size: 11px; }
+    .task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -78,6 +203,8 @@
     }
     h2 { margin: 0 0 12px; font-size: 15px; }
     label { display: block; margin: 10px 0; color: var(--muted); font-size: 12px; }
+    label .field-title { color: var(--ink); font-weight: 600; }
+    label .field-hint { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.35; }
     input, select, textarea {
       width: 100%;
       margin-top: 4px;
@@ -89,6 +216,15 @@
       background: white;
     }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .path-row { display: flex; gap: 8px; margin-top: 4px; align-items: stretch; }
+    .path-row input { margin-top: 0; flex: 1; min-width: 0; }
+    .path-row .btn-browse {
+      flex: 0 0 auto; margin-top: 0; padding: 8px 12px;
+      border: 1px solid var(--line); border-radius: 8px;
+      background: #f9fafb; cursor: pointer; font: inherit; white-space: nowrap;
+    }
+    .path-row .btn-browse:hover { background: #f3f4f6; }
+    .path-row .btn-browse:disabled { opacity: 0.5; cursor: not-allowed; }
     .mode-row { display: flex; gap: 8px; margin-bottom: 4px; }
     .mode-row button {
       flex: 1;
@@ -105,25 +241,12 @@
       border-color: var(--ink);
     }
     .mode-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
-    .check-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 10px 0;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .check-row input[type="checkbox"] {
-      width: auto;
-      margin: 0;
-      accent-color: var(--accent);
-    }
     details { margin-top: 8px; }
     summary { cursor: pointer; color: var(--muted); }
-    .actions, .row { display: flex; gap: 8px; margin-top: 12px; }
-    #btn-start, #btn-attach { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-    #btn-start { flex: 1; }
+    .actions, .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    #btn-start { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); flex: 1; }
     #btn-stop { background: var(--stop); color: white; border-color: var(--stop); }
+    #btn-delete, #btn-delete-draft { background: #fff; color: var(--stop); border-color: #fecaca; }
     #action-msg, #load-msg { color: var(--muted); min-height: 1.4em; }
     #status-box {
       white-space: pre-wrap;
@@ -131,188 +254,203 @@
       border-radius: 8px;
       padding: 10px 12px;
       margin-bottom: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
     }
-    .caption { margin: -6px 0 8px; color: var(--muted); font-size: 12px; }
-    #loss-chart {
-      width: 100%;
-      height: 220px;
-      display: block;
-      background: #f9fafb;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-    #log-view {
-      margin: 0;
-      height: min(42vh, 420px);
-      overflow: auto;
+    #log {
       background: var(--log-bg);
       color: var(--log-fg);
       border-radius: 8px;
       padding: 12px;
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    #gen-output, #env-box {
-      white-space: pre-wrap;
-      min-height: 120px;
-      background: #f9fafb;
-      border-radius: 8px;
-      padding: 12px;
-    }
-    @media (max-width: 900px) {
-      header, main { padding-left: 12px; padding-right: 12px; }
-      .layout, .grid { grid-template-columns: 1fr; }
-    }
-
-    /* ChatGPT-style chat panel */
-    #infer.panel.active {
-      display: flex;
-      flex-direction: column;
-      min-height: calc(100vh - 140px);
-    }
-    .chat-shell {
-      display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 16px;
-      flex: 1;
-      min-height: 0;
-    }
-    .chat-side {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 14px;
-      align-self: start;
-    }
-    .chat-main {
-      display: flex;
-      flex-direction: column;
-      min-height: min(72vh, 720px);
-      background: #f7f7f8;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      overflow: hidden;
-    }
-    .chat-toolbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: #fff;
-      border-bottom: 1px solid var(--line);
-    }
-    .chat-toolbar .title { font-weight: 600; font-size: 14px; }
-    .chat-messages {
-      flex: 1;
+      height: 280px;
       overflow: auto;
-      padding: 20px 0;
-    }
-    .chat-empty {
-      color: var(--muted);
-      text-align: center;
-      padding: 64px 24px;
-      font-size: 15px;
-    }
-    .msg-row {
-      display: flex;
-      justify-content: center;
-      padding: 14px 16px;
-    }
-    .msg-row.user { background: transparent; }
-    .msg-row.assistant { background: #ececf1; }
-    .msg-bubble {
-      width: min(760px, 100%);
-      display: grid;
-      grid-template-columns: 36px 1fr;
-      gap: 14px;
-      align-items: start;
-    }
-    .msg-avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      display: grid;
-      place-items: center;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
-      font-weight: 700;
-      color: #fff;
-      flex-shrink: 0;
-    }
-    .msg-row.user .msg-avatar { background: #19c37d; }
-    .msg-row.assistant .msg-avatar { background: #ab68ff; }
-    .msg-body {
       white-space: pre-wrap;
-      word-break: break-word;
-      line-height: 1.65;
-      font-size: 15px;
-      padding-top: 6px;
     }
-    .msg-body.streaming::after {
-      content: "▍";
-      animation: blink 1s step-end infinite;
-      margin-left: 2px;
-      color: #6b7280;
+    #loss-canvas { width: 100%; height: 180px; background: #fafafa; border-radius: 8px; border: 1px solid var(--line); }
+    .empty-hint { color: var(--muted); padding: 24px; text-align: center; }
+    .phase-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      margin-left: 8px; vertical-align: middle;
     }
+    .frozen-config {
+      background: #f9fafb; border: 1px solid var(--line); border-radius: 10px;
+      padding: 12px 14px; margin: 12px 0; font-size: 13px; line-height: 1.55;
+    }
+    .frozen-config dl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 0; }
+    .frozen-config dt { color: var(--muted); }
+    .frozen-config dd { margin: 0; word-break: break-all; }
+    .run-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .config-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+
+    /* Chat */
+    #infer.panel.active, #continue.panel.active { height: calc(100vh - 140px); }
+    .cont-prefix { flex: 0 0 auto; padding: 16px; border-bottom: 1px solid var(--line); }
+    .cont-prefix textarea { min-height: 100px; resize: vertical; }
+    .cont-out { flex: 1; overflow: auto; padding: 16px; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.55; }
+    .cont-out .prefix { color: var(--muted); }
+    .cont-out .gen { color: var(--ink); }
+    .cont-out.streaming .gen::after { content: "▍"; animation: blink 1s infinite; }
+    #btn-cont-run { background: var(--accent); color: white; border-color: var(--accent); }
+    #btn-cont-stop { background: var(--stop); color: white; border-color: var(--stop); display: none; }
+
+    .chat-shell { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: 100%; }
+    .chat-side { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow: auto; }
+    .chat-main { background: var(--card); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; }
+    .chat-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .chat-toolbar .title { font-weight: 600; font-size: 14px; }
+    .chat-messages { flex: 1; overflow: auto; padding: 16px; }
+    .chat-empty { color: var(--muted); text-align: center; margin-top: 20vh; }
+    .msg-row { margin: 10px 0; display: flex; }
+    .msg-row.user { justify-content: flex-end; }
+    .msg-bubble { max-width: 80%; display: flex; gap: 8px; }
+    .msg-row.user .msg-bubble { flex-direction: row-reverse; }
+    .msg-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #e5e7eb; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; flex-shrink: 0;
+    }
+    .msg-row.user .msg-avatar { background: #dbeafe; }
+    .msg-body {
+      background: #f3f4f6; border-radius: 12px; padding: 10px 12px;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .msg-row.user .msg-body { background: #eff6ff; }
+    .msg-body.streaming::after { content: "▍"; animation: blink 1s infinite; }
     @keyframes blink { 50% { opacity: 0; } }
-    .chat-composer {
-      border-top: 1px solid var(--line);
-      background: #fff;
-      padding: 12px 16px 16px;
-    }
-    .composer-box {
-      width: min(760px, 100%);
-      margin: 0 auto;
-      display: flex;
-      gap: 8px;
-      align-items: flex-end;
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 10px 10px 10px 14px;
-      box-shadow: 0 4px 16px rgba(0,0,0,.04);
-    }
-    .composer-box textarea {
-      border: none;
-      outline: none;
-      resize: none;
-      margin: 0;
-      padding: 6px 0;
-      max-height: 160px;
-      min-height: 24px;
-      background: transparent;
-      font-size: 15px;
-    }
-    .composer-box button {
-      border: none;
-      border-radius: 10px;
-      padding: 10px 14px;
-      cursor: pointer;
-      font: inherit;
-      background: var(--ink);
-      color: #fff;
-      white-space: nowrap;
-    }
-    .composer-box button:disabled {
-      opacity: .45;
-      cursor: not-allowed;
-    }
-    .composer-box button.stop {
-      background: var(--stop);
-    }
-    .composer-hint {
-      width: min(760px, 100%);
-      margin: 8px auto 0;
-      color: var(--muted);
-      font-size: 12px;
-      text-align: center;
-    }
+    .chat-composer { border-top: 1px solid var(--line); padding: 12px; display: flex; gap: 8px; align-items: flex-end; }
+    .chat-composer textarea { resize: none; min-height: 40px; max-height: 160px; }
+    #btn-send { background: var(--accent); color: white; border-color: var(--accent); }
+    #btn-stop-gen { background: var(--stop); color: white; border-color: var(--stop); display: none; }
     @media (max-width: 900px) {
+      .train-layout { flex-direction: column; }
+      .task-sidebar { width: 100%; max-height: 220px; }
       .chat-shell { grid-template-columns: 1fr; }
     }
 
-    /* Expert load bars */
+    .arch-shell { display: grid; grid-template-columns: 280px 1fr; gap: 16px; min-height: 560px; }
+    .arch-side { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+    .arch-main { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; min-width: 0; }
+    .arch-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .arch-canvas-wrap { position: relative; flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 0; min-height: 420px; }
+    .arch-canvas { overflow: auto; padding: 8px 4px 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .arch-block {
+      width: min(420px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: #f8fafc;
+      cursor: default;
+      text-align: center;
+    }
+    .arch-block.layer { cursor: pointer; }
+    .arch-block.layer:hover, .arch-block.layer.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+    .arch-block .lbl { font-weight: 600; }
+    .arch-block .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .arch-block .shape {
+      color: var(--muted);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      margin-top: 3px;
+      font-weight: 500;
+    }
+    .arch-connector { width: 2px; height: 12px; background: var(--line); }
+    .arch-drawer {
+      width: 280px;
+      border-left: 1px solid var(--line);
+      padding: 12px;
+      background: #fbfbfc;
+      overflow: auto;
+    }
+    .arch-drawer[hidden] { display: none; }
+    .arch-drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .arch-msg { color: var(--muted); font-size: 13px; min-height: 1.2em; }
+    .arch-msg.err { color: var(--fail); }
+    .arch-summary { font-size: 13px; line-height: 1.5; color: var(--ink); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .arch-part { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: #fff; }
+    .arch-part .lbl { font-weight: 600; margin-bottom: 4px; }
+    .arch-part .fact { color: var(--muted); font-size: 12px; line-height: 1.55; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    @media (max-width: 900px) {
+      .arch-shell { grid-template-columns: 1fr; }
+      .arch-canvas-wrap { grid-template-columns: 1fr; }
+      .arch-drawer { width: auto; border-left: 0; border-top: 1px solid var(--line); }
+    }
+
+    .arch-toolbar .title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .arch-view-modes { display: inline-flex; gap: 4px; padding: 3px; background: #e8eaee; border: 1px solid var(--line); border-radius: 10px; }
+    .arch-view-modes button {
+      appearance: none; border: 0; background: transparent; border-radius: 8px;
+      padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted);
+    }
+    .arch-view-modes button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(17,24,39,0.06); }
+    .arch-layer-group {
+      position: relative;
+      width: min(440px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 8px;
+      padding-right: 56px;
+      background: #f1f5f9;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+      box-sizing: border-box;
+    }
+    .arch-layer-group.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
+    .arch-layer-head { cursor: pointer; text-align: center; padding: 6px 8px; border-radius: 8px; }
+    .arch-layer-head:hover { background: rgba(255,255,255,0.55); }
+    .arch-layer-head .sub { display: none; }
+    .arch-block.part {
+      width: 100%;
+      background: #fff;
+      font-size: 13px;
+      cursor: default;
+      box-sizing: border-box;
+    }
+    .arch-layer-group .arch-block.part .sub { display: none; }
+    .arch-layer-group .arch-block.part .shape {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      margin-top: 3px;
+      font-weight: 500;
+    }
+    .arch-block.part.add-node {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-color: #3dba7a;
+      background: #13261c;
+      color: #3dba7a;
+      font-weight: 700;
+      margin: 6px auto;
+    }
+    .arch-block.part.add-node .sub { display: none; }
+    .arch-residual-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+    .arch-block.compact-layers { border-style: dashed; }
+
+    .arch-block.part.struct {
+      background: #eef6ff;
+      border-style: dashed;
+    }
     #moe-load-summary {
       white-space: pre-wrap;
       background: #f9fafb;
@@ -355,113 +493,116 @@
     .moe-bar-row.cold .moe-bar-fill { background: #9ca3af; }
     .moe-bar-row.hot .lab, .moe-bar-row.hot .pct { color: #b91c1c; font-weight: 600; }
     .moe-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
-    #live-expert-wrap { margin-top: 8px; }
-    #live-expert-wrap.hidden { display: none; }
-    #live-expert-summary {
-      white-space: pre-wrap;
-      color: var(--muted);
-      font-size: 12px;
-      margin: 4px 0 8px;
-      min-height: 1.2em;
-    }
-    #live-expert-bars {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      max-height: 280px;
-      overflow: auto;
-      padding: 2px 0;
-    }
+
   </style>
 </head>
 <body>
   <header>
     <div>
-      <h1>MiniSeek 训练控制台</h1>
-      <p>Stage 0 Dense · 日志由服务器按行推送，不再定时轮询</p>
+      <h1>MiniSeek</h1>
+      <p>Task 驱动训练 · Tiny / Dense / MoE</p>
     </div>
-    <div class="live"><span id="live-dot" class="dot"></span><span id="live-text">日志连接中</span></div>
+    <div class="hdr-right">
+      <div class="live">
+        <span class="dot-wrap" tabindex="0" title="悬停查看环境">
+          <span class="dot" id="hdr-dot"></span>
+          <span class="hdr-env-tip" id="hdr-env">环境加载中…</span>
+        </span>
+        <span id="hdr-status">空闲</span>
+      </div>
+    </div>
   </header>
   <main>
-    <nav>
-      <button type="button" class="active" data-tab="train">训练</button>
-      <button type="button" data-tab="infer">对话</button>
-      <button type="button" data-tab="moe-load">专家负载</button>
-      <button type="button" data-tab="env">环境</button>
+    <nav class="page-tabs" role="tablist" aria-label="页面">
+      <button type="button" class="active" role="tab" aria-selected="true" data-tab="train">训练</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="infer">对话</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="continue">续写</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="arch">架构</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="bench">评测</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="moe-load">专家负载</button>
     </nav>
 
     <section id="train" class="panel active">
-      <div class="layout">
-        <div class="card">
-          <h2>超参数</h2>
-          <div class="mode-row">
-            <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">预训练 Base</button>
-            <button type="button" id="mode-sft" data-mode="sft">SFT 后训练</button>
+      <div class="train-layout">
+        <aside class="task-sidebar">
+          <h2>Tasks</h2>
+          <button type="button" id="btn-new-task">新建 Task</button>
+          <ul id="task-list"></ul>
+        </aside>
+        <div class="task-main">
+          <div class="card" id="task-detail-empty">
+            <p class="empty-hint">左侧新建或选择一个 Task</p>
           </div>
-          <div class="mode-row" id="arch-row">
-            <button type="button" id="arch-dense" class="active" data-arch="dense">Dense</button>
-            <button type="button" id="arch-moe" data-arch="moe">MoE</button>
-          </div>
-          <p id="arch-hint" class="mode-hint">Dense：MiniSeek-D FFN；MoE：MiniSeek-M（1+32 top-2）。</p>
-          <p id="mode-hint" class="mode-hint">预训练：学语言；权重默认写到 checkpoints/stage0。</p>
-          <label>训练数据路径<input id="data-path" /></label>
-          <label>权重保存目录<input id="out-dir" /></label>
-          <label id="init-ckpt-wrap" style="display:none">从 Checkpoint 初始化（SFT 用 base）
-            <select id="init-ckpt"><option value="">选择预训练 best.pt</option></select>
-          </label>
-          <div class="grid">
-            <label>Batch Size<input id="batch-size" type="number" min="1" value="8" /></label>
-            <label>Max Seq Len<input id="seq-len" type="number" min="8" step="64" value="512" /></label>
-            <label>Peak LR<input id="lr" type="number" step="0.00001" value="0.0001" /></label>
-            <label>Min LR<input id="min-lr" type="number" step="0.00001" value="0.00003" /></label>
-            <label>Warmup Steps<input id="warmup" type="number" min="0" value="200" /></label>
-            <label>Epochs<input id="epochs" type="number" min="1" value="1" /></label>
-            <label>Max Steps（0 为不限）<input id="max-steps" type="number" min="0" value="0" /></label>
-            <label>Log Every<input id="log-every" type="number" min="1" value="1" /></label>
-            <label>Loss 曲线间隔<input id="plot-every" type="number" min="1" value="200" /></label>
-            <label>Grad Clip<input id="grad-clip" type="number" step="0.1" value="1" /></label>
-          </div>
-          <details>
-            <summary>保存策略</summary>
-            <label>Loss 里程碑阈值<input id="thresholds" value="20,15,12,10,9,8,7,6,5,4,3" /></label>
-            <div class="grid">
-              <label>Stable Steps<input id="stable-steps" type="number" min="1" value="100" /></label>
-              <label>Save Every（0 关闭）<input id="save-every" type="number" min="0" value="0" /></label>
+          <div class="card" id="task-detail" style="display:none">
+            <h2><span id="detail-title">Task</span><span class="phase-badge" id="phase-badge">配置</span></h2>
+            <p id="action-msg"></p>
+
+            <div id="phase-config">
+              <p class="config-note">配置阶段：调好参数后点 Start。开始后参数锁定，改配置请新建 Task。</p>
+              <div class="mode-row" id="mode-row">
+                <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">Pretrain</button>
+                <button type="button" id="mode-sft" data-mode="sft">SFT</button>
+              </div>
+              <div class="mode-row" id="arch-row">
+                <button type="button" id="arch-dense" class="active" data-arch="dense">Dense</button>
+                <button type="button" id="arch-moe" data-arch="moe">MoE</button>
+                <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
+              </div>
+              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：MiniSeek-M0.1（1+32 top-2，可训）；Tiny：d=64 L=2 冒烟档。</p>
+              <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
+              <label><span class="field-title">数据路径</span><span class="field-hint">训练用 jsonl 文件路径（每行一条文本样本）。</span><div class="path-row"><input id="data-path" type="text" /><button type="button" class="btn-browse" data-for="data-path">浏览</button></div></label>
+              <div class="grid">
+                <label><span class="field-title">Batch</span><span class="field-hint">每次更新用多少条样本；越大越稳但更吃显存/内存。</span><input id="batch-size" type="number" min="1" /></label>
+                <label><span class="field-title">Max Seq Len</span><span class="field-hint">单条样本截断/填充的最大 token 长度。</span><input id="max-seq-len" type="number" min="8" /></label>
+                <label><span class="field-title">LR</span><span class="field-hint">学习率峰值（warmup 结束后的最高 lr）。</span><input id="lr" type="number" step="any" /></label>
+                <label><span class="field-title">Min LR</span><span class="field-hint">余弦衰减后的学习率下限。</span><input id="min-lr" type="number" step="any" /></label>
+                <label><span class="field-title">Warmup</span><span class="field-hint">前多少步线性升温到峰值 LR；0 表示不升温。</span><input id="warmup-steps" type="number" min="0" /></label>
+                <label><span class="field-title">Epochs</span><span class="field-hint">完整扫过数据集的轮数。</span><input id="epochs" type="number" min="1" /></label>
+                <label><span class="field-title">Max Steps</span><span class="field-hint">最多训练多少步；0 或空表示不按步数截断，只跑完 epochs。</span><input id="max-steps" type="number" min="0" /></label>
+                <label><span class="field-title">Log Every</span><span class="field-hint">每隔多少步往日志打印一次 loss 等指标。</span><input id="log-every" type="number" min="1" /></label>
+                <label><span class="field-title">Plot Every</span><span class="field-hint">每隔多少步给 Loss 曲线记一个点。</span><input id="plot-every" type="number" min="1" /></label>
+                <label><span class="field-title">Grad Clip</span><span class="field-hint">梯度裁剪阈值，抑制爆炸；常见 1.0。</span><input id="grad-clip" type="number" step="any" /></label>
+              </div>
+              <details>
+                <summary>更多</summary>
+                <div class="grid">
+                  <label><span class="field-title">Loss Thresholds</span><span class="field-hint">loss 连续低于这些阈值时触发里程碑存盘（逗号分隔，降序）。</span><input id="save-loss-thresholds" type="text" /></label>
+                  <label><span class="field-title">Stable Steps</span><span class="field-hint">某个阈值需连续多少步 loss≤阈值才写入对应 checkpoint。</span><input id="stable-steps" type="number" min="1" /></label>
+                  <label><span class="field-title">Save Every</span><span class="field-hint">每 N 步额外存 step-N.pt；0=关闭，只靠里程碑与结束时的 last.pt。</span><input id="save-every" type="number" min="0" /></label>
+                  <label><span class="field-title">Aux Coef</span><span class="field-hint">MoE 负载均衡辅助损失系数；Dense/Tiny 可忽略。</span><input id="aux-coef" type="number" step="any" /></label>
+                  <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态），填 .pt 路径。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
+                  <label><span class="field-title">Init Ckpt (SFT)</span><span class="field-hint">SFT 时从该预训练权重初始化（非断点续训）。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
+                </div>
+              </details>
+              <div class="actions">
+                <button type="button" id="btn-save">保存配置</button>
+                <button type="button" id="btn-start">Start</button>
+                <button type="button" id="btn-delete-draft">删除</button>
+              </div>
             </div>
-            <label>断点续训
-              <select id="resume"><option value="">不续训</option></select>
-            </label>
-          </details>
-          <label class="check-row"><input id="compile" type="checkbox" /> torch.compile（首次会慢一点，之后步速通常更快）</label>
-          <div class="actions">
-            <button type="button" id="btn-start">启动训练</button>
-            <button type="button" id="btn-stop">终止训练</button>
+
+            <div id="phase-run" style="display:none">
+              <div id="status-box">—</div>
+              <div class="run-actions">
+                <button type="button" id="btn-stop">Stop</button>
+                <button type="button" id="btn-delete">删除</button>
+                <button type="button" id="btn-new-from-run">用同配置新建 Task</button>
+              </div>
+              <details open>
+                <summary>已锁定配置（只读）</summary>
+                <div class="frozen-config" id="frozen-config"></div>
+              </details>
+              <h2 style="margin-top:16px">Loss</h2>
+              <canvas id="loss-canvas" width="800" height="180"></canvas>
+              <h2 style="margin-top:16px">日志</h2>
+              <div id="log"></div>
+              <h2 style="margin-top:16px">本 Task Checkpoints</h2>
+              <div class="row">
+                <select id="task-ckpt-select"></select>
+                <button type="button" id="btn-refresh-task-ckpt">刷新</button>
+              </div>
+            </div>
           </div>
-          <p id="action-msg">就绪。</p>
-        </div>
-        <div class="card">
-          <h2>训练进程</h2>
-          <label>扫描到的进程
-            <select id="proc-select"></select>
-          </label>
-          <div class="row">
-            <button type="button" id="btn-scan-proc">扫描</button>
-            <button type="button" id="btn-attach">接入选中进程</button>
-          </div>
-          <p id="proc-msg" class="caption">接入只是把日志接到这个页面，不会重启训练。刷新后会保持这次选择。</p>
-          <h2>运行状态</h2>
-          <div id="status-box">正在连接…</div>
-          <h2>Loss</h2>
-          <p id="loss-caption" class="caption">每 200 步记录一个点</p>
-          <canvas id="loss-chart"></canvas>
-          <div id="live-expert-wrap" class="hidden">
-            <h2>专家负载（实时）</h2>
-            <p id="live-expert-caption" class="caption">与训练 log 同步；跨层合计的路由专家 top-k 占比</p>
-            <div id="live-expert-summary">等待 MoE 训练日志…</div>
-            <div id="live-expert-bars"></div>
-          </div>
-          <h2>训练日志</h2>
-          <pre id="log-view">等待日志。</pre>
         </div>
       </div>
     </section>
@@ -470,40 +611,204 @@
       <div class="chat-shell">
         <aside class="chat-side">
           <h2>模型</h2>
-          <label>Checkpoint
+          <label><span class="field-title">Checkpoint</span>
+            <span class="field-hint">打开系统文件对话框选择 .pt，或从下方列表点选。</span>
+            <div class="path-row">
+              <input id="ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
+              <button type="button" class="btn-browse" data-for="ckpt-manual" id="btn-pick-ckpt">打开选择</button>
+            </div>
+          </label>
+          <label>最近/扫描到的列表
             <select id="ckpt-select"></select>
           </label>
           <div class="row">
-            <button type="button" id="btn-refresh-ckpt">刷新</button>
+            <button type="button" id="btn-refresh-ckpt">刷新列表</button>
             <button type="button" id="btn-load">加载</button>
           </div>
-          <p id="load-msg">请先加载一个 Checkpoint。</p>
+          <p id="load-msg"></p>
           <div class="grid">
-            <label>Max Tokens<input id="gen-len" type="number" min="1" value="256" /></label>
-            <label>Temperature<input id="temperature" type="number" min="0.1" step="0.1" value="0.8" /></label>
-            <label>Top-K<input id="top-k" type="number" min="0" value="50" /></label>
+            <label>Max New<input id="gen-len" type="number" value="128" /></label>
+            <label>Temp<input id="temperature" type="number" step="0.1" value="0.8" /></label>
+            <label>Top-K<input id="top-k" type="number" value="50" /></label>
             <label>Seed<input id="seed" type="number" value="42" /></label>
           </div>
-          <div class="row">
-            <button type="button" id="btn-clear-chat">清空对话</button>
-          </div>
-          <p class="mode-hint">多轮会带上历史；训练占满 GPU 时会自动改用 CPU 推理。</p>
+          <button type="button" id="btn-clear-chat">清空对话</button>
         </aside>
         <div class="chat-main">
           <div class="chat-toolbar">
-            <div class="title">MiniSeek Chat</div>
+            <div class="title">对话</div>
             <div id="chat-status" class="live"><span class="dot" id="chat-dot"></span><span id="chat-status-text">未加载模型</span></div>
           </div>
           <div id="chat-messages" class="chat-messages">
             <div class="chat-empty" id="chat-empty">像 ChatGPT 一样提问吧。先在左侧加载权重。</div>
           </div>
           <div class="chat-composer">
-            <div class="composer-box">
-              <textarea id="chat-input" rows="1" placeholder="发消息给 MiniSeek…"></textarea>
-              <button type="button" id="btn-send">发送</button>
-              <button type="button" id="btn-stop-gen" class="stop" style="display:none">停止</button>
+            <textarea id="chat-input" rows="1" placeholder="发消息给 MiniSeek…"></textarea>
+            <button type="button" id="btn-send">发送</button>
+            <button type="button" id="btn-stop-gen">停止</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    
+    <section id="continue" class="panel">
+      <div class="chat-shell">
+        <aside class="chat-side">
+          <h2>模型（预训练）</h2>
+          <p class="field-hint" style="margin:0 0 10px">与「对话」共用已加载权重；续写不做 chat 模板，适合 Pretrain / Tiny 裸模型。</p>
+          <label><span class="field-title">Checkpoint</span>
+            <span class="field-hint">打开选择或从列表点选后加载。</span>
+            <div class="path-row">
+              <input id="cont-ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
+              <button type="button" class="btn-browse" data-for="cont-ckpt-manual" id="btn-pick-cont-ckpt">打开选择</button>
             </div>
-            <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 流式输出</div>
+          </label>
+          <label>最近/扫描到的列表
+            <select id="cont-ckpt-select"></select>
+          </label>
+          <div class="row">
+            <button type="button" id="btn-cont-refresh-ckpt">刷新列表</button>
+            <button type="button" id="btn-cont-load">加载</button>
+          </div>
+          <p id="cont-load-msg"></p>
+          <div class="grid">
+            <label>Max New<input id="cont-gen-len" type="number" value="128" /></label>
+            <label>Temp<input id="cont-temperature" type="number" step="0.1" value="0.8" /></label>
+            <label>Top-K<input id="cont-top-k" type="number" value="50" /></label>
+            <label>Seed<input id="cont-seed" type="number" value="42" /></label>
+          </div>
+        </aside>
+        <div class="chat-main">
+          <div class="chat-toolbar">
+            <div class="title">前缀续写</div>
+            <div id="cont-status" class="live"><span class="dot" id="cont-dot"></span><span id="cont-status-text">未加载模型</span></div>
+          </div>
+          <div class="cont-prefix">
+            <label style="margin:0"><span class="field-title">前缀</span>
+              <span class="field-hint">输入开头文字，模型接着往后写（非问答）。</span>
+              <textarea id="cont-prefix" rows="4" placeholder="例如：春天来了，小河里的冰渐渐融化，"></textarea>
+            </label>
+            <div class="row" style="margin-top:8px">
+              <button type="button" id="btn-cont-run">生成续写</button>
+              <button type="button" id="btn-cont-stop">停止</button>
+              <button type="button" id="btn-cont-clear">清空输出</button>
+            </div>
+          </div>
+          <div id="cont-out" class="cont-out">
+            <span class="chat-empty" id="cont-empty">加载预训练权重后，输入前缀点「生成续写」。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <section id="arch" class="panel">
+      <div class="arch-shell">
+        <aside class="arch-side">
+          <h2>模型规格</h2>
+          <p class="field-hint" style="margin:0 0 10px">按本仓库设计直接出图，无需加载 checkpoint。</p>
+          <div class="mode-row" id="arch-preset-row">
+            <button type="button" id="arch-preset-tiny" data-arch-preset="tiny">Tiny</button>
+            <button type="button" id="arch-preset-dense" class="active" data-arch-preset="dense">Dense</button>
+            <button type="button" id="arch-preset-moe" data-arch-preset="moe">MoE</button>
+          </div>
+          <p id="arch-preset-hint" class="mode-hint">Dense：MiniSeek-D0.1（d=512 L=8）。</p>
+          <p id="arch-msg" class="arch-msg"></p>
+          <div id="arch-summary" class="arch-summary" style="display:none"></div>
+        </aside>
+        <div class="arch-main">
+          <div class="arch-toolbar">
+            <div class="title-row">
+              <div class="title">结构图</div>
+              <div class="arch-view-modes" role="group" aria-label="显示复杂度">
+                <button type="button" data-arch-view="compact" title="只看大块：Embedding / 层组 / Head">简洁</button>
+                <button type="button" data-arch-view="standard" class="active" title="一层一块，点击看内部">标准</button>
+                <button type="button" data-arch-view="detailed" title="每层展开 Attention / FFN / 专家">详细</button>
+              </div>
+            </div>
+            <div id="arch-status" class="live"><span class="dot" id="arch-dot"></span><span id="arch-status-text">未解析</span></div>
+          </div>
+          <div class="arch-canvas-wrap">
+            <div id="arch-canvas" class="arch-canvas">
+              <span class="chat-empty" id="arch-empty">点左侧 Tiny / Dense / MoE 查看设计架构。</span>
+            </div>
+            <aside id="arch-drawer" class="arch-drawer" hidden>
+              <div class="arch-drawer-head">
+                <strong id="arch-drawer-title">层详情</strong>
+                <button type="button" id="btn-arch-drawer-close" aria-label="关闭">×</button>
+              </div>
+              <div id="arch-drawer-body"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="bench" class="panel">
+      <div class="train-layout">
+        <aside class="task-sidebar">
+          <h2>评测 Tasks</h2>
+          <button type="button" id="btn-new-bench-task">新建 Task</button>
+          <ul id="bench-task-list"></ul>
+        </aside>
+        <div class="task-main">
+          <div class="card" id="bench-detail-empty">
+            <p class="empty-hint">请新建或选择一个评测 Task</p>
+          </div>
+          <div class="card" id="bench-detail" style="display:none">
+            <h2><span id="bench-detail-title">Task</span><span class="phase-badge" id="bench-phase-badge">配置</span></h2>
+            <p id="bench-msg"></p>
+
+            <div id="bench-phase-config">
+              <p class="config-note">配置阶段：设好 checkpoint / 子集后点 Start。旧 runs 也会出现在左侧列表里。</p>
+              <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名；可空，默认用 checkpoint 文件名。</span><input id="bench-name" type="text" /></label>
+              <label for="bench-ckpt"><span class="field-title">Checkpoint</span><span class="field-hint">本地 .pt 或 HF 导出目录。</span></label>
+              <div class="path-row">
+                <input id="bench-ckpt" type="text" placeholder="选择权重 .pt / HF 目录" />
+                <button type="button" class="btn-browse" data-for="bench-ckpt">浏览</button>
+              </div>
+              <div class="bench-tasks" id="bench-task-checks">
+                <label><input type="checkbox" value="ceval-valid" checked /> ceval-valid</label>
+                <label><input type="checkbox" value="cmmlu" checked /> cmmlu</label>
+                <label><input type="checkbox" value="gsm8k" checked /> gsm8k</label>
+              </div>
+              <label for="bench-limit"><span class="field-title">Limit</span><span class="field-hint">每子集最多样本；空=全量。</span></label>
+              <input id="bench-limit" type="number" min="1" step="1" placeholder="例如 8 冒烟" />
+              <div class="actions" style="margin-top:12px">
+                <button type="button" id="btn-bench-save">保存配置</button>
+                <button type="button" id="btn-bench-start">Start</button>
+                <button type="button" id="btn-bench-delete-draft">删除</button>
+              </div>
+            </div>
+
+            <div id="bench-phase-run" style="display:none">
+              <div class="title-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+                <div class="title">运行中 / 结果</div>
+                <div class="live"><span class="dot" id="bench-dot"></span><span id="bench-status-text">未开始</span></div>
+              </div>
+              <p id="bench-run-meta" class="field-hint"></p>
+              <div class="bench-progress">
+                <div class="bar-label"><span>总任务</span><span id="bench-suite-label">0/0</span></div>
+                <div class="bar-track"><div class="bar-fill" id="bench-suite-bar"></div></div>
+              </div>
+              <div class="bench-progress">
+                <div class="bar-label"><span id="bench-sample-title">当前子集</span><span id="bench-sample-label">0/0</span></div>
+                <div class="bar-track"><div class="bar-fill" id="bench-sample-bar"></div></div>
+              </div>
+              <div class="run-actions" style="margin:10px 0">
+                <button type="button" id="btn-bench-stop" class="danger" disabled>Stop</button>
+                
+                <button type="button" id="btn-bench-delete">删除</button>
+                <button type="button" id="btn-bench-edit">改配置再跑</button>
+              </div>
+              <table class="bench-scores" id="bench-score-table">
+                <thead><tr><th>子集</th><th>acc</th><th>stderr</th></tr></thead>
+                <tbody id="bench-score-body"><tr><td colspan="3">尚无分数</td></tr></tbody>
+              </table>
+              <h2 style="margin-top:18px">日志</h2>
+              <pre class="bench-log" id="bench-log">（空）</pre>
+            </div>
           </div>
         </div>
       </div>
@@ -541,461 +846,560 @@
         </div>
       </div>
     </section>
-
-    <section id="env" class="panel">
-      <div class="card">
-        <h2>环境自检</h2>
-        <pre id="env-box">检查中…</pre>
-        <div class="row"><button type="button" id="btn-env">重新检查</button></div>
-      </div>
-    </section>
   </main>
+
   <script>
     const $ = (id) => document.getElementById(id);
-    const logView = $("log-view");
-    const shown = [];
-    let stick = true;
-    let scheduled = false;
-    const pending = [];
-    const lossPoints = [];
-    let plotEvery = 200;
-    let modeDefaults = null;
+    let defaultsMap = {};
+    let selectedId = null;
+    let currentTask = null;
     let trainMode = "pretrain";
-    let trainArch = "dense";
+    let trainArch = "tiny";
+    let logLines = [];
+    let lossPoints = [];
+    let eventSource = null;
+    let formDirty = false;
 
-    document.querySelectorAll("nav button").forEach((btn) => {
+    document.querySelectorAll(".page-tabs button").forEach((btn) => {
       btn.addEventListener("click", () => {
-        document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".page-tabs button").forEach((b) => {
+          b.classList.remove("active");
+          b.setAttribute("aria-selected", "false");
+        });
         document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
         btn.classList.add("active");
+        btn.setAttribute("aria-selected", "true");
         $(btn.dataset.tab).classList.add("active");
       });
     });
 
-    logView.addEventListener("scroll", () => {
-      stick = logView.scrollHeight - logView.scrollTop - logView.clientHeight < 48;
-    });
-
-    function renderLog() {
-      scheduled = false;
-      const batch = pending.splice(0, pending.length);
-      if (!batch.length) return;
-      for (const line of batch) shown.push(line);
-      while (shown.length > 400) shown.shift();
-      logView.textContent = shown.join("\n");
-      if (stick) logView.scrollTop = logView.scrollHeight;
-    }
-
-    function pushLine(line) {
-      pending.push(line);
-      if (!scheduled) {
-        scheduled = true;
-        requestAnimationFrame(renderLog);
+    function num(id) { return Number($(id).value); }
+    async function readError(res) {
+      try {
+        const j = await res.json();
+        return j.detail || JSON.stringify(j);
+      } catch (_) {
+        return res.statusText || String(res.status);
       }
     }
 
-    function clearLog() {
-      pending.length = 0;
-      shown.length = 0;
-      logView.textContent = "";
-      stick = true;
+    function statusDotClass(st) {
+      return ({ draft: "draft", running: "running", stopped: "stopped", finished: "finished", failed: "failed" })[st] || "";
     }
 
-    function clearLoss() {
-      lossPoints.length = 0;
-      drawLoss();
+    const PATH_PICK = {
+      "data-path": { title: "选择训练数据", filetypes: "JSONL|*.jsonl;All|*.*" },
+      "resume": { title: "选择 Resume checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+    };
+
+    async function pickPath(inputId) {
+      const el = $(inputId);
+      if (!el || el.disabled) return;
+      const cfg = PATH_PICK[inputId] || { title: "选择文件", filetypes: "All|*.*" };
+      try {
+        const r = await fetch("/api/pick-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: "file",
+            title: cfg.title,
+            initial: el.value.trim(),
+            filetypes: cfg.filetypes,
+          }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(typeof data.detail === "string" ? data.detail : "打开文件选择失败");
+          return;
+        }
+        if (data.path) el.value = data.path;
+      } catch (err) {
+        alert("打开文件选择失败：" + err);
+      }
     }
 
-    function addLossPoint(step, loss) {
-      const last = lossPoints[lossPoints.length - 1];
-      if (last && last.step === step) last.loss = loss;
-      else if (!last || step > last.step) lossPoints.push({ step, loss });
-      drawLoss();
+    document.querySelectorAll(".btn-browse").forEach((btn) => {
+      btn.addEventListener("click", () => pickPath(btn.dataset.for));
+    });
+
+        function setFormEnabled(editable) {
+      ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",
+       "max-steps","log-every","plot-every","grad-clip","save-loss-thresholds","stable-steps",
+       "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
+        $(id).disabled = !editable && id !== "task-name";
+      });
+      $("task-name").disabled = false;
+      document.querySelectorAll("#phase-config .btn-browse").forEach((btn) => {
+        btn.disabled = !editable;
+      });
+      $("mode-pretrain").disabled = !editable;
+      $("mode-sft").disabled = !editable;
+      $("arch-dense").disabled = !editable;
+      $("arch-moe").disabled = !editable || trainMode === "sft";
+      $("arch-tiny").disabled = !editable;
+      $("btn-save").disabled = !editable && currentTask && currentTask.status !== "draft";
+      // name always patchable
+      $("btn-save").disabled = false;
+    }
+
+    function applyArchUI(arch) {
+      trainArch = arch;
+      $("arch-dense").classList.toggle("active", arch === "dense");
+      $("arch-moe").classList.toggle("active", arch === "moe");
+      $("arch-tiny").classList.toggle("active", arch === "tiny");
+      $("arch-hint").textContent =
+        arch === "tiny" ? "Tiny：DenseLM d=64 L=2，CPU 冒烟。"
+        : arch === "moe" ? "MoE：MiniSeek-M0.1（1 shared + 32 routed，top-2，可训）。"
+        : "Dense：MiniSeek-D DenseLM。";
+    }
+
+    function applyModeUI(mode) {
+      trainMode = mode;
+      $("mode-pretrain").classList.toggle("active", mode === "pretrain");
+      $("mode-sft").classList.toggle("active", mode === "sft");
+      $("arch-moe").disabled = mode === "sft" || (currentTask && currentTask.status !== "draft");
+      if (mode === "sft" && trainArch === "moe") applyArchUI("dense");
+    }
+
+    function fillHparams(hp) {
+      const set = (id, v) => { if (v !== undefined && v !== null) $(id).value = v; };
+      set("data-path", hp.data_path);
+      set("batch-size", hp.batch_size);
+      set("max-seq-len", hp.max_seq_len);
+      set("lr", hp.lr);
+      set("min-lr", hp.min_lr);
+      set("warmup-steps", hp.warmup_steps);
+      set("epochs", hp.epochs);
+      set("max-steps", hp.max_steps);
+      set("log-every", hp.log_every);
+      set("plot-every", hp.plot_every);
+      set("grad-clip", hp.grad_clip);
+      set("save-loss-thresholds", hp.save_loss_thresholds);
+      set("stable-steps", hp.stable_steps);
+      set("save-every", hp.save_every);
+      set("aux-coef", hp.aux_coef);
+      set("resume", hp.resume || "");
+      set("init-ckpt", hp.init_ckpt || "");
+    }
+
+    function collectHparams() {
+      return {
+        data_path: $("data-path").value.trim(),
+        batch_size: num("batch-size"),
+        max_seq_len: num("max-seq-len"),
+        lr: num("lr"),
+        min_lr: num("min-lr"),
+        warmup_steps: num("warmup-steps"),
+        epochs: num("epochs"),
+        max_steps: num("max-steps"),
+        log_every: num("log-every"),
+        plot_every: num("plot-every"),
+        grad_clip: num("grad-clip"),
+        save_loss_thresholds: $("save-loss-thresholds").value.trim(),
+        stable_steps: num("stable-steps"),
+        save_every: num("save-every"),
+        aux_coef: num("aux-coef"),
+        resume: $("resume").value.trim(),
+        init_ckpt: $("init-ckpt").value.trim(),
+        arch: trainArch,
+        mode: trainMode,
+      };
+    }
+
+    function renderStatusBox(t) {
+      $("status-box").textContent =
+        `id: ${t.id}\nstatus: ${t.status}\narch: ${t.arch}  mode: ${t.mode}\n` +
+        `pid: ${t.pid ?? "—"}\nout: ${t.out_dir}\n` +
+        `created: ${t.created_at || "—"}  started: ${t.started_at || "—"}  ended: ${t.ended_at || "—"}\n` +
+        (t.error ? `error: ${t.error}\n` : "") +
+        (t.exit_code != null ? `exit: ${t.exit_code}` : "");
+      $("hdr-dot").className = "dot " + statusDotClass(t.status);
+      $("hdr-status").textContent = `${t.name} · ${t.status}`;
+    }
+
+    function clearLog() { logLines = []; $("log").textContent = ""; }
+    function pushLine(line) {
+      logLines.push(line);
+      if (logLines.length > 2000) logLines = logLines.slice(-2000);
+      $("log").textContent = logLines.join("\n");
+      $("log").scrollTop = $("log").scrollHeight;
     }
 
     function drawLoss() {
-      const canvas = $("loss-chart");
-      const wrap = canvas.parentElement;
-      const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(280, wrap.clientWidth - 32);
-      const h = 220;
-      canvas.width = Math.floor(w * dpr);
-      canvas.height = Math.floor(h * dpr);
-      canvas.style.width = w + "px";
-      canvas.style.height = h + "px";
+      const canvas = $("loss-canvas");
       const ctx = canvas.getContext("2d");
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const w = canvas.width, h = canvas.height;
       ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#f9fafb";
+      ctx.fillStyle = "#fafafa";
       ctx.fillRect(0, 0, w, h);
-      const caption = $("loss-caption");
       if (!lossPoints.length) {
-        caption.textContent = `每 ${plotEvery} 步记录一个点`;
-        ctx.fillStyle = "#6b7280";
-        ctx.font = "13px sans-serif";
-        ctx.fillText("满一个间隔后出现第一个点", 16, h / 2);
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillText("暂无 loss 点", 16, 24);
         return;
       }
-      const latest = lossPoints[lossPoints.length - 1];
-      caption.textContent =
-        `每 ${plotEvery} 步记录 · ${lossPoints.length} 个点 · ` +
-        `最近 step ${latest.step} loss ${latest.loss.toFixed(4)}`;
-
-      const pad = { l: 52, r: 16, t: 16, b: 28 };
+      const xs = lossPoints.map((p) => p.step);
       const ys = lossPoints.map((p) => p.loss);
-      let ymin = Math.min(...ys);
-      let ymax = Math.max(...ys);
-      if (ymin === ymax) { ymin -= 0.5; ymax += 0.5; }
-      const ypad = (ymax - ymin) * 0.1;
-      ymin -= ypad;
-      ymax += ypad;
-      let xmin = lossPoints[0].step;
-      let xmax = latest.step;
-      if (xmin === xmax) {
-        xmin = Math.max(0, xmax - plotEvery);
-        xmax += plotEvery;
-      }
-      const plotW = w - pad.l - pad.r;
-      const plotH = h - pad.t - pad.b;
-      const X = (s) => pad.l + ((s - xmin) / (xmax - xmin)) * plotW;
-      const Y = (v) => pad.t + (1 - (v - ymin) / (ymax - ymin)) * plotH;
-
-      ctx.strokeStyle = "#e5e7eb";
-      ctx.fillStyle = "#6b7280";
-      ctx.font = "11px sans-serif";
-      ctx.lineWidth = 1;
-      ctx.textAlign = "left";
-      for (let i = 0; i < 4; i++) {
-        const v = ymin + ((ymax - ymin) * i) / 3;
-        const y = Y(v);
-        ctx.beginPath();
-        ctx.moveTo(pad.l, y);
-        ctx.lineTo(w - pad.r, y);
-        ctx.stroke();
-        ctx.fillText(v.toFixed(2), 6, y + 4);
-      }
-      ctx.fillText(String(lossPoints[0].step), pad.l, h - 8);
-      ctx.textAlign = "right";
-      ctx.fillText(String(latest.step), w - pad.r, h - 8);
-
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const pad = 24;
+      const sx = (x) => pad + ((x - minX) / Math.max(1, maxX - minX)) * (w - 2 * pad);
+      const sy = (y) => h - pad - ((y - minY) / Math.max(1e-6, maxY - minY)) * (h - 2 * pad);
       ctx.strokeStyle = "#1d4ed8";
       ctx.lineWidth = 2;
       ctx.beginPath();
       lossPoints.forEach((p, i) => {
-        const x = X(p.step);
-        const y = Y(p.loss);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const x = sx(p.step), y = sy(p.loss);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       });
       ctx.stroke();
-      ctx.fillStyle = "#1d4ed8";
-      for (const p of lossPoints) {
-        ctx.beginPath();
-        ctx.arc(X(p.step), Y(p.loss), 3.5, 0, Math.PI * 2);
-        ctx.fill();
+    }
+
+    function applyMetrics(m) {
+      lossPoints = (m && m.loss) || [];
+      drawLoss();
+    }
+
+    function disconnectLogs() {
+      if (eventSource) { eventSource.close(); eventSource = null; }
+    }
+
+    function connectTaskLogs(taskId) {
+      disconnectLogs();
+      clearLog();
+      eventSource = new EventSource(`/api/tasks/${taskId}/logs`);
+      eventSource.addEventListener("log", (ev) => {
+        try { pushLine(JSON.parse(ev.data).line); } catch (_) {}
+      });
+      eventSource.addEventListener("metrics", (ev) => {
+        try { applyMetrics(JSON.parse(ev.data)); } catch (_) {}
+      });
+      eventSource.addEventListener("status", async (ev) => {
+        try {
+          const s = JSON.parse(ev.data);
+          if (selectedId === taskId) {
+            await selectTask(taskId, { keepForm: true, silent: true });
+          }
+          refreshTasks();
+        } catch (_) {}
+      });
+      eventSource.onerror = () => { /* browser will retry; ignore */ };
+    }
+
+    async function refreshTasks() {
+      const res = await fetch("/api/tasks");
+      const data = await res.json();
+      const ul = $("task-list");
+      ul.innerHTML = "";
+      for (const t of data.tasks || []) {
+        const li = document.createElement("li");
+        if (t.id === selectedId) li.classList.add("active");
+        li.innerHTML = `<span class="dot ${statusDotClass(t.status)}"></span>
+          <div class="meta"><div class="name"></div><div class="sub"></div></div>`;
+        li.querySelector(".name").textContent = t.name || t.id;
+        li.querySelector(".sub").textContent = `${t.arch} · ${t.status}`;
+        li.addEventListener("click", () => selectTask(t.id));
+        ul.appendChild(li);
+      }
+      const running = (data.tasks || []).find((t) => t.status === "running");
+      if (!selectedId) {
+        $("hdr-dot").className = "dot" + (running ? " on" : "");
+        $("hdr-status").textContent = running ? `运行中 · ${running.name}` : "空闲";
       }
     }
 
-    window.addEventListener("resize", drawLoss);
-
-    function renderStatus(s) {
-      const state = s.running ? `正在训练 (PID ${s.pid})` : "未运行";
-      const loss = s.loss == null ? "-" : Number(s.loss).toFixed(4);
-      const ppl = s.ppl == null ? "-" : Number(s.ppl).toFixed(2);
-      const lr = s.lr == null ? "-" : Number(s.lr).toExponential(2);
-      $("status-box").textContent =
-        `状态: ${state}\nStep: ${s.step || "-"}\nLoss: ${loss}\nPPL: ${ppl}\nLR: ${lr}\n硬件: ${s.gpu || "-"}`;
+    function isConfigPhase(status) {
+      return !status || status === "draft";
     }
 
-
-    function setLiveExpertVisible(show) {
-      const wrap = $("live-expert-wrap");
-      if (!wrap) return;
-      wrap.classList.toggle("hidden", !show);
+    function renderFrozenConfig(t) {
+      const hp = t.hparams || {};
+      const rows = [
+        ["状态", t.status || "-"],
+        ["架构", t.arch || "-"],
+        ["模式", t.mode || "-"],
+        ["数据", hp.data_path || "-"],
+        ["batch", hp.batch_size],
+        ["max_seq_len", hp.max_seq_len],
+        ["lr", hp.lr],
+        ["min_lr", hp.min_lr],
+        ["warmup", hp.warmup_steps],
+        ["epochs", hp.epochs],
+        ["max_steps", hp.max_steps],
+        ["plot_every", hp.plot_every],
+        ["out_dir", t.out_dir || "-"],
+      ];
+      const dl = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v == null || v === "" ? "-" : v}</dd>`).join("");
+      $("frozen-config").innerHTML = `<dl>${dl}</dl>`;
     }
 
-    function clearLiveExpert() {
-      const summary = $("live-expert-summary");
-      const bars = $("live-expert-bars");
-      if (summary) summary.textContent = trainArch === "moe"
-        ? "等待 MoE 训练日志（当前进程若未重启/续训则无实时行）…"
-        : "Dense：无路由专家负载（N/A）";
-      if (bars) bars.innerHTML = "";
+    function applyTaskPhase(t) {
+      const config = isConfigPhase(t && t.status);
+      $("phase-config").style.display = config ? "" : "none";
+      $("phase-run").style.display = config ? "none" : "";
+      $("phase-badge").textContent = config ? "配置" : "执行";
+      if (!config && t) renderFrozenConfig(t);
+      $("btn-stop").style.display = (t && t.status === "running") ? "" : "none";
     }
 
-    function renderLiveExpertLoad(data) {
-      const summary = $("live-expert-summary");
-      const bars = $("live-expert-bars");
-      if (!summary || !bars) return;
-      if (!data || !Array.isArray(data.fractions) || !data.fractions.length) {
-        summary.textContent = (data && data.message) || "N/A";
-        bars.innerHTML = "";
+    async function selectTask(id, opts = {}) {
+      selectedId = id;
+      const res = await fetch(`/api/tasks/${id}`);
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
         return;
       }
-      setLiveExpertVisible(true);
-      const maxF = Number(data.max_frac) || Math.max(...data.fractions, 0);
-      const step = data.step != null ? data.step : "-";
-      const win = data.window_steps != null ? data.window_steps : "?";
-      summary.textContent =
-        `step ${step} · 窗口 ${win} 步 · 路由 ${data.n_routed} · top-${data.top_k} · ${data.n_layers} 层\n` +
-        `最大 E${data.max_expert} = ${(Number(data.max_frac) * 100).toFixed(2)}% · ` +
-        `最小 E${data.min_expert} = ${(Number(data.min_frac) * 100).toFixed(2)}%`;
-      bars.innerHTML = "";
-      const scale = Math.max(maxF, 1e-9);
-      data.fractions.forEach((f, i) => {
-        const row = document.createElement("div");
-        row.className = "moe-bar-row";
-        if (i === data.max_expert) row.classList.add("hot");
-        if (i === data.min_expert) row.classList.add("cold");
-        const lab = document.createElement("div");
-        lab.className = "lab";
-        lab.textContent = `E${i}`;
-        const track = document.createElement("div");
-        track.className = "moe-bar-track";
-        const fill = document.createElement("div");
-        fill.className = "moe-bar-fill";
-        fill.style.width = `${(Number(f) / scale) * 100}%`;
-        track.appendChild(fill);
-        const pct = document.createElement("div");
-        pct.className = "pct";
-        pct.textContent = `${(Number(f) * 100).toFixed(2)}%`;
-        row.appendChild(lab);
-        row.appendChild(track);
-        row.appendChild(pct);
-        bars.appendChild(row);
-      });
-    }
-
-    function connectLogs() {
-      const es = new EventSource("/api/logs/stream");
-      es.addEventListener("hello", (ev) => {
-        const data = JSON.parse(ev.data);
-        clearLog();
-        plotEvery = data.plot_every || 200;
-        clearLoss();
-        clearLiveExpert();
-        setLiveExpertVisible(trainArch === "moe");
-        for (const point of data.loss || []) addLossPoint(point.step, point.loss);
-        if (data.expert_load) renderLiveExpertLoad(data.expert_load);
-        if (data.status) renderStatus(data.status);
-        $("live-dot").classList.add("on");
-        $("live-text").textContent = "日志已连接";
-      });
-      es.addEventListener("reset", (ev) => {
-        const data = JSON.parse(ev.data);
-        if (data.plot_every) plotEvery = data.plot_every;
-        clearLog();
-        clearLoss();
-        clearLiveExpert();
-        setLiveExpertVisible(trainArch === "moe");
-      });
-      es.addEventListener("log", (ev) => pushLine(JSON.parse(ev.data).line));
-      es.addEventListener("loss", (ev) => {
-        const point = JSON.parse(ev.data);
-        if (point.every) plotEvery = point.every;
-        addLossPoint(point.step, point.loss);
-      });
-      es.addEventListener("expert_load", (ev) => {
-        renderLiveExpertLoad(JSON.parse(ev.data));
-      });
-      es.addEventListener("status", (ev) => renderStatus(JSON.parse(ev.data)));
-      es.onerror = () => {
-        $("live-dot").classList.remove("on");
-        $("live-text").textContent = "日志连接中断，正在重连";
-      };
-    }
-
-    async function refreshStatus() {
-      const res = await fetch("/api/status");
-      renderStatus(await res.json());
-    }
-
-    function fillSelect(el, files, emptyLabel) {
-      const current = el.value;
-      el.innerHTML = "";
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = emptyLabel;
-      el.appendChild(empty);
-      for (const file of files) {
-        const opt = document.createElement("option");
-        opt.value = file;
-        opt.textContent = file;
-        el.appendChild(opt);
+      const t = await res.json();
+      currentTask = t;
+      $("task-detail-empty").style.display = "none";
+      $("task-detail").style.display = "";
+      $("detail-title").textContent = t.name || t.id;
+      if (!opts.keepForm || !formDirty) {
+        $("task-name").value = t.name || "";
+        applyModeUI(t.mode || "pretrain");
+        applyArchUI(t.arch || "dense");
+        fillHparams(t.hparams || {});
+        formDirty = false;
       }
-      if ([...el.options].some((opt) => opt.value === current)) el.value = current;
-    }
-
-    async function refreshCheckpoints() {
-      const res = await fetch("/api/checkpoints");
-      const files = (await res.json()).files || [];
-      fillSelect($("resume"), files, trainMode === "sft" ? "不续训（用上方初始化）" : "不续训");
-      fillSelect($("init-ckpt"), files, "选择预训练 best.pt");
-      fillSelect($("ckpt-select"), files, "选择 Checkpoint");
-      // SFT 默认勾上 stage0/best.pt
-      if (trainMode === "sft" && modeDefaults && modeDefaults.sft && modeDefaults.sft.init_ckpt) {
-        const prefer = modeDefaults.sft.init_ckpt;
-        if ([...$("init-ckpt").options].some((opt) => opt.value === prefer)) {
-          $("init-ckpt").value = prefer;
-        }
+      setFormEnabled(t.status === "draft");
+      applyTaskPhase(t);
+      renderStatusBox(t);
+      if (!isConfigPhase(t.status)) {
+        await refreshTaskCheckpoints();
+        const metrics = await (await fetch(`/api/tasks/${id}/metrics`)).json();
+        applyMetrics(metrics);
+        if (!opts.silent) connectTaskLogs(id);
+      } else {
+        disconnectLogs();
+        $("log").textContent = "";
+        lossPoints = [];
+        drawLoss();
       }
-    }
-
-    function applyArch(arch) {
-      trainArch = arch === "moe" ? "moe" : "dense";
-      $("arch-dense").classList.toggle("active", trainArch === "dense");
-      $("arch-moe").classList.toggle("active", trainArch === "moe");
-      if (trainMode === "pretrain" && modeDefaults) {
-        const key = trainArch === "moe" ? "pretrain_moe" : "pretrain";
-        const cfg = modeDefaults[key] || modeDefaults.pretrain || {};
-        if (cfg.out_dir) $("out-dir").value = cfg.out_dir;
-        if (cfg.data_path) $("data-path").value = cfg.data_path;
-        if (cfg.max_seq_len != null) $("seq-len").value = cfg.max_seq_len;
-        if (cfg.stable_steps != null) $("stable-steps").value = cfg.stable_steps;
-      }
-      $("arch-hint").textContent = trainArch === "moe"
-        ? "MoE：MiniSeek-M0.1（1 shared + 32 routed, top-2, h=512）≈150M；默认写到 checkpoints/stage1。"
-        : "Dense：MiniSeek-D FFN；预训练默认写到 checkpoints/stage0。";
-      setLiveExpertVisible(trainArch === "moe");
-      if (trainArch !== "moe") clearLiveExpert();
-    }
-
-    function applyMode(mode) {
-      trainMode = mode === "sft" ? "sft" : "pretrain";
-      $("mode-pretrain").classList.toggle("active", trainMode === "pretrain");
-      $("mode-sft").classList.toggle("active", trainMode === "sft");
-      const cfg = (modeDefaults && modeDefaults[trainMode]) || {};
-      if (cfg.data_path) $("data-path").value = cfg.data_path;
-      if (cfg.out_dir) $("out-dir").value = cfg.out_dir;
-      if (cfg.lr != null) $("lr").value = cfg.lr;
-      if (cfg.min_lr != null) $("min-lr").value = cfg.min_lr;
-      if (cfg.warmup_steps != null) $("warmup").value = cfg.warmup_steps;
-      if (cfg.max_seq_len != null) $("seq-len").value = cfg.max_seq_len;
-      if (cfg.stable_steps != null) $("stable-steps").value = cfg.stable_steps;
-      if (cfg.save_loss_thresholds) $("thresholds").value = cfg.save_loss_thresholds;
-      $("init-ckpt-wrap").style.display = trainMode === "sft" ? "block" : "none";
-      $("mode-hint").textContent = trainMode === "sft"
-        ? "SFT：用对话数据把 base 教成会答问；默认写到 checkpoints/sft，需从 stage0/best.pt 初始化。"
-        : "预训练：学语言；Dense→stage0，MoE→stage1。";
-      // SFT 暂不支持 MoE
-      $("arch-moe").disabled = trainMode === "sft";
-      $("arch-row").style.opacity = trainMode === "sft" ? "0.5" : "1";
-      if (trainMode === "sft") applyArch("dense");
-      else applyArch(trainArch);
+      refreshTasks();
       refreshCheckpoints();
     }
 
-    async function refreshProcs() {
-      const res = await fetch("/api/train/processes");
+    async function refreshTaskCheckpoints() {
+      if (!selectedId) return;
+      const res = await fetch(`/api/tasks/${selectedId}/checkpoints`);
       const data = await res.json();
-      const sel = $("proc-select");
-      const current = sel.value;
+      const sel = $("task-ckpt-select");
       sel.innerHTML = "";
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = (data.processes || []).length ? "选择进程" : "没有扫到训练进程";
-      sel.appendChild(empty);
-      for (const proc of data.processes || []) {
-        const opt = document.createElement("option");
-        opt.value = String(proc.pid);
-        opt.textContent = proc.label + (proc.attached ? " · 已接入" : "");
-        sel.appendChild(opt);
+      const files = data.files || [];
+      if (!files.length) {
+        const o = document.createElement("option");
+        o.textContent = "暂无 ckpt";
+        o.value = "";
+        sel.appendChild(o);
+        return;
       }
-      const prefer = data.attached_pid ? String(data.attached_pid) : current;
-      if ([...sel.options].some((opt) => opt.value === prefer)) sel.value = prefer;
+      for (const f of files) {
+        const o = document.createElement("option");
+        o.value = f;
+        o.textContent = f.split(/[/\\]/).pop();
+        sel.appendChild(o);
+      }
+    }
+
+    function fillSelect(el, files, emptyLabel) {
+      el.innerHTML = "";
+      if (!files.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = emptyLabel;
+        el.appendChild(o);
+        return;
+      }
+      for (const f of files) {
+        const o = document.createElement("option");
+        o.value = f;
+        o.textContent = f;
+        el.appendChild(o);
+      }
+    }
+
+    async function refreshCheckpoints() {
+      let files = [];
+      if (selectedId) {
+        const res = await fetch(`/api/tasks/${selectedId}/checkpoints`);
+        if (res.ok) files = (await res.json()).files || [];
+      }
+      if (!files.length) {
+        const res = await fetch("/api/checkpoints");
+        if (res.ok) files = (await res.json()).files || [];
+      }
+      fillSelect($("ckpt-select"), files, "无可用 checkpoint");
+      // Prefer best.pt then last.pt from current task
+      const prefer = files.find((f) => f.endsWith("best.pt")) || files.find((f) => f.endsWith("last.pt"));
+      if (prefer) $("ckpt-select").value = prefer;
     }
 
     async function refreshEnv() {
-      const res = await fetch("/api/env");
-      $("env-box").textContent = (await res.json()).text;
-    }
-
-    function num(id) { return Number($(id).value); }
-
-    async function readError(res) {
       try {
-        const body = await res.json();
-        return body.detail || body.message || res.statusText;
-      } catch (_) {
-        return res.statusText;
-      }
+        const res = await fetch("/api/env");
+        if (!res.ok) return;
+        const text = (await res.json()).text || "";
+        if ($("hdr-env")) $("hdr-env").textContent = text;
+      } catch (_) { /* ignore */ }
     }
 
-    $("mode-pretrain").addEventListener("click", () => applyMode("pretrain"));
-    $("mode-sft").addEventListener("click", () => applyMode("sft"));
-    $("arch-dense").addEventListener("click", () => { if (trainMode === "pretrain") applyArch("dense"); });
-    $("arch-moe").addEventListener("click", () => { if (trainMode === "pretrain") applyArch("moe"); });
-
-    $("btn-start").addEventListener("click", async () => {
-      $("action-msg").textContent = "正在启动…";
-      const res = await fetch("/api/train/start", {
+    $("btn-new-task").addEventListener("click", async () => {
+      const arch = trainArch || "tiny";
+      const base = defaultsMap[arch] || defaultsMap.tiny || {};
+      const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: trainMode,
-          arch: trainArch,
-          aux_coef: 0.01,
-          data_path: $("data-path").value,
-          out_dir: $("out-dir").value,
-          batch_size: num("batch-size"),
-          max_seq_len: num("seq-len"),
-          lr: num("lr"),
-          min_lr: num("min-lr"),
-          warmup_steps: num("warmup"),
-          epochs: num("epochs"),
-          max_steps: num("max-steps"),
-          log_every: num("log-every"),
-          plot_every: num("plot-every"),
-          grad_clip: num("grad-clip"),
-          save_loss_thresholds: $("thresholds").value,
-          stable_steps: num("stable-steps"),
-          save_every: num("save-every"),
-          resume: $("resume").value,
-          init_ckpt: trainMode === "sft" ? $("init-ckpt").value : "",
-          compile: $("compile").checked,
+          name: `${arch}-pretrain`,
+          arch,
+          mode: "pretrain",
+          hparams: base,
+          uniquify: true,
         }),
       });
-      $("action-msg").textContent = res.ok ? (await res.json()).message : await readError(res);
-      refreshStatus();
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      const t = await res.json();
+      await refreshTasks();
+      await selectTask(t.id);
+      $("action-msg").textContent = `已创建 ${t.id}`;
     });
 
-    $("btn-scan-proc").addEventListener("click", refreshProcs);
-    $("btn-attach").addEventListener("click", async () => {
-      const pid = Number($("proc-select").value);
-      if (!pid) {
-        $("proc-msg").textContent = "先选一个进程。";
-        return;
+    ["arch-dense", "arch-moe", "arch-tiny"].forEach((id) => {
+      $(id).addEventListener("click", () => {
+        if (currentTask && currentTask.status !== "draft") return;
+        const arch = $(id).dataset.arch;
+        applyArchUI(arch);
+        const base = defaultsMap[arch] || {};
+        fillHparams({ ...(currentTask && currentTask.hparams) || {}, ...base, ...collectHparams(), ...base });
+        formDirty = true;
+      });
+    });
+    $("mode-pretrain").addEventListener("click", () => {
+      if (currentTask && currentTask.status !== "draft") return;
+      applyModeUI("pretrain");
+      formDirty = true;
+    });
+    $("mode-sft").addEventListener("click", () => {
+      if (currentTask && currentTask.status !== "draft") return;
+      applyModeUI("sft");
+      const base = defaultsMap.sft || {};
+      fillHparams({ ...collectHparams(), ...base });
+      formDirty = true;
+    });
+
+    $("btn-save").addEventListener("click", async () => {
+      if (!selectedId) return;
+      const body = { name: $("task-name").value.trim() };
+      if (currentTask && currentTask.status === "draft") {
+        body.arch = trainArch;
+        body.mode = trainMode;
+        body.hparams = collectHparams();
       }
-      $("proc-msg").textContent = "正在接入…";
-      const res = await fetch("/api/train/attach", {
-        method: "POST",
+      const res = await fetch(`/api/tasks/${selectedId}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pid, plot_every: num("plot-every") }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
-        $("proc-msg").textContent = await readError(res);
+        $("action-msg").textContent = await readError(res);
         return;
       }
-      const body = await res.json();
-      $("proc-msg").textContent = body.message;
-      if (body.status) renderStatus(body.status);
-      refreshProcs();
+      $("action-msg").textContent = "已保存";
+      formDirty = false;
+      await selectTask(selectedId);
+    });
+
+    $("btn-start").addEventListener("click", async () => {
+      if (!selectedId) return;
+      if (currentTask && currentTask.status === "draft") {
+        const saveRes = await fetch(`/api/tasks/${selectedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: $("task-name").value.trim(),
+            arch: trainArch,
+            mode: trainMode,
+            hparams: collectHparams(),
+          }),
+        });
+        if (!saveRes.ok) {
+          $("action-msg").textContent = await readError(saveRes);
+          return;
+        }
+      }
+      const res = await fetch(`/api/tasks/${selectedId}/start`, { method: "POST" });
+      $("action-msg").textContent = res.ok ? "已启动" : await readError(res);
+      await selectTask(selectedId);
+      refreshTasks();
     });
 
     $("btn-stop").addEventListener("click", async () => {
-      const res = await fetch("/api/train/stop", { method: "POST" });
-      const body = await res.json();
-      $("action-msg").textContent = body.message;
-      if (body.status) renderStatus(body.status);
+      if (!selectedId) return;
+      const res = await fetch(`/api/tasks/${selectedId}/stop`, { method: "POST" });
+      $("action-msg").textContent = res.ok ? "已停止" : await readError(res);
+      await selectTask(selectedId);
+      refreshTasks();
     });
 
-    const chatState = { messages: [], streaming: false, abort: null };
+    async function deleteSelectedTask() {
+      if (!selectedId) return;
+      if (!confirm("确认删除该 Task 目录？不可恢复。")) return;
+      const res = await fetch(`/api/tasks/${selectedId}`, { method: "DELETE" });
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      selectedId = null;
+      currentTask = null;
+      disconnectLogs();
+      $("task-detail").style.display = "none";
+      $("task-detail-empty").style.display = "";
+      $("action-msg").textContent = "已删除";
+      refreshTasks();
+    }
+    $("btn-delete").addEventListener("click", deleteSelectedTask);
+    $("btn-delete-draft").addEventListener("click", deleteSelectedTask);
 
+    $("btn-new-from-run").addEventListener("click", async () => {
+      if (!currentTask) return;
+      const arch = currentTask.arch || "tiny";
+      const mode = currentTask.mode || "pretrain";
+      const hp = { ...(currentTask.hparams || {}) };
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: currentTask.name || `${arch}-pretrain`,
+          arch,
+          mode,
+          hparams: hp,
+          uniquify: true,
+        }),
+      });
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      const t = await res.json();
+      await refreshTasks();
+      await selectTask(t.id);
+      $("action-msg").textContent = `已用同配置新建 ${t.id}，可改参数后再 Start`;
+    });
+
+
+    $("btn-refresh-task-ckpt").addEventListener("click", refreshTaskCheckpoints);
+
+    // Chat
+    const chatState = { messages: [], streaming: false, abort: null };
     function setChatStatus(text, on) {
       $("chat-status-text").textContent = text;
       $("chat-dot").classList.toggle("on", !!on);
     }
-
     function renderChat() {
       const box = $("chat-messages");
       const empty = $("chat-empty");
@@ -1015,26 +1419,11 @@
       }
       box.scrollTop = box.scrollHeight;
     }
-
     function autosizeInput() {
       const el = $("chat-input");
       el.style.height = "auto";
       el.style.height = Math.min(160, el.scrollHeight) + "px";
     }
-
-    async function loadCheckpoint() {
-      $("load-msg").textContent = "正在加载…";
-      setChatStatus("加载中…", false);
-      const res = await fetch("/api/infer/load", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ckpt_path: $("ckpt-select").value }),
-      });
-      const msg = res.ok ? (await res.json()).message : await readError(res);
-      $("load-msg").textContent = msg;
-      setChatStatus(res.ok ? msg : "加载失败", res.ok);
-    }
-
     function parseSseChunk(buffer) {
       const events = [];
       const parts = buffer.split("\n\n");
@@ -1052,7 +1441,24 @@
       }
       return { events, rest };
     }
-
+    async function loadCheckpoint() {
+      $("load-msg").textContent = "正在加载…";
+      setChatStatus("加载中…", false);
+      const path = ($("ckpt-manual").value || "").trim() || $("ckpt-select").value;
+      const res = await fetch("/api/infer/load", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ckpt_path: path }),
+      });
+      const msg = res.ok ? (await res.json()).message : await readError(res);
+      $("load-msg").textContent = msg;
+      setChatStatus(res.ok ? msg : "加载失败", res.ok);
+      if ($("cont-load-msg")) $("cont-load-msg").textContent = msg;
+      if ($("cont-status-text")) {
+        $("cont-status-text").textContent = res.ok ? msg : "加载失败";
+        $("cont-dot").classList.toggle("on", !!res.ok);
+      }
+    }
     async function sendChat() {
       if (chatState.streaming) return;
       const text = ($("chat-input").value || "").trim();
@@ -1134,6 +1540,13 @@
     }
 
     $("btn-refresh-ckpt").addEventListener("click", refreshCheckpoints);
+    
+    // ckpt-select-sync: choosing from list fills the path box
+    $("ckpt-select").addEventListener("change", () => {
+      const v = $("ckpt-select").value;
+      if (v) $("ckpt-manual").value = v;
+    });
+
     $("btn-load").addEventListener("click", loadCheckpoint);
     $("btn-clear-chat").addEventListener("click", () => {
       if (chatState.streaming && chatState.abort) chatState.abort.abort();
@@ -1151,23 +1564,814 @@
         sendChat();
       }
     });
-    $("btn-env").addEventListener("click", refreshEnv);
-
     async function boot() {
-      modeDefaults = await (await fetch("/api/defaults")).json();
-      trainArch = modeDefaults.arch || "dense";
-      applyMode(modeDefaults.mode || "pretrain");
-      connectLogs();
-      drawLoss();
-      refreshStatus();
-      refreshProcs();
-      refreshEnv();
-      setInterval(refreshStatus, 1000);
-      setInterval(refreshProcs, 5000);
+      defaultsMap = await (await fetch("/api/defaults")).json();
+      trainArch = "tiny";
+      applyArchUI("tiny");
+      applyModeUI("pretrain");
+      await refreshTasks();
+      await refreshCheckpoints();
+      await refreshEnv();
+      setInterval(refreshTasks, 3000);
+      setInterval(refreshEnv, 5000);
     }
     boot();
+  
+    // --- 续写（预训练前缀续写）---
+    const contState = { streaming: false, abort: null, prefix: "", gen: "" };
+    function setContStatus(text, on) {
+      $("cont-status-text").textContent = text;
+      $("cont-dot").classList.toggle("on", !!on);
+    }
+    function renderContOut() {
+      const box = $("cont-out");
+      const empty = $("cont-empty");
+      if (!contState.prefix && !contState.gen) {
+        box.innerHTML = "";
+        const span = document.createElement("span");
+        span.className = "chat-empty";
+        span.id = "cont-empty";
+        span.textContent = "加载预训练权重后，输入前缀点「生成续写」。";
+        box.appendChild(span);
+        box.classList.remove("streaming");
+        return;
+      }
+      box.innerHTML = "";
+      const p = document.createElement("span");
+      p.className = "prefix";
+      p.textContent = contState.prefix;
+      const g = document.createElement("span");
+      g.className = "gen";
+      g.textContent = contState.gen;
+      box.appendChild(p);
+      box.appendChild(g);
+      box.classList.toggle("streaming", !!contState.streaming);
+      box.scrollTop = box.scrollHeight;
+    }
+    async function refreshContCheckpoints() {
+      let list = [];
+      try {
+        const res = await fetch("/api/checkpoints");
+        if (res.ok) list = (await res.json()).files || [];
+      } catch (_) { list = []; }
+      const sel = $("cont-ckpt-select");
+      const cur = sel.value;
+      sel.innerHTML = "";
+      if (!list.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = "无可用 checkpoint";
+        sel.appendChild(o);
+      } else {
+        for (const f of list) {
+          const path = typeof f === "string" ? f : (f.path || f);
+          const o = document.createElement("option");
+          o.value = path;
+          o.textContent = path;
+          sel.appendChild(o);
+        }
+      }
+      if (cur) sel.value = cur;
+      else if (list.length) {
+        const prefer = list.find((x) => String(typeof x === "string" ? x : x.path || "").includes("best.pt"));
+        const path = prefer ? (typeof prefer === "string" ? prefer : prefer.path) : (typeof list[0] === "string" ? list[0] : list[0].path);
+        if (path) { sel.value = path; $("cont-ckpt-manual").value = path; }
+      }
+    }
+    $("cont-ckpt-select").addEventListener("change", () => {
+      const v = $("cont-ckpt-select").value;
+      if (v) $("cont-ckpt-manual").value = v;
+    });
+    async function loadContCheckpoint() {
+      $("cont-load-msg").textContent = "正在加载…";
+      setContStatus("加载中…", false);
+      const path = ($("cont-ckpt-manual").value || "").trim() || $("cont-ckpt-select").value;
+      const res = await fetch("/api/infer/load", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ckpt_path: path }),
+      });
+      const msg = res.ok ? (await res.json()).message : await readError(res);
+      $("cont-load-msg").textContent = msg;
+      setContStatus(res.ok ? msg : "加载失败", res.ok);
+      if ($("load-msg")) $("load-msg").textContent = msg;
+      if (typeof setChatStatus === "function") setChatStatus(res.ok ? msg : "加载失败", res.ok);
+      if (res.ok && path) {
+        if ($("ckpt-manual")) $("ckpt-manual").value = path;
+        if ($("cont-ckpt-manual")) $("cont-ckpt-manual").value = path;
+      }
+    }
+    async function runContinue() {
+      if (contState.streaming) return;
+      const prefix = ($("cont-prefix").value || "");
+      if (!prefix.trim()) { alert("请先输入前缀"); return; }
+      contState.prefix = prefix;
+      contState.gen = "";
+      contState.streaming = true;
+      renderContOut();
+      $("btn-cont-run").style.display = "none";
+      $("btn-cont-stop").style.display = "";
+      const controller = new AbortController();
+      contState.abort = controller;
+      setContStatus("生成中…", true);
+      try {
+        const res = await fetch("/api/infer/continue/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            prompt: prefix,
+            max_new_tokens: num("cont-gen-len"),
+            temperature: num("cont-temperature"),
+            top_k: num("cont-top-k"),
+            seed: num("cont-seed"),
+          }),
+        });
+        if (!res.ok) {
+          contState.gen = await readError(res);
+          renderContOut();
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parsed = parseSseChunk(buf);
+          buf = parsed.rest;
+          for (const ev of parsed.events) {
+            if (ev.event === "token" && ev.data.text) {
+              contState.gen += ev.data.text;
+              renderContOut();
+            } else if (ev.event === "error") {
+              contState.gen += (contState.gen ? "\n" : "") + ("错误: " + (ev.data.message || "unknown"));
+              renderContOut();
+            } else if (ev.event === "done") {
+              setContStatus(
+                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s`,
+                true
+              );
+            }
+          }
+        }
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          if (!contState.gen) contState.gen = "（已停止）";
+        } else {
+          contState.gen += (contState.gen ? "\n" : "") + String(err);
+        }
+        renderContOut();
+      } finally {
+        contState.streaming = false;
+        contState.abort = null;
+        $("btn-cont-run").style.display = "";
+        $("btn-cont-stop").style.display = "none";
+        $("cont-out").classList.remove("streaming");
+      }
+    }
+    $("btn-cont-load").addEventListener("click", loadContCheckpoint);
+    $("btn-cont-refresh-ckpt").addEventListener("click", refreshContCheckpoints);
+    $("btn-cont-run").addEventListener("click", runContinue);
+    $("btn-cont-stop").addEventListener("click", () => { if (contState.abort) contState.abort.abort(); });
+    $("btn-cont-clear").addEventListener("click", () => {
+      contState.prefix = "";
+      contState.gen = "";
+      renderContOut();
+    });
+    refreshContCheckpoints().catch(() => {});
 
-    // ---- MoE expert load probe ----
+    // --- 架构可视化（按设计规格，不加载 ckpt）---
+    let archData = null;
+    let archSelectedLayer = null;
+    let archViewMode = "standard";
+    let archPreset = "dense";
+
+    const ARCH_PRESET_HINT = {
+      tiny: "Tiny：冒烟档 DenseLM，d=64 L=2，适合 CPU。",
+      dense: "Dense：MiniSeek-D0.1，d=512 L=8 FFN=2048。",
+      moe: "MoE：MiniSeek-M0.1，同主干 + 1 shared / 32 routed / top-2。",
+    };
+
+    function fmtParams(n) {
+      if (n == null) return "-";
+      if (n === 0) return "结构（无独立参数）";
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+      return String(n);
+    }
+
+    function setArchMsg(text, isErr) {
+      const el = $("arch-msg");
+      el.textContent = text || "";
+      el.classList.toggle("err", !!isErr);
+    }
+
+    function closeArchDrawer() {
+      archSelectedLayer = null;
+      const drawer = $("arch-drawer");
+      if (drawer) drawer.hidden = true;
+      document.querySelectorAll(".arch-block.layer").forEach((el) => el.classList.remove("selected"));
+      document.querySelectorAll(".arch-layer-group").forEach((el) => el.classList.remove("selected"));
+    }
+
+    function openArchDrawer(block) {
+      archSelectedLayer = block.id;
+      const drawer = $("arch-drawer");
+      drawer.hidden = false;
+      $("arch-drawer-title").textContent = block.label || block.id;
+      const body = $("arch-drawer-body");
+      const parts = (block.parts || []).filter((p) => p.kind !== "add" && !(p.id || "").startsWith("add_"));
+      body.innerHTML = `<p class="field-hint">本层参数 ${fmtParams(block.params)}</p>` +
+        parts.map((p) => {
+          const lines = [];
+          if (p.shape_in) lines.push(`输入: ${p.shape_in}`);
+          if (p.shape_out) lines.push(`输出: ${p.shape_out}`);
+          if (p.params != null) lines.push(`参数: ${fmtParams(p.params)}`);
+          const weights = p.weight_shapes || [];
+          weights.forEach((w) => {
+            if (!w) return;
+            const name = w.name || "weight";
+            const shape = w.shape || "";
+            lines.push(`${name}: ${shape}`);
+          });
+          if (p.detail) {
+            Object.entries(p.detail).forEach(([k, v]) => {
+              if (v != null) lines.push(`${k}: ${v}`);
+            });
+          }
+          const facts = lines.map((line) => `<div class="fact">${line}</div>`).join("");
+          return `<div class="arch-part"><div class="lbl">${p.label}</div>${facts}</div>`;
+        }).join("");
+      document.querySelectorAll(".arch-block.layer").forEach((el) => {
+        el.classList.toggle("selected", el.dataset.id === block.id);
+      });
+    }
+
+    function appendConnector(canvas) {
+      const c = document.createElement("div");
+      c.className = "arch-connector";
+      canvas.appendChild(c);
+    }
+
+    function makeBlock(b, extraClass) {
+      const el = document.createElement("div");
+      const isAdd = b.kind === "add" || (b.id || "").startsWith("add_");
+      const isStruct = !isAdd && ((b.params === 0) || (b.id || "").startsWith("residual"));
+      const isPart = extraClass === "part";
+      el.className = "arch-block"
+        + (extraClass ? " " + extraClass : "")
+        + (b.kind === "layer" ? " layer" : "")
+        + (isAdd ? " add-node" : "")
+        + (isStruct ? " struct" : "");
+      el.dataset.id = b.id;
+      if (isAdd) {
+        el.innerHTML = `<div class="lbl">⊕</div>`;
+        return el;
+      }
+      const shapeIn = b.shape_in || "";
+      const shapeOut = b.shape_out || "";
+      let shapeHtml = "";
+      if (shapeIn && shapeOut && shapeOut !== shapeIn) {
+        shapeHtml = `<div class="shape">${shapeIn} → ${shapeOut}</div>`;
+      } else if (shapeIn) {
+        shapeHtml = `<div class="shape">${shapeIn}</div>`;
+      }
+      if (isPart) {
+        el.innerHTML = `<div class="lbl">${b.label}</div>${shapeHtml}`;
+        return el;
+      }
+      const detailBits = b.detail ? Object.entries(b.detail).filter(([,v]) => v != null)
+        .map(([k,v]) => `${k}=${v}`).join(" · ") : "";
+      el.innerHTML = `<div class="lbl">${b.label}</div>${shapeHtml}<div class="sub">${fmtParams(b.params)}${b.tied ? " · tied" : ""}${detailBits ? " · " + detailBits : ""}</div>`;
+      return el;
+    }
+
+    function defaultResiduals() {
+      return [
+        { id: "attn", from: "layer_in", to: "add_attn", label: "x" },
+        { id: "ffn", from: "post_attn", to: "add_ffn", label: "x" },
+      ];
+    }
+
+    function drawLayerResiduals(group, residuals) {
+      const old = group.querySelector("svg.arch-residual-svg");
+      if (old) old.remove();
+      const list = residuals && residuals.length ? residuals : defaultResiduals();
+      const gRect = group.getBoundingClientRect();
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "arch-residual-svg");
+      svg.setAttribute("width", String(group.clientWidth));
+      svg.setAttribute("height", String(group.clientHeight));
+      const gutterX = group.clientWidth - 28;
+      const markerId = "arch-arrow-" + (group.dataset.id || "x");
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      marker.setAttribute("id", markerId);
+      marker.setAttribute("markerWidth", "8");
+      marker.setAttribute("markerHeight", "8");
+      marker.setAttribute("refX", "6");
+      marker.setAttribute("refY", "3");
+      marker.setAttribute("orient", "auto");
+      const tip = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      tip.setAttribute("d", "M0,0 L6,3 L0,6 Z");
+      tip.setAttribute("fill", "#f0a030");
+      marker.appendChild(tip);
+      defs.appendChild(marker);
+      svg.appendChild(defs);
+      // Logical residual sources map to visible block edges (style A).
+      // Attn: x = layer input (anchored at attn_norm right). FFN: x = post-attn add output (add_attn).
+      // Separate gutter X so the two verticals are not one continuous bus from the top.
+      const fromNode = { layer_in: "attn_norm", post_attn: "add_attn" };
+      list.forEach((r, i) => {
+        const fromId = fromNode[r.from] || r.from;
+        const fromEl = group.querySelector(`[data-node="${fromId}"]`);
+        const toEl = group.querySelector(`[data-node="${r.to}"]`);
+        if (!fromEl || !toEl) return;
+        const fr = fromEl.getBoundingClientRect();
+        const tr = toEl.getBoundingClientRect();
+        const startX = fr.right - gRect.left;
+        // FFN residual leaves add_attn below center so it does not overlap Attn arrow into ⊕.
+        const isFfnFromAdd = fromId === "add_attn" || r.from === "post_attn" || r.id === "ffn";
+        const startY = fr.top - gRect.top + fr.height / 2 + (isFfnFromAdd ? 12 : 0);
+        const endX = tr.left - gRect.left + tr.width / 2;
+        const endY = tr.top - gRect.top + tr.height / 2;
+        // Outer trunk for attn residual; inner parallel trunk for FFN (starts at ⊕).
+        const gx = gutterX - i * 16;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const d = `M ${startX} ${startY} H ${gx} V ${endY} H ${endX}`;
+        path.setAttribute("d", d);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "#f0a030");
+        path.setAttribute("stroke-width", "2.5");
+        path.setAttribute("marker-end", `url(#${markerId})`);
+        path.setAttribute("data-residual", r.id || String(i));
+        svg.appendChild(path);
+        const midY = (startY + endY) / 2;
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", String(gx + 8));
+        label.setAttribute("y", String(midY));
+        label.setAttribute("fill", "#f0a030");
+        label.setAttribute("font-size", "12");
+        label.setAttribute("font-weight", "600");
+        label.setAttribute("dominant-baseline", "middle");
+        label.textContent = r.label || "x";
+        svg.appendChild(label);
+      });
+      group.appendChild(svg);
+    }
+
+    function renderArch(data) {
+      if (data) archData = data;
+      if (!archData) return;
+      data = archData;
+      const canvas = $("arch-canvas");
+      canvas.innerHTML = "";
+      const cfg = data.config || {};
+      const meta = data.meta || {};
+      $("arch-summary").style.display = "block";
+      $("arch-summary").innerHTML =
+        `<div><b>${meta.release_name || cfg.arch || "-"}</b> · d=${cfg.d_model || "-"} · L=${cfg.n_layers || "-"} · heads=${cfg.n_heads || "-"}</div>` +
+        `<div>设计参数量 ${fmtParams(data.total_params)}${data.tie_word_embeddings ? " · tie embeddings" : ""}</div>` +
+        `<div class="field-hint">来源=设计规格 · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
+
+      const blocks = data.blocks || [];
+      const tail = data.tail || [];
+      const embed = blocks.filter((b) => b.kind === "embedding");
+      const layers = blocks.filter((b) => b.kind === "layer");
+      let first = true;
+      const pushNode = (nodeEl) => {
+        if (!first) appendConnector(canvas);
+        first = false;
+        canvas.appendChild(nodeEl);
+      };
+
+      if (archViewMode === "compact") {
+        embed.forEach((b) => pushNode(makeBlock(b)));
+        if (layers.length) {
+          const total = layers.reduce((s, b) => s + (b.params || 0), 0);
+          const el = makeBlock({
+            id: "layers-compact",
+            kind: "layer",
+            label: `Transformer × ${layers.length}`,
+            params: total,
+          }, "compact-layers");
+          el.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            openArchDrawer({
+              id: "layers-compact",
+              label: `Transformer × ${layers.length}`,
+              params: total,
+              parts: layers.map((L) => ({
+                id: L.id,
+                label: L.label,
+                params: L.params,
+                detail: { parts: (L.parts || []).map((p) => p.label).join(", ") },
+              })),
+            });
+          });
+          pushNode(el);
+        }
+        tail.forEach((b) => pushNode(makeBlock(b)));
+      } else if (archViewMode === "detailed") {
+        [...embed, ...layers, ...tail].forEach((b) => {
+          if (b.kind !== "layer") {
+            pushNode(makeBlock(b, "part"));
+            return;
+          }
+          if (!first) appendConnector(canvas);
+          first = false;
+          const group = document.createElement("div");
+          group.className = "arch-layer-group";
+          group.dataset.id = b.id;
+          const head = document.createElement("div");
+          head.className = "arch-layer-head";
+          head.innerHTML = `<div class="lbl">${b.label}</div>`;
+          head.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            document.querySelectorAll(".arch-layer-group").forEach((g) => g.classList.remove("selected"));
+            group.classList.add("selected");
+            openArchDrawer(b);
+          });
+          group.appendChild(head);
+          (b.parts || []).forEach((part) => {
+            if ((part.id || "").startsWith("residual_")) return;
+            const isAdd = part.kind === "add" || (part.id || "").startsWith("add_");
+            const pel = makeBlock({
+              id: part.id,
+              kind: isAdd ? "add" : "part",
+              label: part.label,
+              params: part.params,
+              detail: part.detail,
+              shape_in: part.shape_in,
+              shape_out: part.shape_out,
+            }, "part");
+            pel.dataset.node = part.id;
+            group.appendChild(pel);
+          });
+          canvas.appendChild(group);
+          // measure after layout
+          requestAnimationFrame(() => drawLayerResiduals(group, b.residuals));
+        });
+      } else {
+        [...embed, ...layers, ...tail].forEach((b) => {
+          const el = makeBlock(b);
+          if (b.kind === "layer") {
+            el.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              openArchDrawer(b);
+            });
+          }
+          pushNode(el);
+        });
+      }
+
+      $("arch-status-text").textContent = "已加载设计";
+      $("arch-dot").className = "dot finished";
+      closeArchDrawer();
+    }
+
+    async function loadArchDesign(arch) {
+      archPreset = arch || archPreset || "dense";
+      document.querySelectorAll("#arch-preset-row button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.archPreset === archPreset);
+      });
+      $("arch-preset-hint").textContent = ARCH_PRESET_HINT[archPreset] || "";
+      setArchMsg("加载设计…");
+      $("arch-status-text").textContent = "加载中…";
+      $("arch-dot").className = "dot running";
+      try {
+        const res = await fetch(`/api/arch/design?arch=${encodeURIComponent(archPreset)}`);
+        if (!res.ok) throw new Error(await readError(res));
+        const data = await res.json();
+        renderArch(data);
+        setArchMsg("");
+      } catch (e) {
+        setArchMsg(String(e.message || e), true);
+        $("arch-status-text").textContent = "失败";
+        $("arch-dot").className = "dot failed";
+      }
+    }
+
+    document.querySelectorAll("#arch-preset-row button").forEach((btn) => {
+      btn.addEventListener("click", () => loadArchDesign(btn.dataset.archPreset));
+    });
+
+    document.querySelectorAll(".arch-view-modes button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".arch-view-modes button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        archViewMode = btn.dataset.archView || "standard";
+        if (archData) renderArch(archData);
+      });
+    });
+
+    $("btn-arch-drawer-close").addEventListener("click", closeArchDrawer);
+    $("arch-canvas").addEventListener("click", () => closeArchDrawer());
+
+    let archResizeTimer = null;
+    window.addEventListener("resize", () => {
+      if (!archData || archViewMode !== "detailed") return;
+      clearTimeout(archResizeTimer);
+      archResizeTimer = setTimeout(() => renderArch(archData), 100);
+    });
+
+    document.querySelectorAll(".page-tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.tab === "arch" && !archData) loadArchDesign(archPreset);
+      });
+    });
+
+
+    // --- 评测 Task（lm-eval）---
+    let benchSelectedId = null;
+    let benchPollTimer = null;
+    let benchCurrent = null;
+
+    function fmtAcc(v) {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+      return (Number(v) * 100).toFixed(2) + "%";
+    }
+
+    function renderBenchScores(scores) {
+      const body = $("bench-score-body");
+      body.innerHTML = "";
+      const entries = scores ? Object.entries(scores) : [];
+      if (!entries.length) {
+        body.innerHTML = '<tr><td colspan="3">尚无分数</td></tr>';
+        return;
+      }
+      for (const [task, m] of entries) {
+        const tr = document.createElement("tr");
+        const acc = m && typeof m === "object" ? m.acc : m;
+        const err = m && typeof m === "object" ? m.acc_stderr : null;
+        tr.innerHTML = `<td>${task}</td><td>${fmtAcc(acc)}</td><td>${fmtAcc(err)}</td>`;
+        body.appendChild(tr);
+      }
+    }
+
+    function renderBenchProgress(p) {
+      p = p || {};
+      const sd = Number(p.suite_done || 0);
+      const st = Number(p.suite_total || 0) || 0;
+      const cd = Number(p.sample_done || 0);
+      const ct = Number(p.sample_total || 0) || 0;
+      const suitePct = st > 0 ? Math.min(100, (sd / st) * 100) : 0;
+      const samplePct = ct > 0 ? Math.min(100, (cd / ct) * 100) : 0;
+      $("bench-suite-bar").style.width = suitePct + "%";
+      $("bench-sample-bar").style.width = samplePct + "%";
+      $("bench-suite-label").textContent = `${sd}/${st}`;
+      $("bench-sample-label").textContent = `${cd}/${ct}`;
+      $("bench-sample-title").textContent = p.current_task
+        ? `当前子集 · ${p.current_task}`
+        : "当前子集";
+    }
+
+    function isBenchConfigPhase(status) {
+      return !status || status === "draft";
+    }
+
+    function applyBenchPhase(t) {
+      const config = isBenchConfigPhase(t && t.status);
+      $("bench-phase-config").style.display = config ? "" : "none";
+      $("bench-phase-run").style.display = config ? "none" : "";
+      $("bench-phase-badge").textContent = config ? "配置" : "执行";
+      $("btn-bench-stop").disabled = !(t && t.status === "running");
+  const delOn = !(t && t.status === "running");
+  if ($("btn-bench-delete")) $("btn-bench-delete").disabled = !delOn;
+  if ($("btn-bench-delete-draft")) $("btn-bench-delete-draft").disabled = !delOn;
+      $("btn-bench-edit").style.display = (!config && t && t.status !== "running") ? "" : "none";
+    }
+
+    function fillBenchForm(t) {
+      $("bench-name").value = t.name || "";
+      $("bench-ckpt").value = t.ckpt_path || "";
+      $("bench-limit").value = t.limit != null ? t.limit : "";
+      const selected = new Set(t.tasks || []);
+      document.querySelectorAll("#bench-task-checks input").forEach((el) => {
+        el.checked = selected.size ? selected.has(el.value) : el.checked;
+      });
+    }
+
+    function setBenchFormEnabled(on) {
+      ["bench-name", "bench-ckpt", "bench-limit"].forEach((id) => {
+        $(id).disabled = !on;
+      });
+      document.querySelectorAll("#bench-task-checks input").forEach((el) => {
+        el.disabled = !on;
+      });
+      $("btn-bench-save").disabled = !on;
+      $("btn-bench-start").disabled = !on;
+    }
+
+    async function refreshBenchTasks() {
+      const r = await fetch("/api/bench/tasks");
+      if (!r.ok) return;
+      const data = await r.json();
+      const ul = $("bench-task-list");
+      ul.innerHTML = "";
+      const tasks = data.tasks || [];
+      if (!tasks.length) {
+        ul.innerHTML = '<li class="meta" style="cursor:default;opacity:.7">暂无评测 Task</li>';
+        return;
+      }
+      for (const t of tasks) {
+        const li = document.createElement("li");
+        if (t.id === benchSelectedId) li.classList.add("active");
+        li.innerHTML = `<span class="dot ${statusDotClass(t.status)}"></span>
+          <div class="meta"><div class="name"></div><div class="sub"></div></div>`;
+        li.querySelector(".name").textContent = t.name || t.id;
+        const ckpt = (t.ckpt_path || "").split(/[/\\\\]/).pop() || "-";
+        li.querySelector(".sub").textContent = `${t.status || "-"} · ${ckpt}`;
+        li.addEventListener("click", () => selectBenchTask(t.id));
+        ul.appendChild(li);
+      }
+    }
+
+    async function selectBenchTask(id, opts = {}) {
+      benchSelectedId = id;
+      const r = await fetch(`/api/bench/tasks/${id}`);
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      const t = await r.json();
+      benchCurrent = t;
+      $("bench-detail-empty").style.display = "none";
+      $("bench-detail").style.display = "";
+      $("bench-detail-title").textContent = t.name || t.id;
+      fillBenchForm(t);
+      setBenchFormEnabled(isBenchConfigPhase(t.status));
+      applyBenchPhase(t);
+      const ckpt = (t.ckpt_path || "").split(/[/\\\\]/).pop();
+      $("bench-status-text").textContent = t.status || "未开始";
+      $("bench-dot").className = "dot " + statusDotClass(t.status);
+      $("bench-run-meta").textContent =
+        `${t.id} · ${ckpt || "-"} · tasks=${(t.tasks || []).join(",") || "-"} · device=${t.device || "?"}` +
+        (t.limit != null ? ` · limit=${t.limit}` : "");
+      renderBenchScores(t.scores);
+      renderBenchProgress(t.progress);
+      const lr = await fetch(`/api/bench/tasks/${id}/logs?tail=300`);
+      const lj = await lr.json().catch(() => ({ text: "" }));
+      $("bench-log").textContent = lj.text || "（空）";
+      if (t.status === "running") startBenchPoll();
+      else stopBenchPoll();
+      await refreshBenchTasks();
+    }
+
+    function stopBenchPoll() {
+      if (benchPollTimer) {
+        clearInterval(benchPollTimer);
+        benchPollTimer = null;
+      }
+    }
+
+    function startBenchPoll() {
+      if (benchPollTimer) return;
+      benchPollTimer = setInterval(async () => {
+        if (!benchSelectedId) return;
+        await selectBenchTask(benchSelectedId, { silent: true });
+      }, 1500);
+    }
+
+    function readBenchForm() {
+      const name = $("bench-name").value.trim();
+      const ckpt_path = $("bench-ckpt").value.trim();
+      const tasks = [...document.querySelectorAll("#bench-task-checks input:checked")].map((x) => x.value);
+      const limitRaw = $("bench-limit").value.trim();
+      const limit = limitRaw ? Number(limitRaw) : null;
+      return { name, ckpt_path, tasks, limit };
+    }
+
+    $("btn-new-bench-task").addEventListener("click", async () => {
+      $("bench-msg").textContent = "";
+      const r = await fetch("/api/bench/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "",
+          ckpt_path: "",
+          tasks: ["ceval-valid", "cmmlu", "gsm8k"],
+          limit: null,
+        }),
+      });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      const t = await r.json();
+      await refreshBenchTasks();
+      await selectBenchTask(t.id);
+    });
+
+    $("btn-bench-save").addEventListener("click", async () => {
+      if (!benchSelectedId) return;
+      const body = readBenchForm();
+      if (!body.tasks.length) {
+        $("bench-msg").textContent = "至少勾选一个子集";
+        return;
+      }
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      $("bench-msg").textContent = "已保存";
+      await selectBenchTask(benchSelectedId);
+    });
+
+    $("btn-bench-start").addEventListener("click", async () => {
+      if (!benchSelectedId) return;
+      const body = readBenchForm();
+      $("bench-msg").textContent = "";
+      if (!body.ckpt_path) {
+        $("bench-msg").textContent = "请先选择 checkpoint";
+        return;
+      }
+      if (!body.tasks.length) {
+        $("bench-msg").textContent = "至少勾选一个子集";
+        return;
+      }
+      let r = await fetch(`/api/bench/tasks/${benchSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      r = await fetch(`/api/bench/tasks/${benchSelectedId}/start`, { method: "POST" });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      $("bench-msg").textContent = "已启动";
+      await selectBenchTask(benchSelectedId);
+    });
+
+    $("btn-bench-stop").addEventListener("click", async () => {
+      if (!benchSelectedId) return;
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}/stop`, { method: "POST" });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      await selectBenchTask(benchSelectedId);
+    });
+
+    
+    async function deleteSelectedBenchTask() {
+      if (!benchSelectedId) return;
+      if (!confirm("确认删除该评测 Task 目录？不可恢复。")) return;
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}`, { method: "DELETE" });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      stopBenchPoll();
+      benchSelectedId = null;
+      benchCurrent = null;
+      $("bench-detail").style.display = "none";
+      $("bench-detail-empty").style.display = "";
+      $("bench-msg").textContent = "已删除";
+      await refreshBenchTasks();
+    }
+    $("btn-bench-delete").addEventListener("click", deleteSelectedBenchTask);
+    $("btn-bench-delete-draft").addEventListener("click", deleteSelectedBenchTask);
+
+$("btn-bench-edit").addEventListener("click", async () => {
+      if (!benchSelectedId || !benchCurrent) return;
+      // Re-open as draft by patching current fields (store flips stopped/failed/finished -> draft on config change)
+      const body = {
+        name: benchCurrent.name || "",
+        ckpt_path: benchCurrent.ckpt_path || "",
+        tasks: benchCurrent.tasks || ["ceval-valid", "cmmlu", "gsm8k"],
+        limit: benchCurrent.limit == null ? null : benchCurrent.limit,
+      };
+      const r = await fetch(`/api/bench/tasks/${benchSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        $("bench-msg").textContent = await readError(r);
+        return;
+      }
+      await selectBenchTask(benchSelectedId);
+    });
+
+    document.querySelectorAll(".page-tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.tab === "bench") refreshBenchTasks();
+      });
+    });
+
     async function refreshMoeCheckpoints() {
       const res = await fetch("/api/checkpoints");
       const files = (await res.json()).files || [];
@@ -1280,12 +2484,14 @@
     $("moe-data").value = "/home/wyf/miniseek/data/valid.jsonl";
     $("btn-moe-refresh-ckpt").addEventListener("click", refreshMoeCheckpoints);
     $("btn-moe-probe").addEventListener("click", runMoeProbe);
-    document.querySelectorAll("nav button").forEach((btn) => {
-      if (btn.dataset.tab === "moe-load") {
-        btn.addEventListener("click", () => { refreshMoeCheckpoints(); });
-      }
+    document.querySelectorAll(".page-tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.tab === "moe-load") refreshMoeCheckpoints();
+      });
     });
-    refreshMoeCheckpoints();
+
+    // boot: if train already boots elsewhere; also refresh bench list quietly
+    refreshBenchTasks().catch(() => {});
 
   </script>
 </body>

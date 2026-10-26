@@ -1,116 +1,307 @@
-# miniseek
+<div align="center">
 
-**中文为主 / English summary below.**
+# MiniSeek
 
-对齐 DeepSeek-V4.1-Flash 思路的超小可训语言模型（MiniMind 风格数据与分词器），单卡 3090 可跑。  
-**当前仓库 = Stage 0 Dense（MiniSeek-D0.1）+ Stage 1 MoE 实现（MiniSeek-M0.1）**；SWA / CSA2 / CED 仍为后续钩子。
+**由简入难，对齐 DeepSeek-V4.1-Flash 结构思路的超小可训语言模型**
 
-## English (short)
+[![GitHub Repo stars](https://img.shields.io/github/stars/wyf-yfw/miniseek?style=social)](https://github.com/wyf-yfw/miniseek/stargazers)
+[![GitHub Code License](https://img.shields.io/github/license/wyf-yfw/miniseek)](LICENSE)
+[![GitHub last commit](https://img.shields.io/github/last-commit/wyf-yfw/miniseek)](https://github.com/wyf-yfw/miniseek/commits/main)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue)](https://github.com/wyf-yfw/miniseek/pulls)
+[![Collection](https://img.shields.io/badge/🤗-MiniSeek%20Collection-yellow)](https://huggingface.co/collections/wyf-yfw/miniseek-6adc765159d38ab3236c49af)
 
-Ultra-small trainable LM scaffold aligned with DeepSeek-V4.1-Flash ideas. Stage 0 = dense decoder-only (d=512, L=8, H=8, FFN=2048, MiniMind tokenizer vocab=**6400**, ~26–32M params). Stage 1 MoE (MiniSeek-M0.1) implemented; SWA/CSA2/CED still TODOs. Data: `jingyaogong/minimind_dataset`. Eval-Core locked for fair A/B across stages 0–5.
+中文 | [English](./README_en.md)
 
-## 目标与阶段路线
+</div>
 
-详见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)。
+- 从 **Dense 骨架**出发，按阶段逐步接入 MoE / SWA / CSA2 / CED 等结构（见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)），用**同一套数据与评测**做公平 A/B；**MoE（M0.1：1 shared + 32 routed，top-2）已可训**。
+- Stage 0 主线：`d_model=512`、8 层 Dense Decoder-only，MiniMind 词表 **vocab=6400**，tied 权重约 **28.45M**，单卡 3090 可训。
+- 训练数据与分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 生态（`jingyaogong/minimind_dataset`），核心模型用 **PyTorch 原生**实现。
+- 自带 **Web UI**：训练 Task、对话、续写、架构可视化、C-Eval / CMMLU / GSM8K 评测（lm-eval）。
+- 权重已开源到 Hugging Face：[`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base)（预训练）、[`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1)（SFT）。
 
-| Stage | 结构 | 本仓 |
-|-------|------|------|
-| 0 | Dense Decoder-only | ✅ |
-| 1 | + MoE MiniSeek-M0.1（1+32 top-2, h=512, ≈150M） | `model/moe.py` + `--arch moe` |
-| 2 | + SWA（滑动窗口注意力） | TODO |
-| 3 | + CSA2 | TODO |
-| 4 | + CED（因果编码器-解码器） | TODO |
-| 5 | + HSI / Replay | TODO |
+> 本仓库当前实现：**Stage 0 Dense（MiniSeek-D0.1）+ Stage 1 MoE（MiniSeek-M0.1，`model/moe.py` + `--arch moe`）** + 训练/评测/Web 全链路；SWA / CSA2 / CED 仍为后续钩子。
 
-### 冻结规格（Stage 0）
+---
 
-- `d_model=512`, `n_layers=8`, `n_heads=8`, `head_dim=64`
-- Dense FFN `intermediate=2048`
-- RoPE + RMSNorm + GELU FFN，词嵌入与 lm_head 默认 weight tying
-- Tokenizer：**MiniMind 实测 vocab=6400**（不是旧 mistral ~32k）
-- 参数量：init 时打印；6400 词表下约 **26–32M**（早期 ~58M 估算对应 ~32k 词表）
+# 📌 项目介绍
 
-## 快速开始
+个人 GPU 很难「从零」摸清大模型训练全流程：框架封装太厚，真实模型又太大。MiniSeek 想做一件更窄但可复现的事——**把结构升级拆成可对比的阶段**，每阶段只改架构，数据和 Eval-Core 全程锁死，从而看清「加 MoE / SWA / CSA2 / CED 到底换来了什么」。
+
+#### 本项目当前包含
+
+- Dense Decoder-only（`DenseLM`）完整训练与生成代码（RoPE、RMSNorm、GELU FFN，默认 embedding / LM head tying）
+- MoE（`MoELM` / MiniSeek-M0.1）：1 shared + 32 routed、top-2、负载均衡 aux loss；`python train_pretrain.py --arch moe`
+- 预训练脚本 `train_pretrain.py`、生成 `generate.py`、数据下载与 valid 划分
+- Eval-Core：Valid PPL、Gen-Smoke、以及 Web/CLI 上的 C-Eval / CMMLU / GSM8K（lm-evaluation-harness）
+- FastAPI Web UI（`:7860`）：训练 Task、对话、续写、架构图（简洁 / 标准 / 详细）、评测 Task、MoE 专家负载探针
+- 阶段规格文档 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md) 与冒烟测试
+
+#### 已发布模型
+
+| 模型 | 角色 | Hub 参数量 | Release |
+|------|------|------------|---------|
+| [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | Dense 预训练基座 | **28.45M**（tied） | 2026-10 |
+| [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | SFT / 对话 | **31.73M**（untied emb+head） | 2026-10 |
+
+权重格式：`model.safetensors` + `config.json` + MiniMind tokenizer。自定义 `DenseLM`，暂非 `AutoModelForCausalLM` 即插即用。
+
+---
+
+# 📌 快速开始
+
+## 第 0 步：克隆与依赖
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+git clone https://github.com/wyf-yfw/miniseek.git
+cd miniseek
+python -m venv .venv
+# Linux / macOS
+source .venv/bin/activate
+# Windows PowerShell
+# .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+```
 
-# CPU smoke
+CPU 冒烟：
+
+```bash
 python -m pytest tests/test_smoke.py -q
-
-# 预训练 smoke（无数据时自动写占位 jsonl）
-python train_pretrain.py --max-steps 2
-
-# 生成（固定 seed）
-python generate.py --seed 42 --prompt "你好，请介绍一下人工智能。"
 ```
 
-## 数据下载
+## Ⅰ 🚀 推理
+
+### 1. 下载开源权重
 
 ```bash
-# 只打印说明 / 对已有 train 做 valid 划分
-python scripts/download_data.py
-
-# 真正从 HF 拉 pretrain_t2t_mini.jsonl（体积可能很大，按需）
-python scripts/download_data.py --download
+# 基座（预训练）
+huggingface-cli download wyf-yfw/MiniSeek-D0.1-base --local-dir ./hub/MiniSeek-D0.1-base
+# 或对话版
+huggingface-cli download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
 ```
 
-- HF：[`jingyaogong/minimind_dataset`](https://huggingface.co/datasets/jingyaogong/minimind_dataset)
-- Train：`pretrain_t2t_mini.jsonl`
-- Valid：`valid.jsonl` = train 的 **0.5%**，**seed=42**（阶段 0–5 锁死）
-- 阶段间保持同一超参与步数，便于公平对比
-
-### Tokenizer
+### 2. CLI 生成（本地 ckpt）
 
 ```bash
-# 推荐：从 MiniMind2 拉 tokenizer 文件到 ./tokenizer
+python generate.py --ckpt checkpoints/stage0/best.pt --seed 42 --prompt "你好，请介绍一下人工智能。"
+```
+
+### 3. 从 Hub 加载 DenseLM
+
+```python
+import json
+from pathlib import Path
+import torch
+from huggingface_hub import snapshot_download
+from safetensors.torch import load_file
+from model.config import ModelConfig
+from model.dense import DenseLM
+from model.tokenizer import load_tokenizer
+
+repo = snapshot_download("wyf-yfw/MiniSeek-D0.1-base")
+cfg = ModelConfig.from_dict(json.loads(Path(repo, "config.json").read_text()))
+model = DenseLM(cfg)
+state = load_file(Path(repo) / "model.safetensors")
+model.load_state_dict(state, strict=False)  # base: lm_head tied → tok_emb
+tok = load_tokenizer(str(Path(repo) / "tokenizer"))
+
+ids = tok.encode("你好，你是谁", add_special_tokens=True)
+out = model.generate(
+    torch.tensor([ids]),
+    max_new_tokens=64,
+    temperature=0.8,
+    top_k=50,
+    eos_token_id=tok.eos_token_id,
+)
+print(tok.decode(out[0].tolist(), skip_special_tokens=True))
+```
+
+### 4. Web UI（推荐）
+
+```bash
+python -m uvicorn web_ui:app --host 127.0.0.1 --port 7860
+```
+
+浏览器打开后可用：
+
+| Tab | 作用 |
+|-----|------|
+| 训练 | Task 侧栏：配置 → Start → 日志/指标 → Stop；ckpt 在 `tasks/<id>/` |
+| 对话 / 续写 | 选 checkpoint 做 chat / completion |
+| 架构 | Tiny / Dense / MoE 预设；简洁 · 标准 · 详细图 + 右侧抽屉；MoE 专家负载探针 |
+| 评测 | 与训练同形态的 Bench Task：C-Eval / CMMLU / GSM8K，双进度条 |
+
+CPU 链路冒烟：
+
+```bash
+python scripts/smoke_tiny_task.py
+```
+
+---
+
+# 📌 数据介绍
+
+## Ⅰ Tokenizer
+
+使用 MiniMind 词表（**vocab=6400**）。推荐：
+
+```bash
 huggingface-cli download jingyaogong/MiniMind2 --include "tokenizer*" --local-dir ./tokenizer
 # 或 export DS41_TOKENIZER_PATH=/path/to/minimind_tokenizer
 ```
 
-无本地文件时，代码会用 byte-level `FallbackTokenizer`（仅 smoke，不可正式训练）。
+无本地文件时，代码会回退到 byte-level `FallbackTokenizer`（仅 smoke，不可正式训练）。
 
-## 训练 / 生成 / 评测
+## Ⅱ 预训练 / Valid
 
 ```bash
-# 正式训（默认：loss 连续 200 步低于阈值才写 loss-*.pt；结束写 last.pt；刷新最低写 best.pt）
+python scripts/download_data.py            # 说明 / 划分 valid
+python scripts/download_data.py --download # 拉取 pretrain_t2t_mini.jsonl
+```
+
+| 锁定项 | 内容 |
+|--------|------|
+| 源 | [`jingyaogong/minimind_dataset`](https://huggingface.co/datasets/jingyaogong/minimind_dataset) |
+| Train | `pretrain_t2t_mini.jsonl` |
+| Valid | `valid.jsonl` = train 的 **0.5%**，**seed=42**（阶段 0–5 锁死） |
+| SFT | `sft_t2t_mini.jsonl`（架构冻结后的对话线；不参与结构对比） |
+
+对比原则：**换结构，不换数据**。完整 10GB/14GB 版留作冻结后加强，不进阶段表。
+
+---
+
+# 📌 模型
+
+## 结构（Stage 0）
+
+```text
+Token Embedding (V=6400 × d=512)
+        ↓
+×8 Transformer Block
+  RMSNorm → Causal Attn (RoPE) → Residual
+  RMSNorm → Dense FFN (intermediate=2048) → Residual
+        ↓
+RMSNorm → LM Head（基座默认与 Embedding tying）
+```
+
+| 项 | 定稿值 |
+|----|--------|
+| `d_model` / `n_layers` / `n_heads` / `head_dim` | 512 / 8 / 8 / 64 |
+| Dense FFN | 2048 (=4d) |
+| `max_seq_len`（训练起步） | 512 |
+| 精度 / 硬件目标 | BF16 · 单卡 3090 |
+
+## 阶段路线
+
+| Stage | 结构 | 本仓 |
+|-------|------|------|
+| 0 | Dense Decoder-only | ✅ |
+| 1 | + MoE MiniSeek-M0.1（1 shared + 32 routed, top-2, h=512, ≈150M） | ✅ `model/moe.py` + `--arch moe` |
+| 2 | + SWA | TODO |
+| 3 | + CSA2 | TODO |
+| 4 | + CED | TODO |
+| 5 | + HSI / Replay | TODO |
+
+细节与参数量表：[`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)。
+
+命名（DeepSeek 风格，Hub 一仓一权重）：
+
+- `MiniSeek-D{x.y}-base` — Dense 预训练
+- `MiniSeek-D{x.y}` — Dense SFT / chat
+- `MiniSeek-M{x.y}-*` — MoE 线（M0.1 本地可训；Hub 权重后续发布）
+
+---
+
+# 📌 训练
+
+```bash
+# 正式预训练
 python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0
 
-# 短跑 / 调参示例
+# 短跑 / 调参
 python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0 \
   --max-steps 5000 --warmup-steps 200 --lr 1e-4 \
   --save-loss-thresholds 20,15,12,10,9,8,7 --stable-steps 200
-
-python generate.py --ckpt checkpoints/stage0/last.pt --seed 42
-
-python eval/valid_ppl.py --ckpt checkpoints/stage0/last.pt --valid data/valid.jsonl
-python eval/gen_smoke.py --ckpt checkpoints/stage0/last.pt --seed 42
 ```
 
 ### Checkpoint 策略
 
-- **里程碑**：`--save-loss-thresholds`（默认 `20,15,...,3`）——某一档需 **连续** `--stable-steps`（默认 200）步 `loss<=阈值` 才写 `loss-10.pt` 等；中途回升则计数清零。
-- **best.pt**：新历史最低 train loss 时更新（`--no-save-best` 可关）。
-- **last.pt**：跑结束写一次。
-- **`--save-every`**：默认 `0`（关）；需要按步备份时可开。
+- **里程碑** `loss-*.pt`：`--save-loss-thresholds` 某一档需连续 `--stable-steps`（默认 200）步 `loss<=阈值` 才写入
+- **best.pt**：历史最低 train loss
+- **last.pt**：跑结束写一次
+- **`--save-every`**：默认关；需要按步备份再开
 
-C-Eval / CMMLU：见 [`eval/README.md`](eval/README.md)（lm-evaluation-harness，Stage 0 预留）。
+也可在 Web UI「训练」Tab 里用 Task 形态启停，产物在 `tasks/<id>/`。
 
-结果模板：`eval/reports/stage-0.md`、`eval/reports/leaderboard.md`。
+---
 
-## 目录
+# 📌 评估
 
+**Eval-Core**（各阶段同一套）：
+
+| # | 项目 | 说明 |
+|---|------|------|
+| 1 | Valid PPL | 同一 `valid.jsonl` |
+| 2 | Gen-Smoke | 20 条固定 prompt，seed=42 |
+| 3 | C-Eval valid | lm-eval |
+| 4 | CMMLU | lm-eval（需 `trust_remote_code`；`datasets>=2.14,<4.0`） |
+| 5 | GSM8K | lm-eval generate_until |
+| 6 | 效率 | 同硬件记峰值显存 / tokens/s |
+
+CLI 示例：
+
+```bash
+python eval/valid_ppl.py --ckpt checkpoints/stage0/last.pt --valid data/valid.jsonl
+python eval/gen_smoke.py --ckpt checkpoints/stage0/last.pt --seed 42
+# 或 Web「评测」Tab / eval/run_benchmark.py
 ```
-model/           # config + DenseLM + tokenizer
-train_pretrain.py
-generate.py
-scripts/download_data.py
-eval/            # valid_ppl, gen_smoke, reports
-tests/test_smoke.py
-docs/STAGE_PLAN.md
+
+报告模板：`eval/reports/stage-0.md`、`eval/reports/leaderboard.md`。更多见 [`eval/README.md`](eval/README.md)。
+
+锚点参考：MiniMind-3（~64M）C-Eval≈24.9 / CMMLU≈25.4——Stage 0 体量更小，重点看**相对变化**而非绝对分数。
+
+---
+
+# 📌 目录
+
+```text
+model/              # config · DenseLM · tokenizer
+train_pretrain.py   # 预训练入口
+generate.py         # CLI 生成
+web_ui.py + web/    # FastAPI UI · Task/Bench/架构
+eval/               # PPL · Gen-Smoke · lm-eval · reports
+scripts/            # 数据下载 · smoke
+docs/STAGE_PLAN.md  # 阶段规格（主文档）
+tests/              # 冒烟与单测
 ```
 
-## License
+---
 
-MIT
+# 📌 致谢
+
+- 数据与词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)、[`minimind_dataset`](https://huggingface.co/datasets/jingyaogong/minimind_dataset)
+- 结构对齐参考：[DeepSeek-V4.1 相关论文](https://arxiv.org/html/2609.19969)
+- 客观评测：[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)、C-Eval、CMMLU
+
+欢迎 Issue / PR。
+
+---
+
+# 🎓 引用
+
+若本项目对你有帮助，欢迎引用仓库或在论文/博客中注明链接：
+
+```bibtex
+@misc{miniseek2026,
+  title        = {MiniSeek: Tiny Trainable LMs Toward DeepSeek-V4.1-Flash Structures},
+  author       = {wyf-yfw},
+  year         = {2026},
+  howpublished = {\url{https://github.com/wyf-yfw/miniseek}}
+}
+```
+
+---
+
+# ⚖️ 开源协议
+
+[MIT](LICENSE)

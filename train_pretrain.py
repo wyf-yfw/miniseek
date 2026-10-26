@@ -32,8 +32,8 @@ from typing import Any, Dict, List, Optional, Set
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from model import build_model
 from model.config import ModelConfig
-from model.dense import DenseLM
 from model.tokenizer import detect_vocab_size, load_tokenizer
 
 
@@ -227,7 +227,7 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/pretrain_t2t_mini.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="checkpoints/stage0")
-    p.add_argument("--arch", choices=["dense", "moe"], default="dense")
+    p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")
     p.add_argument("--aux-coef", type=float, default=0.01, help="MoE load-balance aux weight")
     p.add_argument("--max-seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
@@ -303,12 +303,13 @@ def main() -> None:
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len).with_vocab_size(vocab)
-    if args.arch == "moe":
-        from model.moe import MoELM
-        model = MoELM(cfg).to(device)
+    if args.arch == "tiny":
+        cfg = ModelConfig.tiny()
+        cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
     else:
-        model = DenseLM(cfg).to(device)
+        cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
+    cfg = cfg.with_vocab_size(vocab)
+    model = build_model(cfg).to(device)
     if args.compile:
         if device.type != "cuda":
             print("[train] WARN: --compile ignored (需要 CUDA)")
@@ -318,7 +319,10 @@ def main() -> None:
                 print("[train] torch.compile enabled")
             except Exception as e:  # noqa: BLE001
                 print(f"[train] WARN: torch.compile 失败，继续未编译: {e}")
-    print(f"[train] arch={args.arch} aux_coef={args.aux_coef if args.arch == 'moe' else 'n/a'}")
+    print(
+        f"[train] arch={args.arch} release={cfg.release_name} "
+        f"aux_coef={args.aux_coef if args.arch == 'moe' else 'n/a'}"
+    )
     expert_window_steps = 0
     if args.arch == "moe":
         _unwrap_model(model).begin_expert_usage()
