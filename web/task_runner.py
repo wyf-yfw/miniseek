@@ -31,17 +31,37 @@ _owned_procs: Dict[str, subprocess.Popen] = {}
 
 
 def pid_alive(pid: Optional[int]) -> bool:
-    """Cross-platform: process exists (os.kill(pid, 0))."""
+    """True if process exists and is not a reaped/zombie exit.
+
+    Prefer owned Popen.poll() (reaps on POSIX). os.kill(pid, 0) alone is
+    not enough on Linux: zombies still pass kill(0).
+    """
     if not pid:
         return False
+    pid_i = int(pid)
+    for proc in list(_owned_procs.values()):
+        try:
+            if proc.pid == pid_i:
+                return proc.poll() is None
+        except Exception:  # noqa: BLE001
+            pass
     try:
-        os.kill(int(pid), 0)
+        os.kill(pid_i, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
     except OSError:
         return False
+    # Linux: zombie still answers kill(0); treat as dead for reconcile/tail.
+    try:
+        with open(f"/proc/{pid_i}/stat", "r", encoding="utf-8") as fh:
+            data = fh.read()
+        state = data.rsplit(")", 1)[-1].lstrip()[:1]
+        if state == "Z":
+            return False
+    except OSError:
+        pass
     return True
 
 
@@ -326,7 +346,10 @@ def stop_task(task_id: str) -> Dict[str, Any]:
         os.kill(int(pid), signal.SIGTERM)
     except OSError:
         pass
+    owned = _owned_procs.get(task_id)
     for _ in range(50):
+        if owned is not None and owned.poll() is not None:
+            break
         if not pid_alive(pid):
             break
         time.sleep(0.1)

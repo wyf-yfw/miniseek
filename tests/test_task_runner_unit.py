@@ -35,3 +35,33 @@ def test_start_refuses_second(tasks_root, monkeypatch):
     monkeypatch.setattr(tr, "_spawn_training", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not spawn")))
     with pytest.raises(RuntimeError, match="running"):
         tr.start_task(b["id"])
+
+
+def test_pid_alive_false_when_owned_exited(tasks_root):
+    class FakeProc:
+        pid = 424242
+
+        def poll(self):
+            return 0
+
+    tr._owned_procs["owned-exit"] = FakeProc()
+    try:
+        assert tr.pid_alive(424242) is False
+    finally:
+        tr._owned_procs.pop("owned-exit", None)
+
+
+def test_pid_alive_true_when_owned_running(tasks_root, monkeypatch):
+    class FakeProc:
+        pid = 434343
+
+        def poll(self):
+            return None
+
+    tr._owned_procs["owned-run"] = FakeProc()
+    try:
+        # Avoid /proc and kill for this fake pid
+        monkeypatch.setattr(tr.os, "kill", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no kill")))
+        assert tr.pid_alive(434343) is True
+    finally:
+        tr._owned_procs.pop("owned-run", None)
