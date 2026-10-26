@@ -45,15 +45,14 @@ def _shape(
     vocab: bool = False,
     tokens: bool = False,
 ) -> str:
-    """Activation shapes with concrete dims from ModelConfig; batch stays symbolic b."""
-    t = int(cfg.max_seq_len)
+    """Activation shapes: batch and seq symbolic (b, t); d/v from ModelConfig."""
     d = int(cfg.d_model)
     v = int(cfg.vocab_size)
     if tokens:
-        return f"[b,{t}]"
+        return "[b,t]"
     if vocab:
-        return f"[b,{t},{v}]"
-    return f"[b,{t},{d}]"
+        return f"[b,t,{v}]"
+    return f"[b,t,{d}]"
 
 
 def _w(name: str, dims: List[int] | str, *, note: str = "") -> Dict[str, str]:
