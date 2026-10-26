@@ -1,7 +1,7 @@
 # MiniSeek Web UI — 架构可视化页设计
 
 日期：2026-10-26  
-状态：待用户审阅后进入 implementation plan
+状态：已审阅通过；实现计划见 docs/superpowers/plans/2026-10-26-model-architecture-viz.md
 
 ## 目标
 
