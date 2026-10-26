@@ -56,6 +56,17 @@ def _shape(
     return f"[b,{t},{d}]"
 
 
+def _w(name: str, dims: List[int] | str, *, note: str = "") -> Dict[str, str]:
+    """One weight tensor entry for the drawer."""
+    if isinstance(dims, str):
+        shape = dims
+    else:
+        shape = "[" + ",".join(str(int(x)) for x in dims) + "]"
+    if note:
+        shape = f"{shape} {note}"
+    return {"name": name, "shape": shape}
+
+
 def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str, Any]:
     """Build viz JSON from ModelConfig (no checkpoint). Param counts are design formulas."""
     c = cfg.to_dict()
@@ -78,6 +89,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
             "params": embed_params,
             "shape_in": bt,
             "shape_out": btd,
+            "weight_shapes": [_w("tok_emb.weight", [vocab, d])],
         }
     ]
 
@@ -93,6 +105,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "params": attn_norm_p,
                 "shape_in": btd,
                 "shape_out": btd,
+                "weight_shapes": [_w("weight", [d])],
                 "detail": {"eps": cfg.rms_norm_eps},
             },
             {
@@ -101,6 +114,10 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "params": attn_p,
                 "shape_in": btd,
                 "shape_out": btd,
+                "weight_shapes": [
+                    _w("qkv.weight", [3 * d, d]),
+                    _w("o_proj.weight", [d, d]),
+                ],
                 "detail": {
                     "n_heads": cfg.n_heads,
                     "head_dim": cfg.head_dim,
@@ -115,6 +132,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "kind": "add",
                 "shape_in": btd,
                 "shape_out": btd,
+                "weight_shapes": [],
             },
             {
                 "id": "ffn_norm",
@@ -122,6 +140,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "params": ffn_norm_p,
                 "shape_in": btd,
                 "shape_out": btd,
+                "weight_shapes": [_w("weight", [d])],
                 "detail": {"eps": cfg.rms_norm_eps},
             },
         ]
@@ -142,6 +161,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "params": gate_p,
                         "shape_in": btd,
                         "shape_out": btd,
+                        "weight_shapes": [_w("gate.weight", [n_routed, d])],
                         "detail": {
                             "n_routed_experts": n_routed,
                             "num_experts_per_tok": topk,
@@ -153,6 +173,10 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "params": shared_p,
                         "shape_in": btd,
                         "shape_out": btd,
+                        "weight_shapes": [
+                            _w("fc1.weight", [mid, d], note=f"×{n_shared}"),
+                            _w("fc2.weight", [d, mid], note=f"×{n_shared}"),
+                        ],
                         "detail": {
                             "n_shared_experts": n_shared,
                             "moe_intermediate_size": mid,
@@ -165,6 +189,10 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "params": routed_p,
                         "shape_in": btd,
                         "shape_out": btd,
+                        "weight_shapes": [
+                            _w("fc1.weight", [mid, d], note=f"×{n_routed}"),
+                            _w("fc2.weight", [d, mid], note=f"×{n_routed}"),
+                        ],
                         "detail": {
                             "n_routed_experts": n_routed,
                             "num_experts_per_tok": topk,
@@ -185,6 +213,10 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                     "params": ffn_p,
                     "shape_in": btd,
                     "shape_out": btd,
+                    "weight_shapes": [
+                        _w("fc1.weight", [mid, d]),
+                        _w("fc2.weight", [d, mid]),
+                    ],
                     "detail": {
                         "intermediate_size": mid,
                         "fc1": f"Linear({d}→{mid})",
@@ -202,6 +234,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "kind": "add",
                 "shape_in": btd,
                 "shape_out": btd,
+                "weight_shapes": [],
             }
         )
         layer_params = attn_norm_p + attn_p + ffn_norm_p + ffn_block_p
@@ -230,6 +263,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
             "params": norm_p,
             "shape_in": btd,
             "shape_out": btd,
+            "weight_shapes": [_w("weight", [d])],
         },
         {
             "id": "lm_head",
@@ -239,6 +273,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
             "tied": tie,
             "shape_in": btd,
             "shape_out": btv,
+            "weight_shapes": [_w("lm_head.weight", [vocab, d], note="(tied)" if tie else "")],
         },
     ]
 

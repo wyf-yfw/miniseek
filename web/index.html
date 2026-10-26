@@ -1613,8 +1613,15 @@
         parts.map((p) => {
           const lines = [];
           if (p.shape_in) lines.push(`输入: ${p.shape_in}`);
-          if (p.shape_out && p.shape_out !== p.shape_in) lines.push(`输出: ${p.shape_out}`);
+          if (p.shape_out) lines.push(`输出: ${p.shape_out}`);
           if (p.params != null) lines.push(`参数: ${fmtParams(p.params)}`);
+          const weights = p.weight_shapes || [];
+          weights.forEach((w) => {
+            if (!w) return;
+            const name = w.name || "weight";
+            const shape = w.shape || "";
+            lines.push(`${name}: ${shape}`);
+          });
           if (p.detail) {
             Object.entries(p.detail).forEach(([k, v]) => {
               if (v != null) lines.push(`${k}: ${v}`);
