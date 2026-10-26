@@ -48,3 +48,12 @@ hf/
 
 .superpowers/
 eval/runs/
+
+# Local smoke / restart junk (do not track)
+eval/reports/_smoke_*/
+web_ui_restart.log*
+web_ui.out.log
+web_ui.err.log
+_fix_*.py
+_api_smoke_*.py
+123.py
