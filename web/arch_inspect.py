@@ -82,10 +82,10 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 },
             },
             {
-                "id": "residual_attn",
-                "label": "Residual + Attn",
+                "id": "add_attn",
+                "label": "⊕",
                 "params": 0,
-                "detail": {"formula": "x = x + Attn(RMSNorm(x))"},
+                "kind": "add",
             },
             {
                 "id": "ffn_norm",
@@ -157,10 +157,10 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
 
         parts.append(
             {
-                "id": "residual_ffn",
-                "label": "Residual + FFN",
+                "id": "add_ffn",
+                "label": "⊕",
                 "params": 0,
-                "detail": {"formula": "x = x + FFN(RMSNorm(x))"},
+                "kind": "add",
             }
         )
         layer_params = attn_norm_p + attn_p + ffn_norm_p + ffn_block_p
@@ -172,6 +172,10 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "label": f"Layer {i}",
                 "params": layer_params,
                 "parts": parts,
+                "residuals": [
+                    {"id": "attn", "from": "layer_in", "to": "add_attn", "label": "x"},
+                    {"id": "ffn", "from": "post_attn", "to": "add_ffn", "label": "x"},
+                ],
             }
         )
 

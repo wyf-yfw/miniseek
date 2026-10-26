@@ -13,7 +13,12 @@ def test_design_tiny_matches_denselm():
     layer = next(b for b in out["blocks"] if b["kind"] == "layer")
     ids = {p["id"] for p in layer["parts"]}
     assert "attn" in ids and "ffn" in ids
-    assert "residual_attn" in ids and "residual_ffn" in ids
+    assert "residual_attn" not in ids and "residual_ffn" not in ids
+    assert "add_attn" in ids and "add_ffn" in ids
+    assert layer["residuals"] == [
+        {"id": "attn", "from": "layer_in", "to": "add_attn", "label": "x"},
+        {"id": "ffn", "from": "post_attn", "to": "add_ffn", "label": "x"},
+    ]
 
 
 def test_design_dense_matches_denselm():
@@ -28,6 +33,8 @@ def test_design_moe_has_experts():
     layer = next(b for b in out["blocks"] if b["kind"] == "layer")
     ids = {p["id"] for p in layer["parts"]}
     assert "router" in ids and "shared_experts" in ids and "routed_experts" in ids
+    assert "residual_attn" not in ids
+    assert "add_attn" in ids and "add_ffn" in ids
     assert out["total_params"] > inspect_design("dense")["total_params"]
 
 
