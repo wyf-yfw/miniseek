@@ -41,3 +41,6 @@ eval/reports/lm_eval_*/
 .hf_token
 release/
 *.log
+
+.worktrees/
+tasks/
