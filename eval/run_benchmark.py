@@ -64,13 +64,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--batch_size", type=int, default=1)
     args = p.parse_args(argv)
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
-    run_bench(
+    print(
+        f"[bench] start ckpt={args.ckpt} tasks={','.join(tasks)} device={args.device} limit={args.limit}",
+        flush=True,
+    )
+    payload = run_bench(
         ckpt=args.ckpt,
         tasks=tasks,
         out_dir=args.out,
         device=args.device,
         limit=args.limit,
         batch_size=args.batch_size,
+    )
+    print(
+        f"[bench] done metrics={json.dumps(payload['metrics'], ensure_ascii=False)}",
+        flush=True,
     )
     return 0
 

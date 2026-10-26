@@ -72,6 +72,28 @@ def reconcile_run(run: Dict[str, Any]) -> Dict[str, Any]:
     return run
 
 
+def _popen_logged(cmd: List[str], log_path: Path, *, cwd: Path, env: dict) -> subprocess.Popen:
+    """Spawn cmd with stdout/stderr in log_path.
+
+    A text file object is inheritable after Popen duplicates it. os.open fds
+    are non-inheritable on Windows, so the child can start with a dead stdout.
+    CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP keeps the child off the web UI console.
+    """
+    log_file = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
+    kwargs: Dict[str, Any] = {
+        "stdout": log_file,
+        "stderr": subprocess.STDOUT,
+        "cwd": str(cwd),
+        "env": env,
+    }
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    try:
+        return subprocess.Popen(cmd, **kwargs)
+    finally:
+        log_file.close()
+
+
 def start_run(
     *,
     ckpt_path: str,
@@ -116,22 +138,11 @@ def start_run(
         cmd.extend(["--limit", str(int(limit))])
 
     log_path = out_dir / "run.log"
-    log_path.write_bytes(b"")
     env = os.environ.copy()
     env.pop("all_proxy", None)
     env.pop("ALL_PROXY", None)
     env["PYTHONUNBUFFERED"] = "1"
-    fd = os.open(log_path, os.O_WRONLY | os.O_CREAT, 0o644)
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=fd,
-            stderr=subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT),
-            env=env,
-        )
-    finally:
-        os.close(fd)
+    proc = _popen_logged(cmd, log_path, cwd=PROJECT_ROOT, env=env)
 
     now = datetime.now().isoformat(timespec="seconds")
     run["status"] = "running"

@@ -151,7 +151,8 @@ class MiniSeekLM(TemplateLM):
             if not continuation_enc:
                 results.append((0.0, True))
                 continue
-            inp = (context_enc + continuation_enc)[-(self.max_length + 1) :]
+            # One forward of at most max_length. max_length+1 is already past DenseLM.
+            inp = (context_enc + continuation_enc)[-self.max_length :]
             # Leave at least one continuation token for scoring
             cont_len = len(continuation_enc)
             if len(inp) < cont_len + 1:
@@ -189,7 +190,10 @@ class MiniSeekLM(TemplateLM):
             ids = list(ctx_ids)
             eos = self.eot_token_id
             for _ in range(max_gen):
-                input_ids = torch.tensor([ids], dtype=torch.long, device=self._device)
+                # Context is already max_length-1; appending without a window
+                # reaches max_seq_len+1 on the next steps (513 > 512).
+                window = ids[-self.max_length :]
+                input_ids = torch.tensor([window], dtype=torch.long, device=self._device)
                 with torch.no_grad():
                     logits, _ = self.model(input_ids)
                 next_id = int(logits[0, -1, :].argmax().item())

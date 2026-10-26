@@ -45,6 +45,9 @@ def pid_alive(pid: Optional[int]) -> bool:
                 return proc.poll() is None
         except Exception:  # noqa: BLE001
             pass
+    if sys.platform == "win32":
+        # os.kill(pid, 0) is TerminateProcess on Windows and would kill the child.
+        return _win_pid_alive(pid_i)
     try:
         os.kill(pid_i, 0)
     except ProcessLookupError:
@@ -181,25 +184,46 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     return cmd
 
 
+def _win_pid_alive(pid: int) -> bool:
+    """True if pid is still running. Does not signal or terminate it."""
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return int(code.value) == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _spawn_training(cmd: List[str], log_path: Path) -> subprocess.Popen:
     env = os.environ.copy()
     env.pop("all_proxy", None)
     env.pop("ALL_PROXY", None)
     env["PYTHONUNBUFFERED"] = "1"
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_bytes(b"")
-    fd = os.open(log_path, os.O_WRONLY | os.O_CREAT, 0o644)
+    # Text file, not os.open: Windows CRT fds are non-inheritable, so the
+    # child can inherit a dead stdout. Detach from the web UI console.
+    log_file = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
+    kwargs: Dict[str, Any] = {
+        "stdout": log_file,
+        "stderr": subprocess.STDOUT,
+        "cwd": str(PROJECT_ROOT),
+        "env": env,
+    }
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=fd,
-            stderr=subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT),
-            env=env,
-        )
+        return subprocess.Popen(cmd, **kwargs)
     finally:
-        os.close(fd)
-    return proc
+        log_file.close()
 
 
 def _parse_and_append_metrics(task_id: str, line: str, plot_every: int, state: Dict[str, Any]) -> None:
