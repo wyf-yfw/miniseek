@@ -345,6 +345,8 @@
     .arch-msg.err { color: var(--fail); }
     .arch-summary { font-size: 13px; line-height: 1.5; color: var(--ink); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
     .arch-part { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: #fff; }
+    .arch-part .lbl { font-weight: 600; margin-bottom: 4px; }
+    .arch-part .fact { color: var(--muted); font-size: 12px; line-height: 1.55; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     @media (max-width: 900px) {
       .arch-shell { grid-template-columns: 1fr; }
       .arch-canvas-wrap { grid-template-columns: 1fr; }
@@ -1609,15 +1611,17 @@
       const parts = (block.parts || []).filter((p) => p.kind !== "add" && !(p.id || "").startsWith("add_"));
       body.innerHTML = `<p class="field-hint">本层参数 ${fmtParams(block.params)}</p>` +
         parts.map((p) => {
-          const detail = p.detail ? Object.entries(p.detail).filter(([,v]) => v != null)
-            .map(([k,v]) => `${k}: ${v}`).join(" · ") : "";
-          const shape = p.shape_in
-            ? (p.shape_out && p.shape_out !== p.shape_in
-              ? `${p.shape_in} → ${p.shape_out}`
-              : p.shape_in)
-            : "";
-          return `<div class="arch-part"><div class="lbl">${p.label}</div>
-            <div class="sub">${shape ? shape + " · " : ""}${fmtParams(p.params)}${detail ? " · " + detail : ""}</div></div>`;
+          const lines = [];
+          if (p.shape_in) lines.push(`输入: ${p.shape_in}`);
+          if (p.shape_out && p.shape_out !== p.shape_in) lines.push(`输出: ${p.shape_out}`);
+          if (p.params != null) lines.push(`参数: ${fmtParams(p.params)}`);
+          if (p.detail) {
+            Object.entries(p.detail).forEach(([k, v]) => {
+              if (v != null) lines.push(`${k}: ${v}`);
+            });
+          }
+          const facts = lines.map((line) => `<div class="fact">${line}</div>`).join("");
+          return `<div class="arch-part"><div class="lbl">${p.label}</div>${facts}</div>`;
         }).join("");
       document.querySelectorAll(".arch-block.layer").forEach((el) => {
         el.classList.toggle("selected", el.dataset.id === block.id);
