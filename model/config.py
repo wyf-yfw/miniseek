@@ -3,6 +3,7 @@
 架构线：
 - dense → MiniSeek-D*（稠密 Decoder-only）
 - moe   → MiniSeek-M*（混合专家，实现见 model/moe.py）
+- tiny  → MiniSeek-D 冒烟档（同 DenseLM，极小超参）
 版本号写在 model_family / model_version（如 D0.1 / M0.1）。
 """
 
@@ -12,7 +13,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Literal
 
 
-Arch = Literal["dense", "moe"]
+Arch = Literal["dense", "moe", "tiny"]
 
 
 @dataclass
@@ -64,7 +65,7 @@ class ModelConfig:
             self.use_moe = True
             if self.model_family == "MiniSeek-D":
                 self.model_family = "MiniSeek-M"
-        elif self.arch == "dense":
+        elif self.arch in ("dense", "tiny"):
             self.use_moe = False
 
     @property
@@ -81,6 +82,21 @@ class ModelConfig:
     def from_dict(cls, d: Dict[str, Any]) -> "ModelConfig":
         known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in d.items() if k in known})
+
+    @classmethod
+    def tiny(cls) -> "ModelConfig":
+        return cls(
+            model_family="MiniSeek-D",
+            model_version="0.0-tiny",
+            arch="tiny",
+            d_model=64,
+            n_layers=2,
+            n_heads=1,
+            head_dim=64,
+            intermediate_size=256,
+            vocab_size=6400,
+            max_seq_len=256,
+        )
 
     def with_vocab_size(self, vocab_size: int) -> "ModelConfig":
         d = self.to_dict()
