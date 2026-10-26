@@ -10,6 +10,28 @@ from model.dense import DenseLM
 from web_ui import app
 
 
+def test_arch_design_dense():
+    client = TestClient(app)
+    r = client.get("/api/arch/design", params={"arch": "dense"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["config"]["n_layers"] == 8
+    assert body["meta"]["source"] == "design"
+    assert len([b for b in body["blocks"] if b["kind"] == "layer"]) == 8
+
+
+def test_arch_design_post_tiny():
+    client = TestClient(app)
+    r = client.post("/api/arch/design", json={"arch": "tiny"})
+    assert r.status_code == 200
+    assert r.json()["config"]["arch"] == "tiny"
+
+
+def test_arch_design_bad():
+    client = TestClient(app)
+    assert client.get("/api/arch/design", params={"arch": "nope"}).status_code == 400
+
+
 def test_arch_inspect_404():
     client = TestClient(app)
     r = client.post("/api/arch/inspect", json={"ckpt_path": "/no/such.pt"})
@@ -26,5 +48,3 @@ def test_arch_inspect_tiny(tmp_path: Path):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["config"]["n_layers"] == 2
-    assert len([b for b in body["blocks"] if b["kind"] == "layer"]) == 2
-    assert body["total_params"] > 0

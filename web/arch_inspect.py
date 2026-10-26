@@ -1,4 +1,4 @@
-"""Inspect MiniSeek checkpoints into architecture-viz JSON (CPU only)."""
+"""Architecture diagram data from MiniSeek design configs (and optional ckpt inspect)."""
 from __future__ import annotations
 
 import json
@@ -11,6 +11,210 @@ import torch
 from model.config import ModelConfig
 
 _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
+
+PRESET_ARCHS = ("tiny", "dense", "moe")
+
+
+def preset_config(arch: str) -> ModelConfig:
+    a = (arch or "").strip().lower()
+    if a == "tiny":
+        return ModelConfig.tiny()
+    if a == "dense":
+        return ModelConfig()  # D0.1 defaults
+    if a == "moe":
+        return ModelConfig(arch="moe")
+    raise ValueError(f"未知架构: {arch}（可选: tiny / dense / moe）")
+
+
+def _attn_params(d: int) -> int:
+    # qkv + o_proj (no bias)
+    return 3 * d * d + d * d
+
+
+def _dense_ffn_params(d: int, intermediate: int) -> int:
+    return d * intermediate + intermediate * d
+
+
+def _expert_ffn_params(d: int, moe_intermediate: int) -> int:
+    return d * moe_intermediate + moe_intermediate * d
+
+
+def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str, Any]:
+    """Build viz JSON from ModelConfig (no checkpoint). Param counts are design formulas."""
+    c = cfg.to_dict()
+    d = int(cfg.d_model)
+    vocab = int(cfg.vocab_size)
+    n_layers = int(cfg.n_layers)
+    tie = bool(cfg.tie_word_embeddings)
+    is_moe = bool(cfg.arch == "moe" or cfg.use_moe)
+
+    embed_params = vocab * d
+    blocks: List[Dict[str, Any]] = [
+        {
+            "id": "embed",
+            "kind": "embedding",
+            "label": "Token Embedding",
+            "params": embed_params,
+        }
+    ]
+
+    attn_p = _attn_params(d)
+    attn_norm_p = d
+    ffn_norm_p = d
+
+    for i in range(n_layers):
+        parts: List[Dict[str, Any]] = [
+            {
+                "id": "attn_norm",
+                "label": "RMSNorm (pre-Attn)",
+                "params": attn_norm_p,
+                "detail": {"eps": cfg.rms_norm_eps},
+            },
+            {
+                "id": "attn",
+                "label": "Attention",
+                "params": attn_p,
+                "detail": {
+                    "n_heads": cfg.n_heads,
+                    "head_dim": cfg.head_dim,
+                    "qkv": f"Linear({d}→{3*d})",
+                    "o_proj": f"Linear({d}→{d})",
+                },
+            },
+            {
+                "id": "residual_attn",
+                "label": "Residual + Attn",
+                "params": 0,
+                "detail": {"formula": "x = x + Attn(RMSNorm(x))"},
+            },
+            {
+                "id": "ffn_norm",
+                "label": "RMSNorm (pre-FFN)",
+                "params": ffn_norm_p,
+                "detail": {"eps": cfg.rms_norm_eps},
+            },
+        ]
+        if is_moe:
+            n_shared = int(cfg.n_shared_experts)
+            n_routed = int(cfg.n_routed_experts)
+            topk = int(cfg.num_experts_per_tok)
+            mid = int(cfg.moe_intermediate_size)
+            gate_p = n_routed * d
+            one_exp = _expert_ffn_params(d, mid)
+            shared_p = n_shared * one_exp
+            routed_p = n_routed * one_exp
+            parts.extend(
+                [
+                    {
+                        "id": "router",
+                        "label": "Router / Gate",
+                        "params": gate_p,
+                        "detail": {
+                            "n_routed_experts": n_routed,
+                            "num_experts_per_tok": topk,
+                        },
+                    },
+                    {
+                        "id": "shared_experts",
+                        "label": f"Shared Experts ×{n_shared}",
+                        "params": shared_p,
+                        "detail": {
+                            "n_shared_experts": n_shared,
+                            "moe_intermediate_size": mid,
+                            "params_per_expert": one_exp,
+                        },
+                    },
+                    {
+                        "id": "routed_experts",
+                        "label": f"Routed Experts ×{n_routed}",
+                        "params": routed_p,
+                        "detail": {
+                            "n_routed_experts": n_routed,
+                            "num_experts_per_tok": topk,
+                            "moe_intermediate_size": mid,
+                            "params_per_expert": one_exp,
+                        },
+                    },
+                ]
+            )
+            ffn_block_p = gate_p + shared_p + routed_p
+        else:
+            mid = int(cfg.intermediate_size)
+            ffn_p = _dense_ffn_params(d, mid)
+            parts.append(
+                {
+                    "id": "ffn",
+                    "label": "FFN (GELU)",
+                    "params": ffn_p,
+                    "detail": {
+                        "intermediate_size": mid,
+                        "fc1": f"Linear({d}→{mid})",
+                        "fc2": f"Linear({mid}→{d})",
+                    },
+                }
+            )
+            ffn_block_p = ffn_p
+
+        parts.append(
+            {
+                "id": "residual_ffn",
+                "label": "Residual + FFN",
+                "params": 0,
+                "detail": {"formula": "x = x + FFN(RMSNorm(x))"},
+            }
+        )
+        layer_params = attn_norm_p + attn_p + ffn_norm_p + ffn_block_p
+        blocks.append(
+            {
+                "id": f"layer-{i}",
+                "kind": "layer",
+                "index": i,
+                "label": f"Layer {i}",
+                "params": layer_params,
+                "parts": parts,
+            }
+        )
+
+    norm_p = d
+    lm_p = vocab * d
+    tail = [
+        {
+            "id": "norm",
+            "kind": "norm",
+            "label": "Final RMSNorm",
+            "params": norm_p,
+        },
+        {
+            "id": "lm_head",
+            "kind": "lm_head",
+            "label": "LM Head",
+            "params": lm_p,
+            "tied": tie,
+        },
+    ]
+
+    total = embed_params + sum(b["params"] for b in blocks if b["kind"] == "layer") + norm_p
+    if not tie:
+        total += lm_p
+
+    return {
+        "path": f"design:{cfg.arch}",
+        "config": c,
+        "meta": {
+            "step": None,
+            "loss": None,
+            "source": source,
+            "release_name": cfg.release_name,
+        },
+        "total_params": total,
+        "tie_word_embeddings": tie,
+        "blocks": blocks,
+        "tail": tail,
+    }
+
+
+def inspect_design(arch: str) -> Dict[str, Any]:
+    return inspect_from_config(preset_config(arch), source="design")
 
 
 def load_ckpt_blob(path: str | Path) -> Dict[str, Any]:

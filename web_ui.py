@@ -31,7 +31,7 @@ from model.dense import DenseLM
 from model.tokenizer import load_tokenizer
 from web import tasks_store as ts
 from web.task_runner import pid_alive, reconcile_task, start_task, stop_task
-from web.arch_inspect import inspect_path as arch_inspect_path
+from web.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 WEB_DIR = PROJECT_ROOT / "web"
@@ -351,6 +351,10 @@ class LoadRequest(BaseModel):
 
 class ArchInspectRequest(BaseModel):
     ckpt_path: str
+
+
+class ArchDesignRequest(BaseModel):
+    arch: str = "dense"  # tiny | dense | moe
 
 
 class GenerateRequest(BaseModel):
@@ -883,6 +887,23 @@ def status() -> dict:
     return {"running": False, "pid": None, "task_id": None, "gpu": _gpu_text()}
 
 
+
+
+
+@app.get("/api/arch/design")
+def api_arch_design_get(arch: str = "dense") -> dict:
+    try:
+        return arch_inspect_design(arch)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/arch/design")
+def api_arch_design(req: ArchDesignRequest) -> dict:
+    try:
+        return arch_inspect_design(req.arch)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/arch/inspect")

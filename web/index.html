@@ -373,6 +373,11 @@
       box-sizing: border-box;
     }
     .arch-block.compact-layers { border-style: dashed; }
+
+    .arch-block.part.struct {
+      background: #eef6ff;
+      border-style: dashed;
+    }
   </style>
 </head>
 <body>
@@ -583,21 +588,14 @@
     <section id="arch" class="panel">
       <div class="arch-shell">
         <aside class="arch-side">
-          <h2>Checkpoint</h2>
-          <label><span class="field-title">路径</span>
-            <span class="field-hint">训练产出的 .pt，或 HF 目录 / pytorch_model.bin。</span>
-            <div class="path-row">
-              <input id="arch-ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
-              <button type="button" class="btn-browse" data-for="arch-ckpt-manual" id="btn-pick-arch-ckpt">打开选择</button>
-            </div>
-          </label>
-          <label>最近/扫描到的列表
-            <select id="arch-ckpt-select"></select>
-          </label>
-          <div class="row">
-            <button type="button" id="btn-arch-refresh-ckpt">刷新列表</button>
-            <button type="button" id="btn-arch-inspect">解析</button>
+          <h2>模型规格</h2>
+          <p class="field-hint" style="margin:0 0 10px">按本仓库设计直接出图，无需加载 checkpoint。</p>
+          <div class="mode-row" id="arch-preset-row">
+            <button type="button" id="arch-preset-tiny" data-arch-preset="tiny">Tiny</button>
+            <button type="button" id="arch-preset-dense" class="active" data-arch-preset="dense">Dense</button>
+            <button type="button" id="arch-preset-moe" data-arch-preset="moe">MoE</button>
           </div>
+          <p id="arch-preset-hint" class="mode-hint">Dense：MiniSeek-D0.1（d=512 L=8）。</p>
           <p id="arch-msg" class="arch-msg"></p>
           <div id="arch-summary" class="arch-summary" style="display:none"></div>
         </aside>
@@ -615,7 +613,7 @@
           </div>
           <div class="arch-canvas-wrap">
             <div id="arch-canvas" class="arch-canvas">
-              <span class="chat-empty" id="arch-empty">选择 checkpoint 后点「解析」。</span>
+              <span class="chat-empty" id="arch-empty">点左侧 Tiny / Dense / MoE 查看设计架构。</span>
             </div>
             <aside id="arch-drawer" class="arch-drawer" hidden>
               <div class="arch-drawer-head">
@@ -676,7 +674,6 @@
       "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
       "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
       "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
-      "arch-ckpt-manual": { title: "选择架构 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
     };
 
     async function pickPath(inputId) {
@@ -1526,13 +1523,21 @@
     });
     refreshContCheckpoints().catch(() => {});
 
-    // --- 架构可视化 ---
+    // --- 架构可视化（按设计规格，不加载 ckpt）---
     let archData = null;
     let archSelectedLayer = null;
+    let archViewMode = "standard";
+    let archPreset = "dense";
 
+    const ARCH_PRESET_HINT = {
+      tiny: "Tiny：冒烟档 DenseLM，d=64 L=2，适合 CPU。",
+      dense: "Dense：MiniSeek-D0.1，d=512 L=8 FFN=2048。",
+      moe: "MoE：MiniSeek-M0.1，同主干 + 1 shared / 8 routed / top-2（设计规格）。",
+    };
 
     function fmtParams(n) {
       if (n == null) return "-";
+      if (n === 0) return "结构（无独立参数）";
       if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
       if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
       return String(n);
@@ -1544,38 +1549,12 @@
       el.classList.toggle("err", !!isErr);
     }
 
-    async function refreshArchCkpts() {
-      const sel = $("arch-ckpt-select");
-      if (!sel) return;
-      let list = [];
-      try {
-        const res = await fetch("/api/checkpoints");
-        if (res.ok) list = (await res.json()).files || [];
-      } catch (_) { list = []; }
-      const cur = sel.value;
-      sel.innerHTML = "";
-      if (!list.length) {
-        const o = document.createElement("option");
-        o.value = "";
-        o.textContent = "无可用 checkpoint";
-        sel.appendChild(o);
-      } else {
-        for (const f of list) {
-          const path = typeof f === "string" ? f : (f.path || f);
-          const o = document.createElement("option");
-          o.value = path;
-          o.textContent = path;
-          sel.appendChild(o);
-        }
-        if (cur) sel.value = cur;
-      }
-    }
-
     function closeArchDrawer() {
       archSelectedLayer = null;
       const drawer = $("arch-drawer");
       if (drawer) drawer.hidden = true;
       document.querySelectorAll(".arch-block.layer").forEach((el) => el.classList.remove("selected"));
+      document.querySelectorAll(".arch-layer-group").forEach((el) => el.classList.remove("selected"));
     }
 
     function openArchDrawer(block) {
@@ -1597,8 +1576,6 @@
       });
     }
 
-    let archViewMode = "standard";
-
     function appendConnector(canvas) {
       const c = document.createElement("div");
       c.className = "arch-connector";
@@ -1607,7 +1584,11 @@
 
     function makeBlock(b, extraClass) {
       const el = document.createElement("div");
-      el.className = "arch-block" + (extraClass ? " " + extraClass : "") + (b.kind === "layer" ? " layer" : "");
+      const isStruct = (b.params === 0) || (b.id || "").startsWith("residual");
+      el.className = "arch-block"
+        + (extraClass ? " " + extraClass : "")
+        + (b.kind === "layer" ? " layer" : "")
+        + (isStruct ? " struct" : "");
       el.dataset.id = b.id;
       const detailBits = b.detail ? Object.entries(b.detail).filter(([,v]) => v != null)
         .map(([k,v]) => `${k}=${v}`).join(" · ") : "";
@@ -1625,9 +1606,9 @@
       const meta = data.meta || {};
       $("arch-summary").style.display = "block";
       $("arch-summary").innerHTML =
-        `<div><b>${cfg.arch || "-"}</b> · d=${cfg.d_model || "-"} · L=${cfg.n_layers || "-"} · heads=${cfg.n_heads || "-"}</div>` +
-        `<div>总参数 ${fmtParams(data.total_params)}${data.tie_word_embeddings ? " · tie embeddings" : ""}</div>` +
-        `<div class="field-hint">step=${meta.step ?? "-"} · loss=${meta.loss ?? "-"} · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
+        `<div><b>${meta.release_name || cfg.arch || "-"}</b> · d=${cfg.d_model || "-"} · L=${cfg.n_layers || "-"} · heads=${cfg.n_heads || "-"}</div>` +
+        `<div>设计参数量 ${fmtParams(data.total_params)}${data.tie_word_embeddings ? " · tie embeddings" : ""}</div>` +
+        `<div class="field-hint">来源=设计规格 · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
 
       const blocks = data.blocks || [];
       const tail = data.tail || [];
@@ -1680,7 +1661,7 @@
           group.dataset.id = b.id;
           const head = document.createElement("div");
           head.className = "arch-layer-head";
-          head.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)} · 点击看摘要</div>`;
+          head.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)} · Pre-Norm + 残差</div>`;
           head.addEventListener("click", (ev) => {
             ev.stopPropagation();
             document.querySelectorAll(".arch-layer-group").forEach((g) => g.classList.remove("selected"));
@@ -1701,7 +1682,6 @@
           canvas.appendChild(group);
         });
       } else {
-        // standard
         [...embed, ...layers, ...tail].forEach((b) => {
           const el = makeBlock(b);
           if (b.kind === "layer") {
@@ -1714,10 +1694,36 @@
         });
       }
 
-      $("arch-status-text").textContent = "已解析";
+      $("arch-status-text").textContent = "已加载设计";
       $("arch-dot").className = "dot finished";
       closeArchDrawer();
     }
+
+    async function loadArchDesign(arch) {
+      archPreset = arch || archPreset || "dense";
+      document.querySelectorAll("#arch-preset-row button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.archPreset === archPreset);
+      });
+      $("arch-preset-hint").textContent = ARCH_PRESET_HINT[archPreset] || "";
+      setArchMsg("加载设计…");
+      $("arch-status-text").textContent = "加载中…";
+      $("arch-dot").className = "dot running";
+      try {
+        const res = await fetch(`/api/arch/design?arch=${encodeURIComponent(archPreset)}`);
+        if (!res.ok) throw new Error(await readError(res));
+        const data = await res.json();
+        renderArch(data);
+        setArchMsg("");
+      } catch (e) {
+        setArchMsg(String(e.message || e), true);
+        $("arch-status-text").textContent = "失败";
+        $("arch-dot").className = "dot failed";
+      }
+    }
+
+    document.querySelectorAll("#arch-preset-row button").forEach((btn) => {
+      btn.addEventListener("click", () => loadArchDesign(btn.dataset.archPreset));
+    });
 
     document.querySelectorAll(".arch-view-modes button").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1728,45 +1734,12 @@
       });
     });
 
-    $("btn-arch-refresh-ckpt").addEventListener("click", refreshArchCkpts);
-    $("arch-ckpt-select").addEventListener("change", () => {
-      if ($("arch-ckpt-select").value) $("arch-ckpt-manual").value = $("arch-ckpt-select").value;
-    });
     $("btn-arch-drawer-close").addEventListener("click", closeArchDrawer);
     $("arch-canvas").addEventListener("click", () => closeArchDrawer());
 
-    $("btn-arch-inspect").addEventListener("click", async () => {
-      const path = ($("arch-ckpt-manual").value || "").trim() || ($("arch-ckpt-select").value || "").trim();
-      if (!path) {
-        setArchMsg("请先选择或粘贴 checkpoint 路径", true);
-        return;
-      }
-      setArchMsg("解析中…");
-      $("arch-status-text").textContent = "解析中…";
-      $("arch-dot").className = "dot running";
-      $("btn-arch-inspect").disabled = true;
-      try {
-        const res = await fetch("/api/arch/inspect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ckpt_path: path }),
-        });
-        if (!res.ok) throw new Error(await readError(res));
-        const data = await res.json();
-        renderArch(data);
-        setArchMsg("解析完成");
-      } catch (e) {
-        setArchMsg(String(e.message || e), true);
-        $("arch-status-text").textContent = "失败";
-        $("arch-dot").className = "dot failed";
-      } finally {
-        $("btn-arch-inspect").disabled = false;
-      }
-    });
-
     document.querySelectorAll(".page-tabs button").forEach((btn) => {
       btn.addEventListener("click", () => {
-        if (btn.dataset.tab === "arch") refreshArchCkpts();
+        if (btn.dataset.tab === "arch" && !archData) loadArchDesign(archPreset);
       });
     });
 
