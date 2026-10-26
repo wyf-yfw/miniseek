@@ -39,6 +39,16 @@ def _expert_ffn_params(d: int, moe_intermediate: int) -> int:
     return d * moe_intermediate + moe_intermediate * d
 
 
+def _shape(*, vocab: bool = False, tokens: bool = False) -> str:
+    """Compact activation shape labels: [b,t], [b,t,d], or [b,t,v]."""
+    if tokens:
+        return "[b,t]"
+    if vocab:
+        return "[b,t,v]"
+    return "[b,t,d]"
+
+
+
 def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str, Any]:
     """Build viz JSON from ModelConfig (no checkpoint). Param counts are design formulas."""
     c = cfg.to_dict()
@@ -49,12 +59,18 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
     is_moe = bool(cfg.arch == "moe" or cfg.use_moe)
 
     embed_params = vocab * d
+    bt = _shape(tokens=True)
+    btd = _shape()
+    btv = _shape(vocab=True)
+
     blocks: List[Dict[str, Any]] = [
         {
             "id": "embed",
             "kind": "embedding",
             "label": "Token Embedding",
             "params": embed_params,
+            "shape_in": bt,
+            "shape_out": btd,
         }
     ]
 
@@ -68,12 +84,16 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "id": "attn_norm",
                 "label": "RMSNorm (pre-Attn)",
                 "params": attn_norm_p,
+                "shape_in": btd,
+                "shape_out": btd,
                 "detail": {"eps": cfg.rms_norm_eps},
             },
             {
                 "id": "attn",
                 "label": "Attention",
                 "params": attn_p,
+                "shape_in": btd,
+                "shape_out": btd,
                 "detail": {
                     "n_heads": cfg.n_heads,
                     "head_dim": cfg.head_dim,
@@ -86,11 +106,15 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "label": "⊕",
                 "params": 0,
                 "kind": "add",
+                "shape_in": btd,
+                "shape_out": btd,
             },
             {
                 "id": "ffn_norm",
                 "label": "RMSNorm (pre-FFN)",
                 "params": ffn_norm_p,
+                "shape_in": btd,
+                "shape_out": btd,
                 "detail": {"eps": cfg.rms_norm_eps},
             },
         ]
@@ -109,6 +133,8 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "id": "router",
                         "label": "Router / Gate",
                         "params": gate_p,
+                        "shape_in": btd,
+                        "shape_out": btd,
                         "detail": {
                             "n_routed_experts": n_routed,
                             "num_experts_per_tok": topk,
@@ -118,6 +144,8 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "id": "shared_experts",
                         "label": f"Shared Experts ×{n_shared}",
                         "params": shared_p,
+                        "shape_in": btd,
+                        "shape_out": btd,
                         "detail": {
                             "n_shared_experts": n_shared,
                             "moe_intermediate_size": mid,
@@ -128,6 +156,8 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "id": "routed_experts",
                         "label": f"Routed Experts ×{n_routed}",
                         "params": routed_p,
+                        "shape_in": btd,
+                        "shape_out": btd,
                         "detail": {
                             "n_routed_experts": n_routed,
                             "num_experts_per_tok": topk,
@@ -146,6 +176,8 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                     "id": "ffn",
                     "label": "FFN (GELU)",
                     "params": ffn_p,
+                    "shape_in": btd,
+                    "shape_out": btd,
                     "detail": {
                         "intermediate_size": mid,
                         "fc1": f"Linear({d}→{mid})",
@@ -161,6 +193,8 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                 "label": "⊕",
                 "params": 0,
                 "kind": "add",
+                "shape_in": btd,
+                "shape_out": btd,
             }
         )
         layer_params = attn_norm_p + attn_p + ffn_norm_p + ffn_block_p
@@ -187,6 +221,8 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
             "kind": "norm",
             "label": "Final RMSNorm",
             "params": norm_p,
+            "shape_in": btd,
+            "shape_out": btd,
         },
         {
             "id": "lm_head",
@@ -194,6 +230,8 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
             "label": "LM Head",
             "params": lm_p,
             "tied": tie,
+            "shape_in": btd,
+            "shape_out": btv,
         },
     ]
 

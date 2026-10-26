@@ -324,6 +324,13 @@
     }
     .arch-block .lbl { font-weight: 600; }
     .arch-block .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .arch-block .shape {
+      color: var(--muted);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      margin-top: 3px;
+      font-weight: 500;
+    }
     .arch-connector { width: 2px; height: 12px; background: var(--line); }
     .arch-drawer {
       width: 280px;
@@ -377,6 +384,14 @@
       box-sizing: border-box;
     }
     .arch-layer-group .arch-block.part .sub { display: none; }
+    .arch-layer-group .arch-block.part .shape {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      margin-top: 3px;
+      font-weight: 500;
+    }
     .arch-block.part.add-node {
       width: 36px;
       height: 36px;
@@ -1596,8 +1611,13 @@
         parts.map((p) => {
           const detail = p.detail ? Object.entries(p.detail).filter(([,v]) => v != null)
             .map(([k,v]) => `${k}: ${v}`).join(" · ") : "";
+          const shape = p.shape_in
+            ? (p.shape_out && p.shape_out !== p.shape_in
+              ? `${p.shape_in} → ${p.shape_out}`
+              : p.shape_in)
+            : "";
           return `<div class="arch-part"><div class="lbl">${p.label}</div>
-            <div class="sub">${fmtParams(p.params)}${detail ? " · " + detail : ""}</div></div>`;
+            <div class="sub">${shape ? shape + " · " : ""}${fmtParams(p.params)}${detail ? " · " + detail : ""}</div></div>`;
         }).join("");
       document.querySelectorAll(".arch-block.layer").forEach((el) => {
         el.classList.toggle("selected", el.dataset.id === block.id);
@@ -1614,6 +1634,7 @@
       const el = document.createElement("div");
       const isAdd = b.kind === "add" || (b.id || "").startsWith("add_");
       const isStruct = !isAdd && ((b.params === 0) || (b.id || "").startsWith("residual"));
+      const isPart = extraClass === "part";
       el.className = "arch-block"
         + (extraClass ? " " + extraClass : "")
         + (b.kind === "layer" ? " layer" : "")
@@ -1624,9 +1645,21 @@
         el.innerHTML = `<div class="lbl">⊕</div>`;
         return el;
       }
+      const shapeIn = b.shape_in || "";
+      const shapeOut = b.shape_out || "";
+      let shapeHtml = "";
+      if (shapeIn && shapeOut && shapeOut !== shapeIn) {
+        shapeHtml = `<div class="shape">${shapeIn} → ${shapeOut}</div>`;
+      } else if (shapeIn) {
+        shapeHtml = `<div class="shape">${shapeIn}</div>`;
+      }
+      if (isPart) {
+        el.innerHTML = `<div class="lbl">${b.label}</div>${shapeHtml}`;
+        return el;
+      }
       const detailBits = b.detail ? Object.entries(b.detail).filter(([,v]) => v != null)
         .map(([k,v]) => `${k}=${v}`).join(" · ") : "";
-      el.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)}${b.tied ? " · tied" : ""}${detailBits ? " · " + detailBits : ""}</div>`;
+      el.innerHTML = `<div class="lbl">${b.label}</div>${shapeHtml}<div class="sub">${fmtParams(b.params)}${b.tied ? " · tied" : ""}${detailBits ? " · " + detailBits : ""}</div>`;
       return el;
     }
 
@@ -1759,7 +1792,7 @@
       } else if (archViewMode === "detailed") {
         [...embed, ...layers, ...tail].forEach((b) => {
           if (b.kind !== "layer") {
-            pushNode(makeBlock(b));
+            pushNode(makeBlock(b, "part"));
             return;
           }
           if (!first) appendConnector(canvas);
@@ -1786,6 +1819,8 @@
               label: part.label,
               params: part.params,
               detail: part.detail,
+              shape_in: part.shape_in,
+              shape_out: part.shape_out,
             }, "part");
             pel.dataset.node = part.id;
             group.appendChild(pel);
