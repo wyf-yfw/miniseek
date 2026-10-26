@@ -494,6 +494,115 @@
     .moe-bar-row.hot .lab, .moe-bar-row.hot .pct { color: #b91c1c; font-weight: 600; }
     .moe-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
 
+
+    /* In-page filesystem path picker (remote / mobile Funnel) */
+    .fs-picker[hidden] { display: none !important; }
+    .fs-picker {
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; align-items: flex-end; justify-content: center;
+      padding: 12px;
+    }
+    .fs-picker-backdrop {
+      position: absolute; inset: 0;
+      background: rgba(17, 24, 39, 0.45);
+    }
+    .fs-picker-panel {
+      position: relative; z-index: 1;
+      width: min(560px, 100%);
+      max-height: min(82vh, 720px);
+      display: flex; flex-direction: column;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 18px 48px rgba(0,0,0,0.22);
+      overflow: hidden;
+    }
+    @media (min-width: 640px) {
+      .fs-picker { align-items: center; }
+    }
+    .fs-picker-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 14px 16px 8px; border-bottom: 1px solid var(--line);
+    }
+    .fs-picker-title { font-weight: 700; font-size: 15px; }
+    .fs-picker-close {
+      border: 0; background: transparent; cursor: pointer;
+      font-size: 22px; line-height: 1; color: var(--muted);
+      width: 36px; height: 36px; border-radius: 8px;
+    }
+    .fs-picker-close:hover { background: #f3f4f6; color: var(--ink); }
+    .fs-picker-path {
+      margin: 8px 16px 0;
+      padding: 8px 10px;
+      background: #f9fafb;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-all;
+      color: var(--ink);
+    }
+    .fs-picker-toolbar {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      padding: 10px 16px 0;
+    }
+    .fs-picker-toolbar button {
+      border: 1px solid var(--line); background: #f9fafb;
+      border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer;
+      min-height: 40px;
+    }
+    .fs-picker-toolbar button:hover { background: #f3f4f6; }
+    .fs-picker-toolbar button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .fs-picker-list {
+      list-style: none; margin: 10px 0 0; padding: 0 8px;
+      overflow: auto; flex: 1; min-height: 180px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .fs-entry {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 8px; align-items: center;
+      padding: 10px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      min-height: 44px;
+      user-select: none;
+    }
+    .fs-entry:hover { background: #f3f4f6; }
+    .fs-entry.selected {
+      background: #eff6ff;
+      outline: 1px solid #bfdbfe;
+    }
+    .fs-entry .fs-icon { text-align: center; }
+    .fs-entry .fs-name {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--ink); font-size: 14px;
+    }
+    .fs-entry.is-dir .fs-name { font-weight: 600; }
+    .fs-entry .fs-meta {
+      color: var(--muted); font-size: 11px;
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .fs-picker-status {
+      padding: 6px 16px; color: var(--muted); font-size: 12px; min-height: 1.4em;
+    }
+    .fs-picker-actions {
+      display: flex; gap: 8px; justify-content: flex-end;
+      padding: 12px 16px 16px; border-top: 1px solid var(--line);
+    }
+    .fs-picker-actions button {
+      border: 1px solid var(--line); background: #fff;
+      border-radius: 8px; padding: 10px 16px; font: inherit; cursor: pointer;
+      min-height: 44px; min-width: 88px;
+    }
+    .fs-picker-actions button.primary {
+      background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+    }
+    .fs-picker-actions button.primary:disabled {
+      opacity: 0.45; cursor: not-allowed;
+    }
+    .fs-picker-actions button:hover:not(:disabled) { filter: brightness(0.97); }
+
   </style>
 </head>
 <body>
@@ -848,6 +957,29 @@
     </section>
   </main>
 
+
+  <div id="fs-picker" class="fs-picker" hidden>
+    <div class="fs-picker-backdrop" id="fs-picker-backdrop"></div>
+    <div class="fs-picker-panel" role="dialog" aria-modal="true" aria-labelledby="fs-picker-title">
+      <div class="fs-picker-head">
+        <div class="fs-picker-title" id="fs-picker-title">选择文件</div>
+        <button type="button" class="fs-picker-close" id="fs-picker-close" aria-label="关闭">×</button>
+      </div>
+      <div class="fs-picker-path" id="fs-picker-path">—</div>
+      <div class="fs-picker-toolbar">
+        <button type="button" id="fs-picker-up">上级</button>
+        <button type="button" id="fs-picker-root">项目</button>
+        <button type="button" id="fs-picker-home">家目录</button>
+      </div>
+      <ul class="fs-picker-list" id="fs-picker-list"></ul>
+      <div class="fs-picker-status" id="fs-picker-status"></div>
+      <div class="fs-picker-actions">
+        <button type="button" id="fs-picker-cancel">取消</button>
+        <button type="button" class="primary" id="fs-picker-confirm" disabled>确定</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     let defaultsMap = {};
@@ -888,42 +1020,222 @@
     }
 
     const PATH_PICK = {
-      "data-path": { title: "选择训练数据", filetypes: "JSONL|*.jsonl;All|*.*" },
-      "resume": { title: "选择 Resume checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
-      "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
-      "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
-      "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "data-path": { title: "选择训练数据", filetypes: "JSONL|*.jsonl;All|*.*", kind: "file" },
+      "resume": { title: "选择 Resume checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "bench-ckpt": { title: "选择评测 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "any" },
     };
+
+    const FS_PROJECT_ROOT = "/home/wyf/miniseek";
+    let fsPicker = {
+      inputId: null,
+      kind: "file",
+      filetypes: "",
+      currentPath: "",
+      parentPath: null,
+      roots: [],
+      selectedPath: null,
+      selectedIsDir: false,
+    };
+
+    function formatBytes(n) {
+      if (typeof n !== "number" || !isFinite(n)) return "";
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+      return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+    }
+
+    function updateFsConfirmBtn() {
+      const btn = $("fs-picker-confirm");
+      if (!btn) return;
+      const kind = fsPicker.kind || "file";
+      if (kind === "dir") {
+        btn.disabled = !fsPicker.currentPath;
+        btn.textContent = "选择此目录";
+      } else if (kind === "any") {
+        if (fsPicker.selectedPath && !fsPicker.selectedIsDir) {
+          btn.disabled = false;
+          btn.textContent = "确定";
+        } else {
+          btn.disabled = !fsPicker.currentPath;
+          btn.textContent = "选择此目录";
+        }
+      } else {
+        btn.disabled = !(fsPicker.selectedPath && !fsPicker.selectedIsDir);
+        btn.textContent = "确定";
+      }
+    }
+
+    function closeFsPicker() {
+      const box = $("fs-picker");
+      if (box) box.hidden = true;
+      document.body.style.overflow = "";
+    }
+
+    function confirmFsPicker() {
+      const el = fsPicker.inputId ? $(fsPicker.inputId) : null;
+      let path = null;
+      const kind = fsPicker.kind || "file";
+      if (kind === "dir") {
+        path = fsPicker.currentPath;
+      } else if (kind === "any") {
+        path = (fsPicker.selectedPath && !fsPicker.selectedIsDir)
+          ? fsPicker.selectedPath
+          : fsPicker.currentPath;
+      } else {
+        path = fsPicker.selectedPath;
+      }
+      if (el && path) el.value = path;
+      closeFsPicker();
+    }
+
+    async function loadFsDir(path) {
+      const list = $("fs-picker-list");
+      const status = $("fs-picker-status");
+      const pathEl = $("fs-picker-path");
+      if (!list || !status) return;
+      status.textContent = "加载中…";
+      list.innerHTML = "";
+      fsPicker.selectedPath = null;
+      fsPicker.selectedIsDir = false;
+      updateFsConfirmBtn();
+      try {
+        const q = new URLSearchParams({
+          path: path || "",
+          filetypes: fsPicker.filetypes || "",
+        });
+        const r = await fetch("/api/fs/list?" + q.toString());
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const detail = typeof data.detail === "string" ? data.detail : "列出目录失败";
+          if (r.status === 404 && path && path !== FS_PROJECT_ROOT) {
+            status.textContent = detail + "，回到项目目录…";
+            loadFsDir(FS_PROJECT_ROOT);
+            return;
+          }
+          status.textContent = detail;
+          return;
+        }
+        fsPicker.currentPath = data.path || "";
+        fsPicker.parentPath = data.parent || null;
+        fsPicker.roots = Array.isArray(data.roots) ? data.roots : [];
+        if (pathEl) pathEl.textContent = fsPicker.currentPath || "—";
+        const up = $("fs-picker-up");
+        if (up) up.disabled = !fsPicker.parentPath;
+        const entries = Array.isArray(data.entries) ? data.entries : [];
+        status.textContent = entries.length ? (entries.length + " 项") : "（空目录）";
+        for (const ent of entries) {
+          const li = document.createElement("li");
+          li.className = "fs-entry " + (ent.is_dir ? "is-dir" : "is-file");
+          const icon = document.createElement("span");
+          icon.className = "fs-icon";
+          icon.textContent = ent.is_dir ? "📁" : "📄";
+          const name = document.createElement("span");
+          name.className = "fs-name";
+          name.textContent = ent.name;
+          const meta = document.createElement("span");
+          meta.className = "fs-meta";
+          meta.textContent = ent.is_dir ? "" : formatBytes(ent.size);
+          li.appendChild(icon);
+          li.appendChild(name);
+          li.appendChild(meta);
+          li.addEventListener("click", () => {
+            if (ent.is_dir) {
+              loadFsDir(ent.path);
+              return;
+            }
+            if (fsPicker.selectedPath === ent.path) {
+              confirmFsPicker();
+              return;
+            }
+            fsPicker.selectedPath = ent.path;
+            fsPicker.selectedIsDir = false;
+            list.querySelectorAll(".fs-entry.selected").forEach((n) => n.classList.remove("selected"));
+            li.classList.add("selected");
+            updateFsConfirmBtn();
+          });
+          list.appendChild(li);
+        }
+        updateFsConfirmBtn();
+      } catch (err) {
+        status.textContent = "加载失败：" + err;
+      }
+    }
+
+    function openFsPicker(opts) {
+      fsPicker = {
+        inputId: opts.inputId,
+        kind: opts.kind || "file",
+        filetypes: opts.filetypes || "All|*.*",
+        currentPath: "",
+        parentPath: null,
+        roots: [],
+        selectedPath: null,
+        selectedIsDir: false,
+      };
+      const title = $("fs-picker-title");
+      if (title) title.textContent = opts.title || "选择文件";
+      const box = $("fs-picker");
+      if (box) box.hidden = false;
+      document.body.style.overflow = "hidden";
+      updateFsConfirmBtn();
+      const start = (opts.initial || "").trim() || FS_PROJECT_ROOT;
+      loadFsDir(start);
+    }
 
     async function pickPath(inputId) {
       const el = $(inputId);
       if (!el || el.disabled) return;
-      const cfg = PATH_PICK[inputId] || { title: "选择文件", filetypes: "All|*.*" };
-      try {
-        const r = await fetch("/api/pick-file", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            kind: "file",
-            title: cfg.title,
-            initial: el.value.trim(),
-            filetypes: cfg.filetypes,
-          }),
-        });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          alert(typeof data.detail === "string" ? data.detail : "打开文件选择失败");
-          return;
-        }
-        if (data.path) el.value = data.path;
-      } catch (err) {
-        alert("打开文件选择失败：" + err);
-      }
+      const cfg = PATH_PICK[inputId] || { title: "选择文件", filetypes: "All|*.*", kind: "file" };
+      openFsPicker({
+        inputId,
+        title: cfg.title,
+        filetypes: cfg.filetypes,
+        kind: cfg.kind || "file",
+        initial: el.value.trim(),
+      });
     }
 
     document.querySelectorAll(".btn-browse").forEach((btn) => {
       btn.addEventListener("click", () => pickPath(btn.dataset.for));
     });
+
+    (function wireFsPicker() {
+      const close = () => closeFsPicker();
+      const c = $("fs-picker-close");
+      const cancel = $("fs-picker-cancel");
+      const backdrop = $("fs-picker-backdrop");
+      const confirm = $("fs-picker-confirm");
+      const up = $("fs-picker-up");
+      const rootBtn = $("fs-picker-root");
+      const homeBtn = $("fs-picker-home");
+      if (c) c.addEventListener("click", close);
+      if (cancel) cancel.addEventListener("click", close);
+      if (backdrop) backdrop.addEventListener("click", close);
+      if (confirm) confirm.addEventListener("click", confirmFsPicker);
+      if (up) up.addEventListener("click", () => {
+        if (fsPicker.parentPath) loadFsDir(fsPicker.parentPath);
+      });
+      if (rootBtn) rootBtn.addEventListener("click", () => {
+        const root = (fsPicker.roots && fsPicker.roots[0]) || FS_PROJECT_ROOT;
+        loadFsDir(root);
+      });
+      if (homeBtn) homeBtn.addEventListener("click", () => {
+        const home = (fsPicker.roots && fsPicker.roots[1]) || "/home/wyf";
+        loadFsDir(home);
+      });
+      document.addEventListener("keydown", (ev) => {
+        const box = $("fs-picker");
+        if (!box || box.hidden) return;
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          closeFsPicker();
+        }
+      });
+    })();
 
         function setFormEnabled(editable) {
       ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",

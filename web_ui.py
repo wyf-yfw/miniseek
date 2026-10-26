@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import glob
 import json
 import os
@@ -592,94 +593,150 @@ app = FastAPI(title="MiniSeek", lifespan=lifespan)
 
 
 class PickFileBody(BaseModel):
-    kind: str = "file"  # file | dir
+    kind: str = "file"  # file | dir | any (kept for old clients)
     title: str = "选择文件"
     initial: str = ""
     filetypes: str = ""  # e.g. "JSONL|*.jsonl;Checkpoint|*.pt;All|*.*"
 
 
-def _parse_filetypes(spec: str):
-    """'JSONL|*.jsonl;Checkpoint|*.pt' -> tkinter filetypes list."""
-    pairs = []
+# In-page path picker may browse under the project and the user home.
+FS_ALLOWED_ROOTS: List[Path] = [
+    PROJECT_ROOT.resolve(),
+    Path.home().resolve(),
+]
+
+
+def _parse_glob_patterns(spec: str) -> List[str]:
+    """'JSONL|*.jsonl;Checkpoint|*.pt;All|*.*' -> ['*.jsonl', '*.pt', '*.*']."""
+    patterns: List[str] = []
     for part in (spec or "").split(";"):
         part = part.strip()
         if not part:
             continue
-        if "|" in part:
-            label, pattern = part.split("|", 1)
-        else:
-            label, pattern = part, part
-        pairs.append((label.strip() or pattern, pattern.strip()))
-    if not pairs:
-        pairs = [("All files", "*.*")]
-    # Always allow all as last option if not present
-    if not any(p[1] == "*.*" for p in pairs):
-        pairs.append(("All files", "*.*"))
-    return pairs
+        pattern = part.split("|", 1)[1].strip() if "|" in part else part
+        if pattern and pattern not in patterns:
+            patterns.append(pattern)
+    return patterns or ["*.*"]
+
+
+def _effective_patterns(patterns: List[str]) -> List[str]:
+    """Prefer specific globs; only treat *.*/ * as allow-all when alone."""
+    specific = [p for p in patterns if p not in {"*.*", "*", ""}]
+    return specific or ["*.*"]
+
+
+def _match_filename(name: str, patterns: List[str]) -> bool:
+    eff = _effective_patterns(patterns)
+    if any(p in {"*.*", "*", ""} for p in eff):
+        return True
+    return any(fnmatch.fnmatch(name, p) for p in eff)
+
+
+def _is_under_allowed(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    for root in FS_ALLOWED_ROOTS:
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _safe_fs_path(raw: Optional[str]) -> Path:
+    """Resolve a user path and reject escapes outside allowed roots."""
+    text = (raw or "").strip()
+    if "\x00" in text:
+        raise HTTPException(status_code=400, detail="非法路径")
+    if not text:
+        return PROJECT_ROOT.resolve()
+    p = Path(text)
+    try:
+        p = (PROJECT_ROOT / p).resolve() if not p.is_absolute() else p.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=f"非法路径：{exc}") from exc
+    if not _is_under_allowed(p):
+        raise HTTPException(status_code=403, detail="路径超出允许范围（项目目录或家目录）")
+    return p
+
+
+@app.get("/api/fs/list")
+def api_fs_list(path: str = "", filetypes: str = "") -> dict:
+    """List a directory for the in-page path picker. Never returns file contents."""
+    target = _safe_fs_path(path)
+    if target.exists() and target.is_file():
+        target = target.parent
+        if not _is_under_allowed(target):
+            raise HTTPException(status_code=403, detail="路径超出允许范围（项目目录或家目录）")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"路径不存在: {target}")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="不是目录")
+
+    patterns = _parse_glob_patterns(filetypes)
+    try:
+        children = list(target.iterdir())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"无权限读取: {exc}") from exc
+
+    entries: List[dict] = []
+    for child in children:
+        name = child.name
+        if name.startswith("."):
+            continue
+        try:
+            is_dir = child.is_dir()
+        except OSError:
+            continue
+        try:
+            resolved = child.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if not _is_under_allowed(resolved):
+            continue
+        if not is_dir and not _match_filename(name, patterns):
+            continue
+        item: dict = {
+            "name": name,
+            "path": str(resolved),
+            "is_dir": is_dir,
+        }
+        if not is_dir:
+            try:
+                item["size"] = child.stat().st_size
+            except OSError:
+                item["size"] = None
+        entries.append(item)
+
+    entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+
+    parent = target.parent
+    parent_out: Optional[str] = None
+    try:
+        parent_res = parent.resolve()
+        if parent_res != target.resolve() and _is_under_allowed(parent_res):
+            parent_out = str(parent_res)
+    except (OSError, RuntimeError):
+        parent_out = None
+
+    return {
+        "path": str(target.resolve()),
+        "parent": parent_out,
+        "entries": entries,
+        "roots": [str(r) for r in FS_ALLOWED_ROOTS],
+    }
 
 
 @app.post("/api/pick-file")
 def api_pick_file(body: PickFileBody) -> dict:
-    """Open a native OS file/folder dialog on the machine running this UI.
-
-    Browser <input type=file> cannot expose absolute paths; for local training
-    we need real filesystem paths, so the server pops the system dialog.
-    """
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except Exception as exc:  # pragma: no cover
-        raise HTTPException(status_code=500, detail=f"无法打开系统文件对话框：{exc}") from exc
-
-    initial = (body.initial or "").strip()
-    init_dir = ""
-    init_file = ""
-    if initial:
-        p = Path(initial)
-        if p.is_dir():
-            init_dir = str(p)
-        else:
-            init_dir = str(p.parent) if p.parent.exists() else ""
-            init_file = p.name
-
-    result: dict = {"path": None, "cancelled": True}
-
-    def _open() -> None:
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            root.attributes("-topmost", True)
-        except Exception:
-            pass
-        root.update()
-        try:
-            if body.kind == "dir":
-                path = filedialog.askdirectory(
-                    parent=root,
-                    title=body.title or "选择目录",
-                    initialdir=init_dir or str(PROJECT_ROOT),
-                )
-            else:
-                path = filedialog.askopenfilename(
-                    parent=root,
-                    title=body.title or "选择文件",
-                    initialdir=init_dir or str(PROJECT_ROOT),
-                    initialfile=init_file or "",
-                    filetypes=_parse_filetypes(body.filetypes),
-                )
-        finally:
-            root.destroy()
-        if path:
-            result["path"] = str(Path(path))
-            result["cancelled"] = False
-
-    # tkinter must run on a dedicated thread with its own loop on some setups;
-    # call directly first (uvicorn worker thread is fine for local single-process).
-    try:
-        _open()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"文件选择失败：{exc}") from exc
-    return result
+    """Deprecated native dialog. Remote/Funnel clients use GET /api/fs/list + in-page picker."""
+    raise HTTPException(
+        status_code=410,
+        detail="系统文件对话框已停用（远程/无图形界面不可用），请使用页面内路径选择器",
+    )
 
 
 @app.get("/")
