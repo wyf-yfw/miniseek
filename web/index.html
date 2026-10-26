@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiniSeek Task 控制台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #1d4ed8;
+      --accent-ink: #ffffff;
+      --stop: #b91c1c;
+      --ok: #047857;
+      --warn: #d97706;
+      --fail: #b91c1c;
+      --log-bg: #111827;
+      --log-fg: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.5 "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 16px 24px;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { font-size: 18px; margin: 0; }
+    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    .live { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+    .dot.on { background: var(--ok); }
+    .dot.running { background: var(--ok); }
+    .dot.draft { background: #9ca3af; }
+    .dot.stopped { background: var(--warn); }
+    .dot.finished { background: var(--accent); }
+    .dot.failed { background: var(--fail); }
+    main { padding: 16px 24px 32px; }
+    nav { display: flex; gap: 8px; margin-bottom: 16px; }
+    nav button, .actions button, .row button, .task-sidebar button {
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    nav button.active { background: var(--ink); color: white; border-color: var(--ink); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .train-layout {
+      display: flex;
+      gap: 16px;
+      align-items: stretch;
+      min-height: 70vh;
+    }
+    .task-sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .task-sidebar h2 { margin: 0; font-size: 14px; }
+    #btn-new-task {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+      width: 100%;
+    }
+    #task-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      flex: 1;
+    }
+    #task-list li {
+      padding: 10px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      border: 1px solid transparent;
+    }
+    #task-list li:hover { background: #f9fafb; }
+    #task-list li.active { background: #eff6ff; border-color: #bfdbfe; }
+    #task-list .meta { flex: 1; min-width: 0; }
+    #task-list .name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #task-list .sub { color: var(--muted); font-size: 11px; }
+    .task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    h2 { margin: 0 0 12px; font-size: 15px; }
+    label { display: block; margin: 10px 0; color: var(--muted); font-size: 12px; }
+    input, select, textarea {
+      width: 100%;
+      margin-top: 4px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: inherit;
+      color: var(--ink);
+      background: white;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mode-row { display: flex; gap: 8px; margin-bottom: 4px; }
+    .mode-row button {
+      flex: 1;
+      border: 1px solid var(--line);
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .mode-row button.active {
+      background: var(--ink);
+      color: white;
+      border-color: var(--ink);
+    }
+    .mode-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--muted); }
+    .actions, .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    #btn-start { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); flex: 1; }
+    #btn-stop { background: var(--stop); color: white; border-color: var(--stop); }
+    #btn-delete { background: #fff; color: var(--stop); border-color: #fecaca; }
+    #action-msg, #load-msg { color: var(--muted); min-height: 1.4em; }
+    #status-box {
+      white-space: pre-wrap;
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    #log {
+      background: var(--log-bg);
+      color: var(--log-fg);
+      border-radius: 8px;
+      padding: 12px;
+      height: 280px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    #loss-canvas { width: 100%; height: 180px; background: #fafafa; border-radius: 8px; border: 1px solid var(--line); }
+    .empty-hint { color: var(--muted); padding: 24px; text-align: center; }
+    /* Chat */
+    #infer.panel.active { height: calc(100vh - 140px); }
+    .chat-shell { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: 100%; }
+    .chat-side { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow: auto; }
+    .chat-main { background: var(--card); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; }
+    .chat-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .chat-toolbar .title { font-weight: 600; font-size: 14px; }
+    .chat-messages { flex: 1; overflow: auto; padding: 16px; }
+    .chat-empty { color: var(--muted); text-align: center; margin-top: 20vh; }
+    .msg-row { margin: 10px 0; display: flex; }
+    .msg-row.user { justify-content: flex-end; }
+    .msg-bubble { max-width: 80%; display: flex; gap: 8px; }
+    .msg-row.user .msg-bubble { flex-direction: row-reverse; }
+    .msg-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #e5e7eb; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; flex-shrink: 0;
+    }
+    .msg-row.user .msg-avatar { background: #dbeafe; }
+    .msg-body {
+      background: #f3f4f6; border-radius: 12px; padding: 10px 12px;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .msg-row.user .msg-body { background: #eff6ff; }
+    .msg-body.streaming::after { content: "▍"; animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .chat-composer { border-top: 1px solid var(--line); padding: 12px; display: flex; gap: 8px; align-items: flex-end; }
+    .chat-composer textarea { resize: none; min-height: 40px; max-height: 160px; }
+    #btn-send { background: var(--accent); color: white; border-color: var(--accent); }
+    #btn-stop-gen { background: var(--stop); color: white; border-color: var(--stop); display: none; }
+    @media (max-width: 900px) {
+      .train-layout { flex-direction: column; }
+      .task-sidebar { width: 100%; max-height: 220px; }
+      .chat-shell { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>MiniSeek</h1>
+      <p>Task 驱动训练 · Tiny / Dense / MoE</p>
+    </div>
+    <div class="live"><span class="dot" id="hdr-dot"></span><span id="hdr-status">空闲</span></div>
+  </header>
+  <main>
+    <nav>
+      <button type="button" class="active" data-tab="train">训练</button>
+      <button type="button" data-tab="infer">对话</button>
+      <button type="button" data-tab="env">环境</button>
+    </nav>
+
+    <section id="train" class="panel active">
+      <div class="train-layout">
+        <aside class="task-sidebar">
+          <h2>Tasks</h2>
+          <button type="button" id="btn-new-task">新建 Task</button>
+          <ul id="task-list"></ul>
+        </aside>
+        <div class="task-main">
+          <div class="card" id="task-detail-empty">
+            <p class="empty-hint">左侧新建或选择一个 Task</p>
+          </div>
+          <div class="card" id="task-detail" style="display:none">
+            <h2 id="detail-title">Task</h2>
+            <div id="status-box">—</div>
+            <div class="mode-row" id="mode-row">
+              <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">Pretrain</button>
+              <button type="button" id="mode-sft" data-mode="sft">SFT</button>
+            </div>
+            <div class="mode-row" id="arch-row">
+              <button type="button" id="arch-dense" class="active" data-arch="dense">Dense</button>
+              <button type="button" id="arch-moe" data-arch="moe">MoE</button>
+              <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
+            </div>
+            <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：尚未实现；Tiny：d=64 L=2 冒烟档。</p>
+            <label>名称<input id="task-name" type="text" /></label>
+            <label>数据路径<input id="data-path" type="text" /></label>
+            <div class="grid">
+              <label>Batch<input id="batch-size" type="number" min="1" /></label>
+              <label>Max Seq Len<input id="max-seq-len" type="number" min="8" /></label>
+              <label>LR<input id="lr" type="number" step="any" /></label>
+              <label>Min LR<input id="min-lr" type="number" step="any" /></label>
+              <label>Warmup<input id="warmup-steps" type="number" min="0" /></label>
+              <label>Epochs<input id="epochs" type="number" min="1" /></label>
+              <label>Max Steps<input id="max-steps" type="number" min="0" /></label>
+              <label>Log Every<input id="log-every" type="number" min="1" /></label>
+              <label>Plot Every<input id="plot-every" type="number" min="1" /></label>
+              <label>Grad Clip<input id="grad-clip" type="number" step="any" /></label>
+            </div>
+            <details>
+              <summary>更多</summary>
+              <div class="grid">
+                <label>Loss Thresholds<input id="save-loss-thresholds" type="text" /></label>
+                <label>Stable Steps<input id="stable-steps" type="number" min="1" /></label>
+                <label>Save Every<input id="save-every" type="number" min="0" /></label>
+                <label>Aux Coef<input id="aux-coef" type="number" step="any" /></label>
+                <label>Resume<input id="resume" type="text" placeholder="可选 .pt" /></label>
+                <label>Init Ckpt (SFT)<input id="init-ckpt" type="text" placeholder="可选 .pt" /></label>
+              </div>
+            </details>
+            <div class="actions">
+              <button type="button" id="btn-save">保存配置</button>
+              <button type="button" id="btn-start">Start</button>
+              <button type="button" id="btn-stop">Stop</button>
+              <button type="button" id="btn-delete">删除</button>
+            </div>
+            <p id="action-msg"></p>
+          </div>
+          <div class="card" id="task-monitor" style="display:none">
+            <h2>Loss</h2>
+            <canvas id="loss-canvas" width="800" height="180"></canvas>
+            <h2 style="margin-top:16px">日志</h2>
+            <div id="log"></div>
+            <h2 style="margin-top:16px">本 Task Checkpoints</h2>
+            <div class="row">
+              <select id="task-ckpt-select"></select>
+              <button type="button" id="btn-refresh-task-ckpt">刷新</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="infer" class="panel">
+      <div class="chat-shell">
+        <aside class="chat-side">
+          <h2>模型</h2>
+          <label>Checkpoint
+            <select id="ckpt-select"></select>
+          </label>
+          <label>或粘贴路径<input id="ckpt-manual" type="text" placeholder="/path/to/best.pt" /></label>
+          <div class="row">
+            <button type="button" id="btn-refresh-ckpt">刷新列表</button>
+            <button type="button" id="btn-load">加载</button>
+          </div>
+          <p id="load-msg"></p>
+          <div class="grid">
+            <label>Max New<input id="gen-len" type="number" value="128" /></label>
+            <label>Temp<input id="temperature" type="number" step="0.1" value="0.8" /></label>
+            <label>Top-K<input id="top-k" type="number" value="50" /></label>
+            <label>Seed<input id="seed" type="number" value="42" /></label>
+          </div>
+          <button type="button" id="btn-clear-chat">清空对话</button>
+        </aside>
+        <div class="chat-main">
+          <div class="chat-toolbar">
+            <div class="title">对话</div>
+            <div id="chat-status" class="live"><span class="dot" id="chat-dot"></span><span id="chat-status-text">未加载模型</span></div>
+          </div>
+          <div id="chat-messages" class="chat-messages">
+            <div class="chat-empty" id="chat-empty">像 ChatGPT 一样提问吧。先在左侧加载权重。</div>
+          </div>
+          <div class="chat-composer">
+            <textarea id="chat-input" rows="1" placeholder="发消息给 MiniSeek…"></textarea>
+            <button type="button" id="btn-send">发送</button>
+            <button type="button" id="btn-stop-gen">停止</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="env" class="panel">
+      <div class="card">
+        <h2>环境</h2>
+        <pre id="env-text" style="white-space:pre-wrap"></pre>
+        <button type="button" id="btn-env">刷新</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let defaultsMap = {};
+    let selectedId = null;
+    let currentTask = null;
+    let trainMode = "pretrain";
+    let trainArch = "tiny";
+    let logLines = [];
+    let lossPoints = [];
+    let eventSource = null;
+    let formDirty = false;
+
+    document.querySelectorAll("nav button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        $(btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    function num(id) { return Number($(id).value); }
+    async function readError(res) {
+      try {
+        const j = await res.json();
+        return j.detail || JSON.stringify(j);
+      } catch (_) {
+        return res.statusText || String(res.status);
+      }
+    }
+
+    function statusDotClass(st) {
+      return ({ draft: "draft", running: "running", stopped: "stopped", finished: "finished", failed: "failed" })[st] || "";
+    }
+
+    function setFormEnabled(editable) {
+      ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",
+       "max-steps","log-every","plot-every","grad-clip","save-loss-thresholds","stable-steps",
+       "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
+        $(id).disabled = !editable && id !== "task-name";
+      });
+      $("task-name").disabled = false;
+      $("mode-pretrain").disabled = !editable;
+      $("mode-sft").disabled = !editable;
+      $("arch-dense").disabled = !editable;
+      $("arch-moe").disabled = !editable || trainMode === "sft";
+      $("arch-tiny").disabled = !editable;
+      $("btn-save").disabled = !editable && currentTask && currentTask.status !== "draft";
+      // name always patchable
+      $("btn-save").disabled = false;
+    }
+
+    function applyArchUI(arch) {
+      trainArch = arch;
+      $("arch-dense").classList.toggle("active", arch === "dense");
+      $("arch-moe").classList.toggle("active", arch === "moe");
+      $("arch-tiny").classList.toggle("active", arch === "tiny");
+      $("arch-hint").textContent =
+        arch === "tiny" ? "Tiny：DenseLM d=64 L=2，CPU 冒烟。"
+        : arch === "moe" ? "MoE：MiniSeek-M（本分支训练尚未实现）。"
+        : "Dense：MiniSeek-D DenseLM。";
+    }
+
+    function applyModeUI(mode) {
+      trainMode = mode;
+      $("mode-pretrain").classList.toggle("active", mode === "pretrain");
+      $("mode-sft").classList.toggle("active", mode === "sft");
+      $("arch-moe").disabled = mode === "sft" || (currentTask && currentTask.status !== "draft");
+      if (mode === "sft" && trainArch === "moe") applyArchUI("dense");
+    }
+
+    function fillHparams(hp) {
+      const set = (id, v) => { if (v !== undefined && v !== null) $(id).value = v; };
+      set("data-path", hp.data_path);
+      set("batch-size", hp.batch_size);
+      set("max-seq-len", hp.max_seq_len);
+      set("lr", hp.lr);
+      set("min-lr", hp.min_lr);
+      set("warmup-steps", hp.warmup_steps);
+      set("epochs", hp.epochs);
+      set("max-steps", hp.max_steps);
+      set("log-every", hp.log_every);
+      set("plot-every", hp.plot_every);
+      set("grad-clip", hp.grad_clip);
+      set("save-loss-thresholds", hp.save_loss_thresholds);
+      set("stable-steps", hp.stable_steps);
+      set("save-every", hp.save_every);
+      set("aux-coef", hp.aux_coef);
+      set("resume", hp.resume || "");
+      set("init-ckpt", hp.init_ckpt || "");
+    }
+
+    function collectHparams() {
+      return {
+        data_path: $("data-path").value.trim(),
+        batch_size: num("batch-size"),
+        max_seq_len: num("max-seq-len"),
+        lr: num("lr"),
+        min_lr: num("min-lr"),
+        warmup_steps: num("warmup-steps"),
+        epochs: num("epochs"),
+        max_steps: num("max-steps"),
+        log_every: num("log-every"),
+        plot_every: num("plot-every"),
+        grad_clip: num("grad-clip"),
+        save_loss_thresholds: $("save-loss-thresholds").value.trim(),
+        stable_steps: num("stable-steps"),
+        save_every: num("save-every"),
+        aux_coef: num("aux-coef"),
+        resume: $("resume").value.trim(),
+        init_ckpt: $("init-ckpt").value.trim(),
+        arch: trainArch,
+        mode: trainMode,
+      };
+    }
+
+    function renderStatusBox(t) {
+      $("status-box").textContent =
+        `id: ${t.id}\nstatus: ${t.status}\narch: ${t.arch}  mode: ${t.mode}\n` +
+        `pid: ${t.pid ?? "—"}\nout: ${t.out_dir}\n` +
+        `created: ${t.created_at || "—"}  started: ${t.started_at || "—"}  ended: ${t.ended_at || "—"}\n` +
+        (t.error ? `error: ${t.error}\n` : "") +
+        (t.exit_code != null ? `exit: ${t.exit_code}` : "");
+      $("hdr-dot").className = "dot " + statusDotClass(t.status);
+      $("hdr-status").textContent = `${t.name} · ${t.status}`;
+    }
+
+    function clearLog() { logLines = []; $("log").textContent = ""; }
+    function pushLine(line) {
+      logLines.push(line);
+      if (logLines.length > 2000) logLines = logLines.slice(-2000);
+      $("log").textContent = logLines.join("\n");
+      $("log").scrollTop = $("log").scrollHeight;
+    }
+
+    function drawLoss() {
+      const canvas = $("loss-canvas");
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#fafafa";
+      ctx.fillRect(0, 0, w, h);
+      if (!lossPoints.length) {
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillText("暂无 loss 点", 16, 24);
+        return;
+      }
+      const xs = lossPoints.map((p) => p.step);
+      const ys = lossPoints.map((p) => p.loss);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const pad = 24;
+      const sx = (x) => pad + ((x - minX) / Math.max(1, maxX - minX)) * (w - 2 * pad);
+      const sy = (y) => h - pad - ((y - minY) / Math.max(1e-6, maxY - minY)) * (h - 2 * pad);
+      ctx.strokeStyle = "#1d4ed8";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      lossPoints.forEach((p, i) => {
+        const x = sx(p.step), y = sy(p.loss);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    function applyMetrics(m) {
+      lossPoints = (m && m.loss) || [];
+      drawLoss();
+    }
+
+    function disconnectLogs() {
+      if (eventSource) { eventSource.close(); eventSource = null; }
+    }
+
+    function connectTaskLogs(taskId) {
+      disconnectLogs();
+      clearLog();
+      eventSource = new EventSource(`/api/tasks/${taskId}/logs`);
+      eventSource.addEventListener("log", (ev) => {
+        try { pushLine(JSON.parse(ev.data).line); } catch (_) {}
+      });
+      eventSource.addEventListener("metrics", (ev) => {
+        try { applyMetrics(JSON.parse(ev.data)); } catch (_) {}
+      });
+      eventSource.addEventListener("status", async (ev) => {
+        try {
+          const s = JSON.parse(ev.data);
+          if (selectedId === taskId) {
+            await selectTask(taskId, { keepForm: true, silent: true });
+          }
+          refreshTasks();
+        } catch (_) {}
+      });
+      eventSource.onerror = () => { /* browser will retry; ignore */ };
+    }
+
+    async function refreshTasks() {
+      const res = await fetch("/api/tasks");
+      const data = await res.json();
+      const ul = $("task-list");
+      ul.innerHTML = "";
+      for (const t of data.tasks || []) {
+        const li = document.createElement("li");
+        if (t.id === selectedId) li.classList.add("active");
+        li.innerHTML = `<span class="dot ${statusDotClass(t.status)}"></span>
+          <div class="meta"><div class="name"></div><div class="sub"></div></div>`;
+        li.querySelector(".name").textContent = t.name || t.id;
+        li.querySelector(".sub").textContent = `${t.arch} · ${t.status}`;
+        li.addEventListener("click", () => selectTask(t.id));
+        ul.appendChild(li);
+      }
+      const running = (data.tasks || []).find((t) => t.status === "running");
+      if (!selectedId) {
+        $("hdr-dot").className = "dot" + (running ? " on" : "");
+        $("hdr-status").textContent = running ? `运行中 · ${running.name}` : "空闲";
+      }
+    }
+
+    async function selectTask(id, opts = {}) {
+      selectedId = id;
+      const res = await fetch(`/api/tasks/${id}`);
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      const t = await res.json();
+      currentTask = t;
+      $("task-detail-empty").style.display = "none";
+      $("task-detail").style.display = "";
+      $("task-monitor").style.display = "";
+      $("detail-title").textContent = t.name || t.id;
+      if (!opts.keepForm || !formDirty) {
+        $("task-name").value = t.name || "";
+        applyModeUI(t.mode || "pretrain");
+        applyArchUI(t.arch || "dense");
+        fillHparams(t.hparams || {});
+        formDirty = false;
+      }
+      setFormEnabled(t.status === "draft");
+      renderStatusBox(t);
+      await refreshTaskCheckpoints();
+      const metrics = await (await fetch(`/api/tasks/${id}/metrics`)).json();
+      applyMetrics(metrics);
+      if (!opts.silent) connectTaskLogs(id);
+      refreshTasks();
+      // Also refresh chat ckpt list from this task
+      refreshCheckpoints();
+    }
+
+    async function refreshTaskCheckpoints() {
+      if (!selectedId) return;
+      const res = await fetch(`/api/tasks/${selectedId}/checkpoints`);
+      const data = await res.json();
+      const sel = $("task-ckpt-select");
+      sel.innerHTML = "";
+      const files = data.files || [];
+      if (!files.length) {
+        const o = document.createElement("option");
+        o.textContent = "暂无 ckpt";
+        o.value = "";
+        sel.appendChild(o);
+        return;
+      }
+      for (const f of files) {
+        const o = document.createElement("option");
+        o.value = f;
+        o.textContent = f.split(/[/\\]/).pop();
+        sel.appendChild(o);
+      }
+    }
+
+    function fillSelect(el, files, emptyLabel) {
+      el.innerHTML = "";
+      if (!files.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = emptyLabel;
+        el.appendChild(o);
+        return;
+      }
+      for (const f of files) {
+        const o = document.createElement("option");
+        o.value = f;
+        o.textContent = f;
+        el.appendChild(o);
+      }
+    }
+
+    async function refreshCheckpoints() {
+      let files = [];
+      if (selectedId) {
+        const res = await fetch(`/api/tasks/${selectedId}/checkpoints`);
+        if (res.ok) files = (await res.json()).files || [];
+      }
+      if (!files.length) {
+        const res = await fetch("/api/checkpoints");
+        if (res.ok) files = (await res.json()).files || [];
+      }
+      fillSelect($("ckpt-select"), files, "无可用 checkpoint");
+      // Prefer best.pt then last.pt from current task
+      const prefer = files.find((f) => f.endsWith("best.pt")) || files.find((f) => f.endsWith("last.pt"));
+      if (prefer) $("ckpt-select").value = prefer;
+    }
+
+    async function refreshEnv() {
+      const res = await fetch("/api/env");
+      $("env-text").textContent = (await res.json()).text || "";
+    }
+
+    $("btn-new-task").addEventListener("click", async () => {
+      const arch = trainArch || "tiny";
+      const base = defaultsMap[arch] || defaultsMap.tiny || {};
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `${arch}-pretrain`,
+          arch,
+          mode: "pretrain",
+          hparams: base,
+        }),
+      });
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      const t = await res.json();
+      await refreshTasks();
+      await selectTask(t.id);
+      $("action-msg").textContent = `已创建 ${t.id}`;
+    });
+
+    ["arch-dense", "arch-moe", "arch-tiny"].forEach((id) => {
+      $(id).addEventListener("click", () => {
+        if (currentTask && currentTask.status !== "draft") return;
+        const arch = $(id).dataset.arch;
+        applyArchUI(arch);
+        const base = defaultsMap[arch] || {};
+        fillHparams({ ...(currentTask && currentTask.hparams) || {}, ...base, ...collectHparams(), ...base });
+        formDirty = true;
+      });
+    });
+    $("mode-pretrain").addEventListener("click", () => {
+      if (currentTask && currentTask.status !== "draft") return;
+      applyModeUI("pretrain");
+      formDirty = true;
+    });
+    $("mode-sft").addEventListener("click", () => {
+      if (currentTask && currentTask.status !== "draft") return;
+      applyModeUI("sft");
+      const base = defaultsMap.sft || {};
+      fillHparams({ ...collectHparams(), ...base });
+      formDirty = true;
+    });
+
+    $("btn-save").addEventListener("click", async () => {
+      if (!selectedId) return;
+      const body = { name: $("task-name").value.trim() };
+      if (currentTask && currentTask.status === "draft") {
+        body.arch = trainArch;
+        body.mode = trainMode;
+        body.hparams = collectHparams();
+      }
+      const res = await fetch(`/api/tasks/${selectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      $("action-msg").textContent = "已保存";
+      formDirty = false;
+      await selectTask(selectedId);
+    });
+
+    $("btn-start").addEventListener("click", async () => {
+      if (!selectedId) return;
+      if (currentTask && currentTask.status === "draft") {
+        const saveRes = await fetch(`/api/tasks/${selectedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: $("task-name").value.trim(),
+            arch: trainArch,
+            mode: trainMode,
+            hparams: collectHparams(),
+          }),
+        });
+        if (!saveRes.ok) {
+          $("action-msg").textContent = await readError(saveRes);
+          return;
+        }
+      }
+      const res = await fetch(`/api/tasks/${selectedId}/start`, { method: "POST" });
+      $("action-msg").textContent = res.ok ? "已启动" : await readError(res);
+      await selectTask(selectedId);
+      refreshTasks();
+    });
+
+    $("btn-stop").addEventListener("click", async () => {
+      if (!selectedId) return;
+      const res = await fetch(`/api/tasks/${selectedId}/stop`, { method: "POST" });
+      $("action-msg").textContent = res.ok ? "已停止" : await readError(res);
+      await selectTask(selectedId);
+      refreshTasks();
+    });
+
+    $("btn-delete").addEventListener("click", async () => {
+      if (!selectedId) return;
+      if (!confirm("确认删除该 Task 目录？不可恢复。")) return;
+      const res = await fetch(`/api/tasks/${selectedId}`, { method: "DELETE" });
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      selectedId = null;
+      currentTask = null;
+      disconnectLogs();
+      $("task-detail").style.display = "none";
+      $("task-monitor").style.display = "none";
+      $("task-detail-empty").style.display = "";
+      $("action-msg").textContent = "已删除";
+      refreshTasks();
+    });
+
+
+    $("btn-refresh-task-ckpt").addEventListener("click", refreshTaskCheckpoints);
+
+    // Chat
+    const chatState = { messages: [], streaming: false, abort: null };
+    function setChatStatus(text, on) {
+      $("chat-status-text").textContent = text;
+      $("chat-dot").classList.toggle("on", !!on);
+    }
+    function renderChat() {
+      const box = $("chat-messages");
+      const empty = $("chat-empty");
+      [...box.querySelectorAll(".msg-row")].forEach((el) => el.remove());
+      if (!chatState.messages.length) {
+        if (empty) empty.style.display = "";
+        return;
+      }
+      if (empty) empty.style.display = "none";
+      for (const m of chatState.messages) {
+        const row = document.createElement("div");
+        row.className = `msg-row ${m.role}`;
+        row.innerHTML = `<div class="msg-bubble"><div class="msg-avatar">${m.role === "user" ? "你" : "AI"}</div><div class="msg-body"></div></div>`;
+        row.querySelector(".msg-body").textContent = m.content || "";
+        if (m.streaming) row.querySelector(".msg-body").classList.add("streaming");
+        box.appendChild(row);
+      }
+      box.scrollTop = box.scrollHeight;
+    }
+    function autosizeInput() {
+      const el = $("chat-input");
+      el.style.height = "auto";
+      el.style.height = Math.min(160, el.scrollHeight) + "px";
+    }
+    function parseSseChunk(buffer) {
+      const events = [];
+      const parts = buffer.split("\n\n");
+      const rest = parts.pop() || "";
+      for (const block of parts) {
+        let event = "message";
+        let data = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        try { events.push({ event, data: JSON.parse(data) }); }
+        catch (_) { events.push({ event, data: { text: data } }); }
+      }
+      return { events, rest };
+    }
+    async function loadCheckpoint() {
+      $("load-msg").textContent = "正在加载…";
+      setChatStatus("加载中…", false);
+      const path = ($("ckpt-manual").value || "").trim() || $("ckpt-select").value;
+      const res = await fetch("/api/infer/load", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ckpt_path: path }),
+      });
+      const msg = res.ok ? (await res.json()).message : await readError(res);
+      $("load-msg").textContent = msg;
+      setChatStatus(res.ok ? msg : "加载失败", res.ok);
+    }
+    async function sendChat() {
+      if (chatState.streaming) return;
+      const text = ($("chat-input").value || "").trim();
+      if (!text) return;
+      $("chat-input").value = "";
+      autosizeInput();
+      chatState.messages.push({ role: "user", content: text });
+      const assistant = { role: "assistant", content: "", streaming: true };
+      chatState.messages.push(assistant);
+      renderChat();
+      chatState.streaming = true;
+      $("btn-send").style.display = "none";
+      $("btn-stop-gen").style.display = "";
+      const controller = new AbortController();
+      chatState.abort = controller;
+      const history = chatState.messages
+        .filter((m) => !m.streaming)
+        .map((m) => ({ role: m.role, content: m.content }));
+      try {
+        const res = await fetch("/api/infer/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            messages: history,
+            max_new_tokens: num("gen-len"),
+            temperature: num("temperature"),
+            top_k: num("top-k"),
+            seed: num("seed"),
+          }),
+        });
+        if (!res.ok) {
+          assistant.content = await readError(res);
+          assistant.streaming = false;
+          renderChat();
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parsed = parseSseChunk(buf);
+          buf = parsed.rest;
+          for (const ev of parsed.events) {
+            if (ev.event === "token" && ev.data.text) {
+              assistant.content += ev.data.text;
+              renderChat();
+            } else if (ev.event === "error") {
+              assistant.content += (assistant.content ? "\n" : "") + ("错误: " + (ev.data.message || "unknown"));
+              renderChat();
+            } else if (ev.event === "done") {
+              if (ev.data && typeof ev.data.text === "string" && !assistant.content) {
+                assistant.content = ev.data.text;
+              }
+              setChatStatus(
+                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s`,
+                true
+              );
+            }
+          }
+        }
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          if (!assistant.content) assistant.content = "（已停止）";
+        } else {
+          assistant.content += (assistant.content ? "\n" : "") + String(err);
+        }
+      } finally {
+        assistant.streaming = false;
+        chatState.streaming = false;
+        chatState.abort = null;
+        $("btn-send").style.display = "";
+        $("btn-stop-gen").style.display = "none";
+        renderChat();
+      }
+    }
+
+    $("btn-refresh-ckpt").addEventListener("click", refreshCheckpoints);
+    $("btn-load").addEventListener("click", loadCheckpoint);
+    $("btn-clear-chat").addEventListener("click", () => {
+      if (chatState.streaming && chatState.abort) chatState.abort.abort();
+      chatState.messages = [];
+      renderChat();
+    });
+    $("btn-send").addEventListener("click", sendChat);
+    $("btn-stop-gen").addEventListener("click", () => {
+      if (chatState.abort) chatState.abort.abort();
+    });
+    $("chat-input").addEventListener("input", autosizeInput);
+    $("chat-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChat();
+      }
+    });
+    $("btn-env").addEventListener("click", refreshEnv);
+
+    async function boot() {
+      defaultsMap = await (await fetch("/api/defaults")).json();
+      trainArch = "tiny";
+      applyArchUI("tiny");
+      applyModeUI("pretrain");
+      await refreshTasks();
+      await refreshCheckpoints();
+      await refreshEnv();
+      setInterval(refreshTasks, 3000);
+    }
+    boot();
+  </script>
+</body>
+</html>

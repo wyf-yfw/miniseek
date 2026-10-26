@@ -247,6 +247,8 @@ class TaskCreate(BaseModel):
 
 class TaskPatch(BaseModel):
     name: Optional[str] = None
+    arch: Optional[str] = None
+    mode: Optional[str] = None
     hparams: Optional[Dict[str, Any]] = None
 
 
@@ -508,13 +510,24 @@ def api_patch_task(task_id: str, body: TaskPatch) -> dict:
     task = reconcile_task(_get_task_or_404(task_id))
     if body.name is not None:
         task["name"] = body.name.strip() or task["name"]
-    if body.hparams is not None:
-        if task.get("status") != "draft":
-            raise HTTPException(status_code=400, detail="只有 draft 可改 hparams")
-        hp = dict(task.get("hparams") or {})
-        hp.update(body.hparams)
-        hp.pop("out_dir", None)
-        task["hparams"] = hp
+    if task.get("status") == "draft":
+        if body.arch is not None:
+            arch = body.arch.strip().lower()
+            if arch not in {"dense", "moe", "tiny"}:
+                raise HTTPException(status_code=400, detail=f"未知架构: {arch}")
+            task["arch"] = arch
+        if body.mode is not None:
+            mode = body.mode.strip().lower()
+            if mode not in {"pretrain", "sft"}:
+                raise HTTPException(status_code=400, detail=f"未知模式: {mode}")
+            task["mode"] = mode
+        if body.hparams is not None:
+            hp = dict(task.get("hparams") or {})
+            hp.update(body.hparams)
+            hp.pop("out_dir", None)
+            task["hparams"] = hp
+    elif body.hparams is not None or body.arch is not None or body.mode is not None:
+        raise HTTPException(status_code=400, detail="只有 draft 可改 arch/mode/hparams")
     ts.save_task(task)
     return task
 
