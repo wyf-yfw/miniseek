@@ -234,7 +234,16 @@
     .config-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
 
     /* Chat */
-    #infer.panel.active { height: calc(100vh - 140px); }
+    #infer.panel.active, #continue.panel.active { height: calc(100vh - 140px); }
+    .cont-prefix { flex: 0 0 auto; padding: 16px; border-bottom: 1px solid var(--line); }
+    .cont-prefix textarea { min-height: 100px; resize: vertical; }
+    .cont-out { flex: 1; overflow: auto; padding: 16px; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.55; }
+    .cont-out .prefix { color: var(--muted); }
+    .cont-out .gen { color: var(--ink); }
+    .cont-out.streaming .gen::after { content: "▍"; animation: blink 1s infinite; }
+    #btn-cont-run { background: var(--accent); color: white; border-color: var(--accent); }
+    #btn-cont-stop { background: var(--stop); color: white; border-color: var(--stop); display: none; }
+
     .chat-shell { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: 100%; }
     .chat-side { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow: auto; }
     .chat-main { background: var(--card); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; }
@@ -282,6 +291,7 @@
     <nav class="page-tabs" role="tablist" aria-label="页面">
       <button type="button" class="active" role="tab" aria-selected="true" data-tab="train">训练</button>
       <button type="button" role="tab" aria-selected="false" data-tab="infer">对话</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="continue">续写</button>
       <button type="button" role="tab" aria-selected="false" data-tab="env">环境</button>
     </nav>
 
@@ -414,6 +424,57 @@
       </div>
     </section>
 
+    
+    <section id="continue" class="panel">
+      <div class="chat-shell">
+        <aside class="chat-side">
+          <h2>模型（预训练）</h2>
+          <p class="field-hint" style="margin:0 0 10px">与「对话」共用已加载权重；续写不做 chat 模板，适合 Pretrain / Tiny 裸模型。</p>
+          <label><span class="field-title">Checkpoint</span>
+            <span class="field-hint">打开选择或从列表点选后加载。</span>
+            <div class="path-row">
+              <input id="cont-ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
+              <button type="button" class="btn-browse" data-for="cont-ckpt-manual" id="btn-pick-cont-ckpt">打开选择</button>
+            </div>
+          </label>
+          <label>最近/扫描到的列表
+            <select id="cont-ckpt-select"></select>
+          </label>
+          <div class="row">
+            <button type="button" id="btn-cont-refresh-ckpt">刷新列表</button>
+            <button type="button" id="btn-cont-load">加载</button>
+          </div>
+          <p id="cont-load-msg"></p>
+          <div class="grid">
+            <label>Max New<input id="cont-gen-len" type="number" value="128" /></label>
+            <label>Temp<input id="cont-temperature" type="number" step="0.1" value="0.8" /></label>
+            <label>Top-K<input id="cont-top-k" type="number" value="50" /></label>
+            <label>Seed<input id="cont-seed" type="number" value="42" /></label>
+          </div>
+        </aside>
+        <div class="chat-main">
+          <div class="chat-toolbar">
+            <div class="title">前缀续写</div>
+            <div id="cont-status" class="live"><span class="dot" id="cont-dot"></span><span id="cont-status-text">未加载模型</span></div>
+          </div>
+          <div class="cont-prefix">
+            <label style="margin:0"><span class="field-title">前缀</span>
+              <span class="field-hint">输入开头文字，模型接着往后写（非问答）。</span>
+              <textarea id="cont-prefix" rows="4" placeholder="例如：春天来了，小河里的冰渐渐融化，"></textarea>
+            </label>
+            <div class="row" style="margin-top:8px">
+              <button type="button" id="btn-cont-run">生成续写</button>
+              <button type="button" id="btn-cont-stop">停止</button>
+              <button type="button" id="btn-cont-clear">清空输出</button>
+            </div>
+          </div>
+          <div id="cont-out" class="cont-out">
+            <span class="chat-empty" id="cont-empty">加载预训练权重后，输入前缀点「生成续写」。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="env" class="panel">
       <div class="card">
         <h2>环境</h2>
@@ -467,6 +528,7 @@
       "resume": { title: "选择 Resume checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
       "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
       "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
+      "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*" },
     };
 
     async function pickPath(inputId) {
@@ -1023,6 +1085,11 @@
       const msg = res.ok ? (await res.json()).message : await readError(res);
       $("load-msg").textContent = msg;
       setChatStatus(res.ok ? msg : "加载失败", res.ok);
+      if ($("cont-load-msg")) $("cont-load-msg").textContent = msg;
+      if ($("cont-status-text")) {
+        $("cont-status-text").textContent = res.ok ? msg : "加载失败";
+        $("cont-dot").classList.toggle("on", !!res.ok);
+      }
     }
     async function sendChat() {
       if (chatState.streaming) return;
@@ -1142,6 +1209,171 @@
       setInterval(refreshTasks, 3000);
     }
     boot();
-  </script>
+  
+    // --- 续写（预训练前缀续写）---
+    const contState = { streaming: false, abort: null, prefix: "", gen: "" };
+    function setContStatus(text, on) {
+      $("cont-status-text").textContent = text;
+      $("cont-dot").classList.toggle("on", !!on);
+    }
+    function renderContOut() {
+      const box = $("cont-out");
+      const empty = $("cont-empty");
+      if (!contState.prefix && !contState.gen) {
+        box.innerHTML = "";
+        const span = document.createElement("span");
+        span.className = "chat-empty";
+        span.id = "cont-empty";
+        span.textContent = "加载预训练权重后，输入前缀点「生成续写」。";
+        box.appendChild(span);
+        box.classList.remove("streaming");
+        return;
+      }
+      box.innerHTML = "";
+      const p = document.createElement("span");
+      p.className = "prefix";
+      p.textContent = contState.prefix;
+      const g = document.createElement("span");
+      g.className = "gen";
+      g.textContent = contState.gen;
+      box.appendChild(p);
+      box.appendChild(g);
+      box.classList.toggle("streaming", !!contState.streaming);
+      box.scrollTop = box.scrollHeight;
+    }
+    async function refreshContCheckpoints() {
+      let list = [];
+      try {
+        const res = await fetch("/api/checkpoints");
+        if (res.ok) list = (await res.json()).files || [];
+      } catch (_) { list = []; }
+      const sel = $("cont-ckpt-select");
+      const cur = sel.value;
+      sel.innerHTML = "";
+      if (!list.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = "无可用 checkpoint";
+        sel.appendChild(o);
+      } else {
+        for (const f of list) {
+          const path = typeof f === "string" ? f : (f.path || f);
+          const o = document.createElement("option");
+          o.value = path;
+          o.textContent = path;
+          sel.appendChild(o);
+        }
+      }
+      if (cur) sel.value = cur;
+      else if (list.length) {
+        const prefer = list.find((x) => String(typeof x === "string" ? x : x.path || "").includes("best.pt"));
+        const path = prefer ? (typeof prefer === "string" ? prefer : prefer.path) : (typeof list[0] === "string" ? list[0] : list[0].path);
+        if (path) { sel.value = path; $("cont-ckpt-manual").value = path; }
+      }
+    }
+    $("cont-ckpt-select").addEventListener("change", () => {
+      const v = $("cont-ckpt-select").value;
+      if (v) $("cont-ckpt-manual").value = v;
+    });
+    async function loadContCheckpoint() {
+      $("cont-load-msg").textContent = "正在加载…";
+      setContStatus("加载中…", false);
+      const path = ($("cont-ckpt-manual").value || "").trim() || $("cont-ckpt-select").value;
+      const res = await fetch("/api/infer/load", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ckpt_path: path }),
+      });
+      const msg = res.ok ? (await res.json()).message : await readError(res);
+      $("cont-load-msg").textContent = msg;
+      setContStatus(res.ok ? msg : "加载失败", res.ok);
+      if ($("load-msg")) $("load-msg").textContent = msg;
+      if (typeof setChatStatus === "function") setChatStatus(res.ok ? msg : "加载失败", res.ok);
+      if (res.ok && path) {
+        if ($("ckpt-manual")) $("ckpt-manual").value = path;
+        if ($("cont-ckpt-manual")) $("cont-ckpt-manual").value = path;
+      }
+    }
+    async function runContinue() {
+      if (contState.streaming) return;
+      const prefix = ($("cont-prefix").value || "");
+      if (!prefix.trim()) { alert("请先输入前缀"); return; }
+      contState.prefix = prefix;
+      contState.gen = "";
+      contState.streaming = true;
+      renderContOut();
+      $("btn-cont-run").style.display = "none";
+      $("btn-cont-stop").style.display = "";
+      const controller = new AbortController();
+      contState.abort = controller;
+      setContStatus("生成中…", true);
+      try {
+        const res = await fetch("/api/infer/continue/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            prompt: prefix,
+            max_new_tokens: num("cont-gen-len"),
+            temperature: num("cont-temperature"),
+            top_k: num("cont-top-k"),
+            seed: num("cont-seed"),
+          }),
+        });
+        if (!res.ok) {
+          contState.gen = await readError(res);
+          renderContOut();
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parsed = parseSseChunk(buf);
+          buf = parsed.rest;
+          for (const ev of parsed.events) {
+            if (ev.event === "token" && ev.data.text) {
+              contState.gen += ev.data.text;
+              renderContOut();
+            } else if (ev.event === "error") {
+              contState.gen += (contState.gen ? "\n" : "") + ("错误: " + (ev.data.message || "unknown"));
+              renderContOut();
+            } else if (ev.event === "done") {
+              setContStatus(
+                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s`,
+                true
+              );
+            }
+          }
+        }
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          if (!contState.gen) contState.gen = "（已停止）";
+        } else {
+          contState.gen += (contState.gen ? "\n" : "") + String(err);
+        }
+        renderContOut();
+      } finally {
+        contState.streaming = false;
+        contState.abort = null;
+        $("btn-cont-run").style.display = "";
+        $("btn-cont-stop").style.display = "none";
+        $("cont-out").classList.remove("streaming");
+      }
+    }
+    $("btn-cont-load").addEventListener("click", loadContCheckpoint);
+    $("btn-cont-refresh-ckpt").addEventListener("click", refreshContCheckpoints);
+    $("btn-cont-run").addEventListener("click", runContinue);
+    $("btn-cont-stop").addEventListener("click", () => { if (contState.abort) contState.abort.abort(); });
+    $("btn-cont-clear").addEventListener("click", () => {
+      contState.prefix = "";
+      contState.gen = "";
+      renderContOut();
+    });
+    refreshContCheckpoints().catch(() => {});
+</script>
 </body>
 </html>

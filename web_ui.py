@@ -235,6 +235,70 @@ class InferenceEngine:
         }
 
 
+
+    def stream_continue(
+        self,
+        prompt: str,
+        max_new_tokens: int = 128,
+        temperature: float = 0.8,
+        top_k: int = 50,
+        seed: int = 42,
+    ):
+        """Raw prefix continuation for pretrained LMs (no chat template)."""
+        if self.model is None:
+            raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
+        if not str(prompt).strip():
+            raise HTTPException(status_code=400, detail="请输入前缀")
+
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+        ids = self.tokenizer.encode(prompt, add_special_tokens=True)
+        input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
+        eos_id = getattr(self.tokenizer, "eos_token_id", None)
+        t0 = time.time()
+        token_ids: List[int] = []
+        prev_text = ""
+        n = 0
+        with self._gen_lock:
+            for token in self.model.generate_stream(
+                input_ids,
+                max_new_tokens=int(max_new_tokens),
+                temperature=float(temperature),
+                top_k=int(top_k),
+                eos_token_id=eos_id,
+            ):
+                n += 1
+                if eos_id is not None and token == int(eos_id):
+                    break
+                token_ids.append(int(token))
+                full = self.tokenizer.decode(token_ids, skip_special_tokens=False)
+                for special in ("<|im_start|>", "<|im_end|>", "<|endoftext|>"):
+                    full = full.replace(special, "")
+                if "\ufffd" in full:
+                    continue
+                if full.startswith(prev_text):
+                    piece = full[len(prev_text):]
+                else:
+                    piece = full
+                prev_text = full
+                if not piece:
+                    continue
+                yield {"event": "token", "data": {"text": piece}}
+        cost = time.time() - t0
+        speed = n / max(cost, 1e-6)
+        yield {
+            "event": "done",
+            "data": {
+                "text": prev_text,
+                "tokens": n,
+                "seconds": round(cost, 2),
+                "tokens_per_s": round(speed, 1),
+            },
+        }
+
+
 infer_engine = InferenceEngine()
 
 
@@ -834,6 +898,39 @@ async def infer_chat_stream(req: ChatRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+
+@app.post("/api/infer/continue/stream")
+async def infer_continue_stream(req: GenerateRequest) -> StreamingResponse:
+    """Prefix continuation stream for pretrained models (no chat template)."""
+
+    def event_iter():
+        try:
+            for item in infer_engine.stream_continue(
+                req.prompt,
+                max_new_tokens=req.max_new_tokens,
+                temperature=req.temperature,
+                top_k=req.top_k,
+                seed=req.seed,
+            ):
+                yield _sse(item["event"], item["data"])
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            yield _sse("error", {"message": detail})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 
 if __name__ == "__main__":
