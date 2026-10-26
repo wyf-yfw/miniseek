@@ -86,7 +86,34 @@ class InferenceEngine:
             raise HTTPException(status_code=404, detail=f"找不到 checkpoint: {ckpt_path}")
         if self.tokenizer is None:
             self.tokenizer = load_tokenizer(allow_fallback=True)
-        blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        path = Path(ckpt_path)
+        # HF export dir or pytorch_model.bin → normalize to training blob shape
+        if path.is_dir() and (path / "pytorch_model.bin").exists():
+            weight_path = path / "pytorch_model.bin"
+            cfg_path = path / "config.json"
+        elif path.name == "pytorch_model.bin":
+            weight_path = path
+            cfg_path = path.parent / "config.json"
+        else:
+            weight_path = None
+            cfg_path = None
+        if weight_path is not None:
+            import json
+            sd = torch.load(weight_path, map_location="cpu", weights_only=False)
+            if isinstance(sd, dict) and "model" in sd:
+                blob = sd
+            else:
+                cfg_raw = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path and cfg_path.exists() else {}
+                allowed = set(ModelConfig.__annotations__)
+                cfg_dict = {k: v for k, v in cfg_raw.items() if k in allowed}
+                blob = {
+                    "model": sd,
+                    "config": cfg_dict,
+                    "step": cfg_raw.get("train_step", "?"),
+                    "loss": cfg_raw.get("train_loss", "?"),
+                }
+        else:
+            blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         cfg = ModelConfig.from_dict(blob["config"])
         if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
             from model.moe import MoELM
