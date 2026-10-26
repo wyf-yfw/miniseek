@@ -21,8 +21,8 @@ from typing import Any, Dict, List, Optional, Set
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from model import build_model
 from model.config import ModelConfig
-from model.dense import DenseLM
 from model.tokenizer import detect_vocab_size, load_tokenizer
 
 
@@ -206,6 +206,14 @@ def main() -> None:
         default=None,
         help="从 checkpoint 继续（含 optimizer）",
     )
+    p.add_argument(
+        "--arch",
+        type=str,
+        default="dense",
+        choices=["dense", "moe", "tiny"],
+        help="model architecture",
+    )
+    p.add_argument("--aux-coef", type=float, default=0.01, help="MoE load-balance coef")
     args = p.parse_args()
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
@@ -222,8 +230,18 @@ def main() -> None:
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    cfg = ModelConfig(max_seq_len=args.max_seq_len).with_vocab_size(vocab)
-    model = DenseLM(cfg).to(device)
+    if args.arch == "moe":
+        raise NotImplementedError(
+            "MiniSeek-M (MoE) 训练尚未实现。请使用 --arch dense 或 --arch tiny。"
+        )
+    if args.arch == "tiny":
+        cfg = ModelConfig.tiny()
+        cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
+    else:
+        cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
+    cfg = cfg.with_vocab_size(vocab)
+    model = build_model(cfg).to(device)
+    print(f"[train] arch={args.arch} release={cfg.release_name}")
 
     if not Path(args.data).exists():
         print(f"[train] WARN: 缺少 {args.data}，使用内置中文占位样本做 smoke")
