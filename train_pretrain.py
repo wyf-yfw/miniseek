@@ -5,7 +5,7 @@
 
     python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --max-steps 2
     python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --epochs 1 --batch-size 8
-    # loss 连续低于阈值满 --stable-steps 才存盘；best.pt 同理需稳定后再存；也可额外开 --save-every 1000
+    # 默认只写 best.pt + last.pt；可选 --save-loss-thresholds / --save-every（占盘，慎用）
 """
 
 from __future__ import annotations
@@ -244,7 +244,7 @@ def main() -> None:
         "--save-every",
         type=int,
         default=0,
-        help="每 N 步额外写 step-N.pt；默认 0=关闭（只靠 loss 里程碑 + 结束 last.pt）",
+        help="每 N 步额外写 step-N.pt；默认 0=关闭（默认只 best.pt + last.pt）",
     )
     p.add_argument(
         "--keep-last",
@@ -255,8 +255,9 @@ def main() -> None:
     p.add_argument(
         "--save-loss-thresholds",
         type=str,
-        default="20,15,12,10,9,8,7,6,5,4,3",
-        help="loss 连续低于各阈值满 --stable-steps 后各存一次（逗号分隔，降序）",
+        default="",
+        help="可选：loss 连续低于各阈值满 --stable-steps 后各存一次 loss-*.pt（逗号分隔降序）；"
+        "默认空=不写里程碑，只保留 best.pt + last.pt（省磁盘）",
     )
     p.add_argument(
         "--stable-steps",

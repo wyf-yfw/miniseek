@@ -35,7 +35,7 @@ def main() -> int:
             "lr": 1e-4,
             "min_lr": 3e-5,
             "grad_clip": 1.0,
-            "save_loss_thresholds": "20,15",
+            "save_loss_thresholds": "",
             "stable_steps": 200,
             "save_every": 0,
         },

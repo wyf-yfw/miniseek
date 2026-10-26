@@ -153,7 +153,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         "--grad-clip",
         str(float(_hp(hp, "grad_clip", 1.0))),
         "--save-loss-thresholds",
-        str(_hp(hp, "save_loss_thresholds", "20,15,12,10,9,8,7,6,5,4,3")),
+        str(_hp(hp, "save_loss_thresholds", "")),
         "--stable-steps",
         str(int(_hp(hp, "stable_steps", 200))),
         "--save-every",

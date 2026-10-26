@@ -211,17 +211,16 @@ Naming (one Hub repo per checkpoint):
 ```bash
 python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0
 
+# short run (no loss-*.pt by default; pass --save-loss-thresholds only if needed)
 python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0 \
-  --max-steps 5000 --warmup-steps 200 --lr 1e-4 \
-  --save-loss-thresholds 20,15,12,10,9,8,7 --stable-steps 200
+  --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
 ### Checkpoint policy
 
-- **Milestones** `loss-*.pt`: a threshold writes only after `--stable-steps` (default 200) consecutive steps with `loss<=threshold`
-- **best.pt**: best train loss so far
-- **last.pt**: written once at the end
-- **`--save-every`**: off by default
+- **Default**: only `best.pt` (overwrite when improved) and `last.pt` (once at end) — avoids filling the disk
+- **Milestones** `loss-*.pt`: opt-in via `--save-loss-thresholds` (writes after `--stable-steps` consecutive `loss<=threshold`); default empty = off
+- **`--save-every`**: default `0` (off); enable only if you need step backups
 
 Or drive the same loop from the Web **Train** tab (`tasks/<id>/`).
 

@@ -218,18 +218,16 @@ RMSNorm → LM Head（基座默认与 Embedding tying）
 # 正式预训练
 python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0
 
-# 短跑 / 调参
+# 短跑 / 调参（默认不写 loss-*.pt；需要里程碑再显式加 --save-loss-thresholds）
 python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0 \
-  --max-steps 5000 --warmup-steps 200 --lr 1e-4 \
-  --save-loss-thresholds 20,15,12,10,9,8,7 --stable-steps 200
+  --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
 ### Checkpoint 策略
 
-- **里程碑** `loss-*.pt`：`--save-loss-thresholds` 某一档需连续 `--stable-steps`（默认 200）步 `loss<=阈值` 才写入
-- **best.pt**：历史最低 train loss
-- **last.pt**：跑结束写一次
-- **`--save-every`**：默认关；需要按步备份再开
+- **默认只保留** `best.pt`（更好时覆盖）与 `last.pt`（结束写一次），避免占满磁盘
+- **里程碑** `loss-*.pt`：可选；需显式设 `--save-loss-thresholds`（某一档连续 `--stable-steps` 步 `loss<=阈值` 才写）；默认空=不写
+- **`--save-every`**：默认 `0` 关闭；需要按步备份再开（也会占盘）
 
 也可在 Web UI「训练」Tab 里用 Task 形态启停，产物在 `tasks/<id>/`。
 
