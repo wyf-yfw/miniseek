@@ -343,6 +343,36 @@
       .arch-canvas-wrap { grid-template-columns: 1fr; }
       .arch-drawer { width: auto; border-left: 0; border-top: 1px solid var(--line); }
     }
+
+    .arch-toolbar .title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .arch-view-modes { display: inline-flex; gap: 4px; padding: 3px; background: #e8eaee; border: 1px solid var(--line); border-radius: 10px; }
+    .arch-view-modes button {
+      appearance: none; border: 0; background: transparent; border-radius: 8px;
+      padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted);
+    }
+    .arch-view-modes button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(17,24,39,0.06); }
+    .arch-layer-group {
+      width: min(440px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 8px;
+      background: #f1f5f9;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .arch-layer-group.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
+    .arch-layer-head { cursor: pointer; text-align: center; padding: 6px 8px; border-radius: 8px; }
+    .arch-layer-head:hover { background: rgba(255,255,255,0.55); }
+    .arch-block.part {
+      width: 100%;
+      background: #fff;
+      font-size: 13px;
+      cursor: default;
+      box-sizing: border-box;
+    }
+    .arch-block.compact-layers { border-style: dashed; }
   </style>
 </head>
 <body>
@@ -573,7 +603,14 @@
         </aside>
         <div class="arch-main">
           <div class="arch-toolbar">
-            <div class="title">结构图</div>
+            <div class="title-row">
+              <div class="title">结构图</div>
+              <div class="arch-view-modes" role="group" aria-label="显示复杂度">
+                <button type="button" data-arch-view="compact" title="只看大块：Embedding / 层组 / Head">简洁</button>
+                <button type="button" data-arch-view="standard" class="active" title="一层一块，点击看内部">标准</button>
+                <button type="button" data-arch-view="detailed" title="每层展开 Attention / FFN / 专家">详细</button>
+              </div>
+            </div>
             <div id="arch-status" class="live"><span class="dot" id="arch-dot"></span><span id="arch-status-text">未解析</span></div>
           </div>
           <div class="arch-canvas-wrap">
@@ -1493,6 +1530,7 @@
     let archData = null;
     let archSelectedLayer = null;
 
+
     function fmtParams(n) {
       if (n == null) return "-";
       if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
@@ -1559,8 +1597,28 @@
       });
     }
 
+    let archViewMode = "standard";
+
+    function appendConnector(canvas) {
+      const c = document.createElement("div");
+      c.className = "arch-connector";
+      canvas.appendChild(c);
+    }
+
+    function makeBlock(b, extraClass) {
+      const el = document.createElement("div");
+      el.className = "arch-block" + (extraClass ? " " + extraClass : "") + (b.kind === "layer" ? " layer" : "");
+      el.dataset.id = b.id;
+      const detailBits = b.detail ? Object.entries(b.detail).filter(([,v]) => v != null)
+        .map(([k,v]) => `${k}=${v}`).join(" · ") : "";
+      el.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)}${b.tied ? " · tied" : ""}${detailBits ? " · " + detailBits : ""}</div>`;
+      return el;
+    }
+
     function renderArch(data) {
-      archData = data;
+      if (data) archData = data;
+      if (!archData) return;
+      data = archData;
       const canvas = $("arch-canvas");
       canvas.innerHTML = "";
       const cfg = data.config || {};
@@ -1569,31 +1627,106 @@
       $("arch-summary").innerHTML =
         `<div><b>${cfg.arch || "-"}</b> · d=${cfg.d_model || "-"} · L=${cfg.n_layers || "-"} · heads=${cfg.n_heads || "-"}</div>` +
         `<div>总参数 ${fmtParams(data.total_params)}${data.tie_word_embeddings ? " · tie embeddings" : ""}</div>` +
-        `<div class="field-hint">step=${meta.step ?? "-"} · loss=${meta.loss ?? "-"}</div>`;
+        `<div class="field-hint">step=${meta.step ?? "-"} · loss=${meta.loss ?? "-"} · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
 
-      const nodes = [...(data.blocks || []), ...(data.tail || [])];
-      nodes.forEach((b, idx) => {
-        if (idx) {
-          const c = document.createElement("div");
-          c.className = "arch-connector";
-          canvas.appendChild(c);
-        }
-        const el = document.createElement("div");
-        el.className = "arch-block" + (b.kind === "layer" ? " layer" : "");
-        el.dataset.id = b.id;
-        el.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)}${b.tied ? " · tied" : ""}</div>`;
-        if (b.kind === "layer") {
+      const blocks = data.blocks || [];
+      const tail = data.tail || [];
+      const embed = blocks.filter((b) => b.kind === "embedding");
+      const layers = blocks.filter((b) => b.kind === "layer");
+      let first = true;
+      const pushNode = (nodeEl) => {
+        if (!first) appendConnector(canvas);
+        first = false;
+        canvas.appendChild(nodeEl);
+      };
+
+      if (archViewMode === "compact") {
+        embed.forEach((b) => pushNode(makeBlock(b)));
+        if (layers.length) {
+          const total = layers.reduce((s, b) => s + (b.params || 0), 0);
+          const el = makeBlock({
+            id: "layers-compact",
+            kind: "layer",
+            label: `Transformer × ${layers.length}`,
+            params: total,
+          }, "compact-layers");
           el.addEventListener("click", (ev) => {
             ev.stopPropagation();
+            openArchDrawer({
+              id: "layers-compact",
+              label: `Transformer × ${layers.length}`,
+              params: total,
+              parts: layers.map((L) => ({
+                id: L.id,
+                label: L.label,
+                params: L.params,
+                detail: { parts: (L.parts || []).map((p) => p.label).join(", ") },
+              })),
+            });
+          });
+          pushNode(el);
+        }
+        tail.forEach((b) => pushNode(makeBlock(b)));
+      } else if (archViewMode === "detailed") {
+        [...embed, ...layers, ...tail].forEach((b) => {
+          if (b.kind !== "layer") {
+            pushNode(makeBlock(b));
+            return;
+          }
+          if (!first) appendConnector(canvas);
+          first = false;
+          const group = document.createElement("div");
+          group.className = "arch-layer-group";
+          group.dataset.id = b.id;
+          const head = document.createElement("div");
+          head.className = "arch-layer-head";
+          head.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)} · 点击看摘要</div>`;
+          head.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            document.querySelectorAll(".arch-layer-group").forEach((g) => g.classList.remove("selected"));
+            group.classList.add("selected");
             openArchDrawer(b);
           });
-        }
-        canvas.appendChild(el);
-      });
+          group.appendChild(head);
+          (b.parts || []).forEach((part) => {
+            const pel = makeBlock({
+              id: `${b.id}-${part.id}`,
+              kind: "part",
+              label: part.label,
+              params: part.params,
+              detail: part.detail,
+            }, "part");
+            group.appendChild(pel);
+          });
+          canvas.appendChild(group);
+        });
+      } else {
+        // standard
+        [...embed, ...layers, ...tail].forEach((b) => {
+          const el = makeBlock(b);
+          if (b.kind === "layer") {
+            el.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              openArchDrawer(b);
+            });
+          }
+          pushNode(el);
+        });
+      }
+
       $("arch-status-text").textContent = "已解析";
       $("arch-dot").className = "dot finished";
       closeArchDrawer();
     }
+
+    document.querySelectorAll(".arch-view-modes button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".arch-view-modes button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        archViewMode = btn.dataset.archView || "standard";
+        if (archData) renderArch(archData);
+      });
+    });
 
     $("btn-arch-refresh-ckpt").addEventListener("click", refreshArchCkpts);
     $("arch-ckpt-select").addEventListener("change", () => {
