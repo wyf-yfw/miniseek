@@ -352,25 +352,60 @@
     }
     .arch-view-modes button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(17,24,39,0.06); }
     .arch-layer-group {
+      position: relative;
       width: min(440px, 100%);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 8px;
+      padding-right: 56px;
       background: #f1f5f9;
       display: flex;
       flex-direction: column;
       align-items: stretch;
       gap: 6px;
+      box-sizing: border-box;
     }
     .arch-layer-group.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
     .arch-layer-head { cursor: pointer; text-align: center; padding: 6px 8px; border-radius: 8px; }
     .arch-layer-head:hover { background: rgba(255,255,255,0.55); }
+    .arch-layer-head .sub { display: none; }
     .arch-block.part {
       width: 100%;
       background: #fff;
       font-size: 13px;
       cursor: default;
       box-sizing: border-box;
+    }
+    .arch-layer-group .arch-block.part .sub { display: none; }
+    .arch-block.part.add-node {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-color: #3dba7a;
+      background: #13261c;
+      color: #3dba7a;
+      font-weight: 700;
+      margin: 6px auto;
+    }
+    .arch-block.part.add-node .sub { display: none; }
+    .arch-residual-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+    .arch-wire-anchor {
+      display: block;
+      height: 0;
+      width: 100%;
+      overflow: hidden;
+      pointer-events: none;
     }
     .arch-block.compact-layers { border-style: dashed; }
 
@@ -1563,7 +1598,7 @@
       drawer.hidden = false;
       $("arch-drawer-title").textContent = block.label || block.id;
       const body = $("arch-drawer-body");
-      const parts = block.parts || [];
+      const parts = (block.parts || []).filter((p) => p.kind !== "add" && !(p.id || "").startsWith("add_"));
       body.innerHTML = `<p class="field-hint">本层参数 ${fmtParams(block.params)}</p>` +
         parts.map((p) => {
           const detail = p.detail ? Object.entries(p.detail).filter(([,v]) => v != null)
@@ -1584,16 +1619,86 @@
 
     function makeBlock(b, extraClass) {
       const el = document.createElement("div");
-      const isStruct = (b.params === 0) || (b.id || "").startsWith("residual");
+      const isAdd = b.kind === "add" || (b.id || "").startsWith("add_");
+      const isStruct = !isAdd && ((b.params === 0) || (b.id || "").startsWith("residual"));
       el.className = "arch-block"
         + (extraClass ? " " + extraClass : "")
         + (b.kind === "layer" ? " layer" : "")
+        + (isAdd ? " add-node" : "")
         + (isStruct ? " struct" : "");
       el.dataset.id = b.id;
+      if (isAdd) {
+        el.innerHTML = `<div class="lbl">⊕</div>`;
+        return el;
+      }
       const detailBits = b.detail ? Object.entries(b.detail).filter(([,v]) => v != null)
         .map(([k,v]) => `${k}=${v}`).join(" · ") : "";
       el.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)}${b.tied ? " · tied" : ""}${detailBits ? " · " + detailBits : ""}</div>`;
       return el;
+    }
+
+    function defaultResiduals() {
+      return [
+        { id: "attn", from: "layer_in", to: "add_attn", label: "x" },
+        { id: "ffn", from: "post_attn", to: "add_ffn", label: "x" },
+      ];
+    }
+
+    function drawLayerResiduals(group, residuals) {
+      const old = group.querySelector("svg.arch-residual-svg");
+      if (old) old.remove();
+      const list = residuals && residuals.length ? residuals : defaultResiduals();
+      const gRect = group.getBoundingClientRect();
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "arch-residual-svg");
+      svg.setAttribute("width", String(group.clientWidth));
+      svg.setAttribute("height", String(group.clientHeight));
+      const gutterX = group.clientWidth - 28;
+      const markerId = "arch-arrow-" + (group.dataset.id || "x");
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      marker.setAttribute("id", markerId);
+      marker.setAttribute("markerWidth", "8");
+      marker.setAttribute("markerHeight", "8");
+      marker.setAttribute("refX", "6");
+      marker.setAttribute("refY", "3");
+      marker.setAttribute("orient", "auto");
+      const tip = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      tip.setAttribute("d", "M0,0 L6,3 L0,6 Z");
+      tip.setAttribute("fill", "#f0a030");
+      marker.appendChild(tip);
+      defs.appendChild(marker);
+      svg.appendChild(defs);
+      list.forEach((r) => {
+        const fromEl = group.querySelector(`[data-node="${r.from}"]`);
+        const toEl = group.querySelector(`[data-node="${r.to}"]`);
+        if (!fromEl || !toEl) return;
+        const fr = fromEl.getBoundingClientRect();
+        const tr = toEl.getBoundingClientRect();
+        const startX = fr.right - gRect.left;
+        const startY = fr.top - gRect.top + fr.height / 2;
+        const endX = tr.left - gRect.left + tr.width / 2;
+        const endY = tr.top - gRect.top + tr.height / 2;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const d = `M ${startX} ${startY} H ${gutterX} V ${endY} H ${endX}`;
+        path.setAttribute("d", d);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "#f0a030");
+        path.setAttribute("stroke-width", "2.5");
+        path.setAttribute("marker-end", `url(#${markerId})`);
+        svg.appendChild(path);
+        const midY = (startY + endY) / 2;
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", String(gutterX + 8));
+        label.setAttribute("y", String(midY));
+        label.setAttribute("fill", "#f0a030");
+        label.setAttribute("font-size", "12");
+        label.setAttribute("font-weight", "600");
+        label.setAttribute("dominant-baseline", "middle");
+        label.textContent = r.label || "x";
+        svg.appendChild(label);
+      });
+      group.appendChild(svg);
     }
 
     function renderArch(data) {
@@ -1661,7 +1766,7 @@
           group.dataset.id = b.id;
           const head = document.createElement("div");
           head.className = "arch-layer-head";
-          head.innerHTML = `<div class="lbl">${b.label}</div><div class="sub">${fmtParams(b.params)} · Pre-Norm + 残差</div>`;
+          head.innerHTML = `<div class="lbl">${b.label}</div>`;
           head.addEventListener("click", (ev) => {
             ev.stopPropagation();
             document.querySelectorAll(".arch-layer-group").forEach((g) => g.classList.remove("selected"));
@@ -1669,17 +1774,33 @@
             openArchDrawer(b);
           });
           group.appendChild(head);
+          // layer_in anchor before first main part
+          const layerIn = document.createElement("span");
+          layerIn.className = "arch-wire-anchor";
+          layerIn.dataset.node = "layer_in";
+          group.appendChild(layerIn);
           (b.parts || []).forEach((part) => {
+            if ((part.id || "").startsWith("residual_")) return;
+            const isAdd = part.kind === "add" || (part.id || "").startsWith("add_");
             const pel = makeBlock({
-              id: `${b.id}-${part.id}`,
-              kind: "part",
+              id: part.id,
+              kind: isAdd ? "add" : "part",
               label: part.label,
               params: part.params,
               detail: part.detail,
             }, "part");
+            pel.dataset.node = part.id;
             group.appendChild(pel);
+            if (part.id === "add_attn") {
+              const post = document.createElement("span");
+              post.className = "arch-wire-anchor";
+              post.dataset.node = "post_attn";
+              group.appendChild(post);
+            }
           });
           canvas.appendChild(group);
+          // measure after layout
+          requestAnimationFrame(() => drawLayerResiduals(group, b.residuals));
         });
       } else {
         [...embed, ...layers, ...tail].forEach((b) => {
@@ -1736,6 +1857,13 @@
 
     $("btn-arch-drawer-close").addEventListener("click", closeArchDrawer);
     $("arch-canvas").addEventListener("click", () => closeArchDrawer());
+
+    let archResizeTimer = null;
+    window.addEventListener("resize", () => {
+      if (!archData || archViewMode !== "detailed") return;
+      clearTimeout(archResizeTimer);
+      archResizeTimer = setTimeout(() => renderArch(archData), 100);
+    });
 
     document.querySelectorAll(".page-tabs button").forEach((btn) => {
       btn.addEventListener("click", () => {
