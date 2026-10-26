@@ -400,13 +400,6 @@
       pointer-events: none;
       overflow: visible;
     }
-    .arch-wire-anchor {
-      display: block;
-      height: 0;
-      width: 100%;
-      overflow: hidden;
-      pointer-events: none;
-    }
     .arch-block.compact-layers { border-style: dashed; }
 
     .arch-block.part.struct {
@@ -1669,8 +1662,11 @@
       marker.appendChild(tip);
       defs.appendChild(marker);
       svg.appendChild(defs);
+      // Logical residual sources map to visible block edges (style A).
+      const fromNode = { layer_in: "attn_norm", post_attn: "add_attn" };
       list.forEach((r) => {
-        const fromEl = group.querySelector(`[data-node="${r.from}"]`);
+        const fromId = fromNode[r.from] || r.from;
+        const fromEl = group.querySelector(`[data-node="${fromId}"]`);
         const toEl = group.querySelector(`[data-node="${r.to}"]`);
         if (!fromEl || !toEl) return;
         const fr = fromEl.getBoundingClientRect();
@@ -1774,11 +1770,6 @@
             openArchDrawer(b);
           });
           group.appendChild(head);
-          // layer_in anchor before first main part
-          const layerIn = document.createElement("span");
-          layerIn.className = "arch-wire-anchor";
-          layerIn.dataset.node = "layer_in";
-          group.appendChild(layerIn);
           (b.parts || []).forEach((part) => {
             if ((part.id || "").startsWith("residual_")) return;
             const isAdd = part.kind === "add" || (part.id || "").startsWith("add_");
@@ -1791,12 +1782,6 @@
             }, "part");
             pel.dataset.node = part.id;
             group.appendChild(pel);
-            if (part.id === "add_attn") {
-              const post = document.createElement("span");
-              post.className = "arch-wire-anchor";
-              post.dataset.node = "post_attn";
-              group.appendChild(post);
-            }
           });
           canvas.appendChild(group);
           // measure after layout

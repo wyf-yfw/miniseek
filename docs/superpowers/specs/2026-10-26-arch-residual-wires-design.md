@@ -63,6 +63,7 @@
 
 - `.arch-layer-group { position: relative; }`，右侧留出旁路 gutter（约 48–64px）
 - 主路径节点带稳定 `data-node`（如 `attn_norm`、`attn`、`add_attn`、`ffn_norm`、`ffn`/`router`…、`add_ffn`）
+- 旁路起点映射到**可见块右中**，不用零高锚点：`layer_in` → `attn_norm`，`post_attn` → `add_attn`；终点仍为对应 ⊕ 中心
 - 渲染完一层后测量节点相对层组的坐标，插入 `<svg class="arch-residual-svg">` 画折线与 ⊕；窗口 resize / 视图切换时重算
 - ⊕ 可作为 SVG 圆，或小号 DOM 节点插入主路径流；推荐 **主路径流里放 DOM ⊕**，SVG 只画旁路折线接到 ⊕ 中心，避免两套布局打架
 - 简洁 / 标准：逻辑与现网一致，不画 SVG 旁路
