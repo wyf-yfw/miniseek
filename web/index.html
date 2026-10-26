@@ -1674,7 +1674,9 @@
         const fr = fromEl.getBoundingClientRect();
         const tr = toEl.getBoundingClientRect();
         const startX = fr.right - gRect.left;
-        const startY = fr.top - gRect.top + fr.height / 2;
+        // FFN residual leaves add_attn below center so it does not overlap Attn arrow into ⊕.
+        const isFfnFromAdd = fromId === "add_attn" || r.from === "post_attn" || r.id === "ffn";
+        const startY = fr.top - gRect.top + fr.height / 2 + (isFfnFromAdd ? 12 : 0);
         const endX = tr.left - gRect.left + tr.width / 2;
         const endY = tr.top - gRect.top + tr.height / 2;
         // Outer trunk for attn residual; inner parallel trunk for FFN (starts at ⊕).
