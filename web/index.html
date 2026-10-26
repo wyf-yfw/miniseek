@@ -183,7 +183,7 @@
     .actions, .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
     #btn-start { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); flex: 1; }
     #btn-stop { background: var(--stop); color: white; border-color: var(--stop); }
-    #btn-delete { background: #fff; color: var(--stop); border-color: #fecaca; }
+    #btn-delete, #btn-delete-draft { background: #fff; color: var(--stop); border-color: #fecaca; }
     #action-msg, #load-msg { color: var(--muted); min-height: 1.4em; }
     #status-box {
       white-space: pre-wrap;
@@ -207,6 +207,21 @@
     }
     #loss-canvas { width: 100%; height: 180px; background: #fafafa; border-radius: 8px; border: 1px solid var(--line); }
     .empty-hint { color: var(--muted); padding: 24px; text-align: center; }
+    .phase-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      margin-left: 8px; vertical-align: middle;
+    }
+    .frozen-config {
+      background: #f9fafb; border: 1px solid var(--line); border-radius: 10px;
+      padding: 12px 14px; margin: 12px 0; font-size: 13px; line-height: 1.55;
+    }
+    .frozen-config dl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 0; }
+    .frozen-config dt { color: var(--muted); }
+    .frozen-config dd { margin: 0; word-break: break-all; }
+    .run-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .config-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+
     /* Chat */
     #infer.panel.active { height: calc(100vh - 140px); }
     .chat-shell { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: 100%; }
@@ -271,60 +286,73 @@
             <p class="empty-hint">左侧新建或选择一个 Task</p>
           </div>
           <div class="card" id="task-detail" style="display:none">
-            <h2 id="detail-title">Task</h2>
-            <div id="status-box">—</div>
-            <div class="mode-row" id="mode-row">
-              <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">Pretrain</button>
-              <button type="button" id="mode-sft" data-mode="sft">SFT</button>
-            </div>
-            <div class="mode-row" id="arch-row">
-              <button type="button" id="arch-dense" class="active" data-arch="dense">Dense</button>
-              <button type="button" id="arch-moe" data-arch="moe">MoE</button>
-              <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
-            </div>
-            <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：尚未实现；Tiny：d=64 L=2 冒烟档。</p>
-            <label>名称<input id="task-name" type="text" /></label>
-            <label>数据路径<input id="data-path" type="text" /></label>
-            <div class="grid">
-              <label>Batch<input id="batch-size" type="number" min="1" /></label>
-              <label>Max Seq Len<input id="max-seq-len" type="number" min="8" /></label>
-              <label>LR<input id="lr" type="number" step="any" /></label>
-              <label>Min LR<input id="min-lr" type="number" step="any" /></label>
-              <label>Warmup<input id="warmup-steps" type="number" min="0" /></label>
-              <label>Epochs<input id="epochs" type="number" min="1" /></label>
-              <label>Max Steps<input id="max-steps" type="number" min="0" /></label>
-              <label>Log Every<input id="log-every" type="number" min="1" /></label>
-              <label>Plot Every<input id="plot-every" type="number" min="1" /></label>
-              <label>Grad Clip<input id="grad-clip" type="number" step="any" /></label>
-            </div>
-            <details>
-              <summary>更多</summary>
-              <div class="grid">
-                <label>Loss Thresholds<input id="save-loss-thresholds" type="text" /></label>
-                <label>Stable Steps<input id="stable-steps" type="number" min="1" /></label>
-                <label>Save Every<input id="save-every" type="number" min="0" /></label>
-                <label>Aux Coef<input id="aux-coef" type="number" step="any" /></label>
-                <label>Resume<input id="resume" type="text" placeholder="可选 .pt" /></label>
-                <label>Init Ckpt (SFT)<input id="init-ckpt" type="text" placeholder="可选 .pt" /></label>
-              </div>
-            </details>
-            <div class="actions">
-              <button type="button" id="btn-save">保存配置</button>
-              <button type="button" id="btn-start">Start</button>
-              <button type="button" id="btn-stop">Stop</button>
-              <button type="button" id="btn-delete">删除</button>
-            </div>
+            <h2><span id="detail-title">Task</span><span class="phase-badge" id="phase-badge">配置</span></h2>
             <p id="action-msg"></p>
-          </div>
-          <div class="card" id="task-monitor" style="display:none">
-            <h2>Loss</h2>
-            <canvas id="loss-canvas" width="800" height="180"></canvas>
-            <h2 style="margin-top:16px">日志</h2>
-            <div id="log"></div>
-            <h2 style="margin-top:16px">本 Task Checkpoints</h2>
-            <div class="row">
-              <select id="task-ckpt-select"></select>
-              <button type="button" id="btn-refresh-task-ckpt">刷新</button>
+
+            <div id="phase-config">
+              <p class="config-note">配置阶段：调好参数后点 Start。开始后参数锁定，改配置请新建 Task。</p>
+              <div class="mode-row" id="mode-row">
+                <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">Pretrain</button>
+                <button type="button" id="mode-sft" data-mode="sft">SFT</button>
+              </div>
+              <div class="mode-row" id="arch-row">
+                <button type="button" id="arch-dense" class="active" data-arch="dense">Dense</button>
+                <button type="button" id="arch-moe" data-arch="moe">MoE</button>
+                <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
+              </div>
+              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：尚未实现；Tiny：d=64 L=2 冒烟档。</p>
+              <label>名称<input id="task-name" type="text" /></label>
+              <label>数据路径<input id="data-path" type="text" /></label>
+              <div class="grid">
+                <label>Batch<input id="batch-size" type="number" min="1" /></label>
+                <label>Max Seq Len<input id="max-seq-len" type="number" min="8" /></label>
+                <label>LR<input id="lr" type="number" step="any" /></label>
+                <label>Min LR<input id="min-lr" type="number" step="any" /></label>
+                <label>Warmup<input id="warmup-steps" type="number" min="0" /></label>
+                <label>Epochs<input id="epochs" type="number" min="1" /></label>
+                <label>Max Steps<input id="max-steps" type="number" min="0" /></label>
+                <label>Log Every<input id="log-every" type="number" min="1" /></label>
+                <label>Plot Every<input id="plot-every" type="number" min="1" /></label>
+                <label>Grad Clip<input id="grad-clip" type="number" step="any" /></label>
+              </div>
+              <details>
+                <summary>更多</summary>
+                <div class="grid">
+                  <label>Loss Thresholds<input id="save-loss-thresholds" type="text" /></label>
+                  <label>Stable Steps<input id="stable-steps" type="number" min="1" /></label>
+                  <label>Save Every<input id="save-every" type="number" min="0" /></label>
+                  <label>Aux Coef<input id="aux-coef" type="number" step="any" /></label>
+                  <label>Resume<input id="resume" type="text" placeholder="可选 .pt" /></label>
+                  <label>Init Ckpt (SFT)<input id="init-ckpt" type="text" placeholder="可选 .pt" /></label>
+                </div>
+              </details>
+              <div class="actions">
+                <button type="button" id="btn-save">保存配置</button>
+                <button type="button" id="btn-start">Start</button>
+                <button type="button" id="btn-delete-draft">删除</button>
+              </div>
+            </div>
+
+            <div id="phase-run" style="display:none">
+              <div id="status-box">—</div>
+              <div class="run-actions">
+                <button type="button" id="btn-stop">Stop</button>
+                <button type="button" id="btn-delete">删除</button>
+                <button type="button" id="btn-new-from-run">用同配置新建 Task</button>
+              </div>
+              <details open>
+                <summary>已锁定配置（只读）</summary>
+                <div class="frozen-config" id="frozen-config"></div>
+              </details>
+              <h2 style="margin-top:16px">Loss</h2>
+              <canvas id="loss-canvas" width="800" height="180"></canvas>
+              <h2 style="margin-top:16px">日志</h2>
+              <div id="log"></div>
+              <h2 style="margin-top:16px">本 Task Checkpoints</h2>
+              <div class="row">
+                <select id="task-ckpt-select"></select>
+                <button type="button" id="btn-refresh-task-ckpt">刷新</button>
+              </div>
             </div>
           </div>
         </div>
@@ -599,6 +627,40 @@
       }
     }
 
+    function isConfigPhase(status) {
+      return !status || status === "draft";
+    }
+
+    function renderFrozenConfig(t) {
+      const hp = t.hparams || {};
+      const rows = [
+        ["状态", t.status || "-"],
+        ["架构", t.arch || "-"],
+        ["模式", t.mode || "-"],
+        ["数据", hp.data_path || "-"],
+        ["batch", hp.batch_size],
+        ["max_seq_len", hp.max_seq_len],
+        ["lr", hp.lr],
+        ["min_lr", hp.min_lr],
+        ["warmup", hp.warmup_steps],
+        ["epochs", hp.epochs],
+        ["max_steps", hp.max_steps],
+        ["plot_every", hp.plot_every],
+        ["out_dir", t.out_dir || "-"],
+      ];
+      const dl = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v == null || v === "" ? "-" : v}</dd>`).join("");
+      $("frozen-config").innerHTML = `<dl>${dl}</dl>`;
+    }
+
+    function applyTaskPhase(t) {
+      const config = isConfigPhase(t && t.status);
+      $("phase-config").style.display = config ? "" : "none";
+      $("phase-run").style.display = config ? "none" : "";
+      $("phase-badge").textContent = config ? "配置" : "执行";
+      if (!config && t) renderFrozenConfig(t);
+      $("btn-stop").style.display = (t && t.status === "running") ? "" : "none";
+    }
+
     async function selectTask(id, opts = {}) {
       selectedId = id;
       const res = await fetch(`/api/tasks/${id}`);
@@ -610,7 +672,6 @@
       currentTask = t;
       $("task-detail-empty").style.display = "none";
       $("task-detail").style.display = "";
-      $("task-monitor").style.display = "";
       $("detail-title").textContent = t.name || t.id;
       if (!opts.keepForm || !formDirty) {
         $("task-name").value = t.name || "";
@@ -620,13 +681,20 @@
         formDirty = false;
       }
       setFormEnabled(t.status === "draft");
+      applyTaskPhase(t);
       renderStatusBox(t);
-      await refreshTaskCheckpoints();
-      const metrics = await (await fetch(`/api/tasks/${id}/metrics`)).json();
-      applyMetrics(metrics);
-      if (!opts.silent) connectTaskLogs(id);
+      if (!isConfigPhase(t.status)) {
+        await refreshTaskCheckpoints();
+        const metrics = await (await fetch(`/api/tasks/${id}/metrics`)).json();
+        applyMetrics(metrics);
+        if (!opts.silent) connectTaskLogs(id);
+      } else {
+        disconnectLogs();
+        $("log").textContent = "";
+        lossPoints = [];
+        drawLoss();
+      }
       refreshTasks();
-      // Also refresh chat ckpt list from this task
       refreshCheckpoints();
     }
 
@@ -790,7 +858,7 @@
       refreshTasks();
     });
 
-    $("btn-delete").addEventListener("click", async () => {
+    async function deleteSelectedTask() {
       if (!selectedId) return;
       if (!confirm("确认删除该 Task 目录？不可恢复。")) return;
       const res = await fetch(`/api/tasks/${selectedId}`, { method: "DELETE" });
@@ -802,10 +870,36 @@
       currentTask = null;
       disconnectLogs();
       $("task-detail").style.display = "none";
-      $("task-monitor").style.display = "none";
       $("task-detail-empty").style.display = "";
       $("action-msg").textContent = "已删除";
       refreshTasks();
+    }
+    $("btn-delete").addEventListener("click", deleteSelectedTask);
+    $("btn-delete-draft").addEventListener("click", deleteSelectedTask);
+
+    $("btn-new-from-run").addEventListener("click", async () => {
+      if (!currentTask) return;
+      const arch = currentTask.arch || "tiny";
+      const mode = currentTask.mode || "pretrain";
+      const hp = { ...(currentTask.hparams || {}) };
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `${(currentTask.name || arch).replace(/-\d+$/, "")}-new`,
+          arch,
+          mode,
+          hparams: hp,
+        }),
+      });
+      if (!res.ok) {
+        $("action-msg").textContent = await readError(res);
+        return;
+      }
+      const t = await res.json();
+      await refreshTasks();
+      await selectTask(t.id);
+      $("action-msg").textContent = `已用同配置新建 ${t.id}，可改参数后再 Start`;
     });
 
 
