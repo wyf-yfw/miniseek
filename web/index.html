@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiniSeek 训练控制台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #1d4ed8;
+      --accent-ink: #ffffff;
+      --stop: #b91c1c;
+      --ok: #047857;
+      --log-bg: #111827;
+      --log-fg: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.5 "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 16px 24px;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { font-size: 18px; margin: 0; }
+    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    .live {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #9ca3af;
+    }
+    .dot.on { background: var(--ok); }
+    main { padding: 16px 24px 32px; }
+    nav { display: flex; gap: 8px; margin-bottom: 16px; }
+    nav button, .actions button, .row button {
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    nav button.active { background: var(--ink); color: white; border-color: var(--ink); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 380px) 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    h2 { margin: 0 0 12px; font-size: 15px; }
+    label { display: block; margin: 10px 0; color: var(--muted); font-size: 12px; }
+    input, select, textarea {
+      width: 100%;
+      margin-top: 4px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: inherit;
+      color: var(--ink);
+      background: white;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mode-row { display: flex; gap: 8px; margin-bottom: 4px; }
+    .mode-row button {
+      flex: 1;
+      border: 1px solid var(--line);
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .mode-row button.active {
+      background: var(--ink);
+      color: white;
+      border-color: var(--ink);
+    }
+    .mode-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--muted); }
+    .actions, .row { display: flex; gap: 8px; margin-top: 12px; }
+    #btn-start, #btn-attach { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    #btn-start { flex: 1; }
+    #btn-stop { background: var(--stop); color: white; border-color: var(--stop); }
+    #action-msg, #load-msg { color: var(--muted); min-height: 1.4em; }
+    #status-box {
+      white-space: pre-wrap;
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+    .caption { margin: -6px 0 8px; color: var(--muted); font-size: 12px; }
+    #loss-chart {
+      width: 100%;
+      height: 220px;
+      display: block;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    #log-view {
+      margin: 0;
+      height: min(42vh, 420px);
+      overflow: auto;
+      background: var(--log-bg);
+      color: var(--log-fg);
+      border-radius: 8px;
+      padding: 12px;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #gen-output, #env-box {
+      white-space: pre-wrap;
+      min-height: 120px;
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    @media (max-width: 900px) {
+      header, main { padding-left: 12px; padding-right: 12px; }
+      .layout, .grid { grid-template-columns: 1fr; }
+    }
+
+    /* ChatGPT-style chat panel */
+    #infer.panel.active {
+      display: flex;
+      flex-direction: column;
+      min-height: calc(100vh - 140px);
+    }
+    .chat-shell {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 16px;
+      flex: 1;
+      min-height: 0;
+    }
+    .chat-side {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      align-self: start;
+    }
+    .chat-main {
+      display: flex;
+      flex-direction: column;
+      min-height: min(72vh, 720px);
+      background: #f7f7f8;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .chat-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }
+    .chat-toolbar .title { font-weight: 600; font-size: 14px; }
+    .chat-messages {
+      flex: 1;
+      overflow: auto;
+      padding: 20px 0;
+    }
+    .chat-empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 64px 24px;
+      font-size: 15px;
+    }
+    .msg-row {
+      display: flex;
+      justify-content: center;
+      padding: 14px 16px;
+    }
+    .msg-row.user { background: transparent; }
+    .msg-row.assistant { background: #ececf1; }
+    .msg-bubble {
+      width: min(760px, 100%);
+      display: grid;
+      grid-template-columns: 36px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    .msg-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .msg-row.user .msg-avatar { background: #19c37d; }
+    .msg-row.assistant .msg-avatar { background: #ab68ff; }
+    .msg-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.65;
+      font-size: 15px;
+      padding-top: 6px;
+    }
+    .msg-body.streaming::after {
+      content: "▍";
+      animation: blink 1s step-end infinite;
+      margin-left: 2px;
+      color: #6b7280;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .chat-composer {
+      border-top: 1px solid var(--line);
+      background: #fff;
+      padding: 12px 16px 16px;
+    }
+    .composer-box {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 10px 10px 10px 14px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.04);
+    }
+    .composer-box textarea {
+      border: none;
+      outline: none;
+      resize: none;
+      margin: 0;
+      padding: 6px 0;
+      max-height: 160px;
+      min-height: 24px;
+      background: transparent;
+      font-size: 15px;
+    }
+    .composer-box button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font: inherit;
+      background: var(--ink);
+      color: #fff;
+      white-space: nowrap;
+    }
+    .composer-box button:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+    .composer-box button.stop {
+      background: var(--stop);
+    }
+    .composer-hint {
+      width: min(760px, 100%);
+      margin: 8px auto 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+    @media (max-width: 900px) {
+      .chat-shell { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>MiniSeek 训练控制台</h1>
+      <p>Stage 0 Dense · 日志由服务器按行推送，不再定时轮询</p>
+    </div>
+    <div class="live"><span id="live-dot" class="dot"></span><span id="live-text">日志连接中</span></div>
+  </header>
+  <main>
+    <nav>
+      <button type="button" class="active" data-tab="train">训练</button>
+      <button type="button" data-tab="infer">对话</button>
+      <button type="button" data-tab="env">环境</button>
+    </nav>
+
+    <section id="train" class="panel active">
+      <div class="layout">
+        <div class="card">
+          <h2>超参数</h2>
+          <div class="mode-row">
+            <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">预训练 Base</button>
+            <button type="button" id="mode-sft" data-mode="sft">SFT 后训练</button>
+          </div>
+          <div class="mode-row" id="arch-row">
+            <button type="button" id="arch-dense" class="active" data-arch="dense">Dense</button>
+            <button type="button" id="arch-moe" data-arch="moe">MoE</button>
+          </div>
+          <p id="arch-hint" class="mode-hint">Dense：MiniSeek-D FFN；MoE：MiniSeek-M（1+32 top-2）。</p>
+          <p id="mode-hint" class="mode-hint">预训练：学语言；权重默认写到 checkpoints/stage0。</p>
+          <label>训练数据路径<input id="data-path" /></label>
+          <label>权重保存目录<input id="out-dir" /></label>
+          <label id="init-ckpt-wrap" style="display:none">从 Checkpoint 初始化（SFT 用 base）
+            <select id="init-ckpt"><option value="">选择预训练 best.pt</option></select>
+          </label>
+          <div class="grid">
+            <label>Batch Size<input id="batch-size" type="number" min="1" value="8" /></label>
+            <label>Max Seq Len<input id="seq-len" type="number" min="8" step="64" value="512" /></label>
+            <label>Peak LR<input id="lr" type="number" step="0.00001" value="0.0001" /></label>
+            <label>Min LR<input id="min-lr" type="number" step="0.00001" value="0.00003" /></label>
+            <label>Warmup Steps<input id="warmup" type="number" min="0" value="200" /></label>
+            <label>Epochs<input id="epochs" type="number" min="1" value="1" /></label>
+            <label>Max Steps（0 为不限）<input id="max-steps" type="number" min="0" value="0" /></label>
+            <label>Log Every<input id="log-every" type="number" min="1" value="1" /></label>
+            <label>Loss 曲线间隔<input id="plot-every" type="number" min="1" value="200" /></label>
+            <label>Grad Clip<input id="grad-clip" type="number" step="0.1" value="1" /></label>
+          </div>
+          <details>
+            <summary>保存策略</summary>
+            <label>Loss 里程碑阈值<input id="thresholds" value="20,15,12,10,9,8,7,6,5,4,3" /></label>
+            <div class="grid">
+              <label>Stable Steps<input id="stable-steps" type="number" min="1" value="200" /></label>
+              <label>Save Every（0 关闭）<input id="save-every" type="number" min="0" value="0" /></label>
+            </div>
+            <label>断点续训
+              <select id="resume"><option value="">不续训</option></select>
+            </label>
+          </details>
+          <div class="actions">
+            <button type="button" id="btn-start">启动训练</button>
+            <button type="button" id="btn-stop">终止训练</button>
+          </div>
+          <p id="action-msg">就绪。</p>
+        </div>
+        <div class="card">
+          <h2>训练进程</h2>
+          <label>扫描到的进程
+            <select id="proc-select"></select>
+          </label>
+          <div class="row">
+            <button type="button" id="btn-scan-proc">扫描</button>
+            <button type="button" id="btn-attach">接入选中进程</button>
+          </div>
+          <p id="proc-msg" class="caption">接入只是把日志接到这个页面，不会重启训练。刷新后会保持这次选择。</p>
+          <h2>运行状态</h2>
+          <div id="status-box">正在连接…</div>
+          <h2>Loss</h2>
+          <p id="loss-caption" class="caption">每 200 步记录一个点</p>
+          <canvas id="loss-chart"></canvas>
+          <h2>训练日志</h2>
+          <pre id="log-view">等待日志。</pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="infer" class="panel">
+      <div class="chat-shell">
+        <aside class="chat-side">
+          <h2>模型</h2>
+          <label>Checkpoint
+            <select id="ckpt-select"></select>
+          </label>
+          <div class="row">
+            <button type="button" id="btn-refresh-ckpt">刷新</button>
+            <button type="button" id="btn-load">加载</button>
+          </div>
+          <p id="load-msg">请先加载一个 Checkpoint。</p>
+          <div class="grid">
+            <label>Max Tokens<input id="gen-len" type="number" min="1" value="256" /></label>
+            <label>Temperature<input id="temperature" type="number" min="0.1" step="0.1" value="0.8" /></label>
+            <label>Top-K<input id="top-k" type="number" min="0" value="50" /></label>
+            <label>Seed<input id="seed" type="number" value="42" /></label>
+          </div>
+          <div class="row">
+            <button type="button" id="btn-clear-chat">清空对话</button>
+          </div>
+          <p class="mode-hint">多轮会带上历史；训练占满 GPU 时会自动改用 CPU 推理。</p>
+        </aside>
+        <div class="chat-main">
+          <div class="chat-toolbar">
+            <div class="title">MiniSeek Chat</div>
+            <div id="chat-status" class="live"><span class="dot" id="chat-dot"></span><span id="chat-status-text">未加载模型</span></div>
+          </div>
+          <div id="chat-messages" class="chat-messages">
+            <div class="chat-empty" id="chat-empty">像 ChatGPT 一样提问吧。先在左侧加载权重。</div>
+          </div>
+          <div class="chat-composer">
+            <div class="composer-box">
+              <textarea id="chat-input" rows="1" placeholder="发消息给 MiniSeek…"></textarea>
+              <button type="button" id="btn-send">发送</button>
+              <button type="button" id="btn-stop-gen" class="stop" style="display:none">停止</button>
+            </div>
+            <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 流式输出</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="env" class="panel">
+      <div class="card">
+        <h2>环境自检</h2>
+        <pre id="env-box">检查中…</pre>
+        <div class="row"><button type="button" id="btn-env">重新检查</button></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const logView = $("log-view");
+    const shown = [];
+    let stick = true;
+    let scheduled = false;
+    const pending = [];
+    const lossPoints = [];
+    let plotEvery = 200;
+    let modeDefaults = null;
+    let trainMode = "pretrain";
+    let trainArch = "dense";
+
+    document.querySelectorAll("nav button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        $(btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    logView.addEventListener("scroll", () => {
+      stick = logView.scrollHeight - logView.scrollTop - logView.clientHeight < 48;
+    });
+
+    function renderLog() {
+      scheduled = false;
+      const batch = pending.splice(0, pending.length);
+      if (!batch.length) return;
+      for (const line of batch) shown.push(line);
+      while (shown.length > 400) shown.shift();
+      logView.textContent = shown.join("\n");
+      if (stick) logView.scrollTop = logView.scrollHeight;
+    }
+
+    function pushLine(line) {
+      pending.push(line);
+      if (!scheduled) {
+        scheduled = true;
+        requestAnimationFrame(renderLog);
+      }
+    }
+
+    function clearLog() {
+      pending.length = 0;
+      shown.length = 0;
+      logView.textContent = "";
+      stick = true;
+    }
+
+    function clearLoss() {
+      lossPoints.length = 0;
+      drawLoss();
+    }
+
+    function addLossPoint(step, loss) {
+      const last = lossPoints[lossPoints.length - 1];
+      if (last && last.step === step) last.loss = loss;
+      else if (!last || step > last.step) lossPoints.push({ step, loss });
+      drawLoss();
+    }
+
+    function drawLoss() {
+      const canvas = $("loss-chart");
+      const wrap = canvas.parentElement;
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(280, wrap.clientWidth - 32);
+      const h = 220;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#f9fafb";
+      ctx.fillRect(0, 0, w, h);
+      const caption = $("loss-caption");
+      if (!lossPoints.length) {
+        caption.textContent = `每 ${plotEvery} 步记录一个点`;
+        ctx.fillStyle = "#6b7280";
+        ctx.font = "13px sans-serif";
+        ctx.fillText("满一个间隔后出现第一个点", 16, h / 2);
+        return;
+      }
+      const latest = lossPoints[lossPoints.length - 1];
+      caption.textContent =
+        `每 ${plotEvery} 步记录 · ${lossPoints.length} 个点 · ` +
+        `最近 step ${latest.step} loss ${latest.loss.toFixed(4)}`;
+
+      const pad = { l: 52, r: 16, t: 16, b: 28 };
+      const ys = lossPoints.map((p) => p.loss);
+      let ymin = Math.min(...ys);
+      let ymax = Math.max(...ys);
+      if (ymin === ymax) { ymin -= 0.5; ymax += 0.5; }
+      const ypad = (ymax - ymin) * 0.1;
+      ymin -= ypad;
+      ymax += ypad;
+      let xmin = lossPoints[0].step;
+      let xmax = latest.step;
+      if (xmin === xmax) {
+        xmin = Math.max(0, xmax - plotEvery);
+        xmax += plotEvery;
+      }
+      const plotW = w - pad.l - pad.r;
+      const plotH = h - pad.t - pad.b;
+      const X = (s) => pad.l + ((s - xmin) / (xmax - xmin)) * plotW;
+      const Y = (v) => pad.t + (1 - (v - ymin) / (ymax - ymin)) * plotH;
+
+      ctx.strokeStyle = "#e5e7eb";
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "11px sans-serif";
+      ctx.lineWidth = 1;
+      ctx.textAlign = "left";
+      for (let i = 0; i < 4; i++) {
+        const v = ymin + ((ymax - ymin) * i) / 3;
+        const y = Y(v);
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(w - pad.r, y);
+        ctx.stroke();
+        ctx.fillText(v.toFixed(2), 6, y + 4);
+      }
+      ctx.fillText(String(lossPoints[0].step), pad.l, h - 8);
+      ctx.textAlign = "right";
+      ctx.fillText(String(latest.step), w - pad.r, h - 8);
+
+      ctx.strokeStyle = "#1d4ed8";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      lossPoints.forEach((p, i) => {
+        const x = X(p.step);
+        const y = Y(p.loss);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.fillStyle = "#1d4ed8";
+      for (const p of lossPoints) {
+        ctx.beginPath();
+        ctx.arc(X(p.step), Y(p.loss), 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    window.addEventListener("resize", drawLoss);
+
+    function renderStatus(s) {
+      const state = s.running ? `正在训练 (PID ${s.pid})` : "未运行";
+      const loss = s.loss == null ? "-" : Number(s.loss).toFixed(4);
+      const ppl = s.ppl == null ? "-" : Number(s.ppl).toFixed(2);
+      const lr = s.lr == null ? "-" : Number(s.lr).toExponential(2);
+      $("status-box").textContent =
+        `状态: ${state}\nStep: ${s.step || "-"}\nLoss: ${loss}\nPPL: ${ppl}\nLR: ${lr}\n硬件: ${s.gpu || "-"}`;
+    }
+
+    function connectLogs() {
+      const es = new EventSource("/api/logs/stream");
+      es.addEventListener("hello", (ev) => {
+        const data = JSON.parse(ev.data);
+        clearLog();
+        plotEvery = data.plot_every || 200;
+        clearLoss();
+        for (const point of data.loss || []) addLossPoint(point.step, point.loss);
+        if (data.status) renderStatus(data.status);
+        $("live-dot").classList.add("on");
+        $("live-text").textContent = "日志已连接";
+      });
+      es.addEventListener("reset", (ev) => {
+        const data = JSON.parse(ev.data);
+        if (data.plot_every) plotEvery = data.plot_every;
+        clearLog();
+        clearLoss();
+      });
+      es.addEventListener("log", (ev) => pushLine(JSON.parse(ev.data).line));
+      es.addEventListener("loss", (ev) => {
+        const point = JSON.parse(ev.data);
+        if (point.every) plotEvery = point.every;
+        addLossPoint(point.step, point.loss);
+      });
+      es.addEventListener("status", (ev) => renderStatus(JSON.parse(ev.data)));
+      es.onerror = () => {
+        $("live-dot").classList.remove("on");
+        $("live-text").textContent = "日志连接中断，正在重连";
+      };
+    }
+
+    async function refreshStatus() {
+      const res = await fetch("/api/status");
+      renderStatus(await res.json());
+    }
+
+    function fillSelect(el, files, emptyLabel) {
+      const current = el.value;
+      el.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = emptyLabel;
+      el.appendChild(empty);
+      for (const file of files) {
+        const opt = document.createElement("option");
+        opt.value = file;
+        opt.textContent = file;
+        el.appendChild(opt);
+      }
+      if ([...el.options].some((opt) => opt.value === current)) el.value = current;
+    }
+
+    async function refreshCheckpoints() {
+      const res = await fetch("/api/checkpoints");
+      const files = (await res.json()).files || [];
+      fillSelect($("resume"), files, trainMode === "sft" ? "不续训（用上方初始化）" : "不续训");
+      fillSelect($("init-ckpt"), files, "选择预训练 best.pt");
+      fillSelect($("ckpt-select"), files, "选择 Checkpoint");
+      // SFT 默认勾上 stage0/best.pt
+      if (trainMode === "sft" && modeDefaults && modeDefaults.sft && modeDefaults.sft.init_ckpt) {
+        const prefer = modeDefaults.sft.init_ckpt;
+        if ([...$("init-ckpt").options].some((opt) => opt.value === prefer)) {
+          $("init-ckpt").value = prefer;
+        }
+      }
+    }
+
+    function applyArch(arch) {
+      trainArch = arch === "moe" ? "moe" : "dense";
+      $("arch-dense").classList.toggle("active", trainArch === "dense");
+      $("arch-moe").classList.toggle("active", trainArch === "moe");
+      if (trainMode === "pretrain" && modeDefaults) {
+        const key = trainArch === "moe" ? "pretrain_moe" : "pretrain";
+        const cfg = modeDefaults[key] || modeDefaults.pretrain || {};
+        if (cfg.out_dir) $("out-dir").value = cfg.out_dir;
+        if (cfg.data_path) $("data-path").value = cfg.data_path;
+      }
+      $("arch-hint").textContent = trainArch === "moe"
+        ? "MoE：MiniSeek-M0.1（1 shared + 32 routed, top-2, h=512）≈150M；默认写到 checkpoints/stage1。"
+        : "Dense：MiniSeek-D FFN；预训练默认写到 checkpoints/stage0。";
+    }
+
+    function applyMode(mode) {
+      trainMode = mode === "sft" ? "sft" : "pretrain";
+      $("mode-pretrain").classList.toggle("active", trainMode === "pretrain");
+      $("mode-sft").classList.toggle("active", trainMode === "sft");
+      const cfg = (modeDefaults && modeDefaults[trainMode]) || {};
+      if (cfg.data_path) $("data-path").value = cfg.data_path;
+      if (cfg.out_dir) $("out-dir").value = cfg.out_dir;
+      if (cfg.lr != null) $("lr").value = cfg.lr;
+      if (cfg.min_lr != null) $("min-lr").value = cfg.min_lr;
+      if (cfg.warmup_steps != null) $("warmup").value = cfg.warmup_steps;
+      if (cfg.save_loss_thresholds) $("thresholds").value = cfg.save_loss_thresholds;
+      $("init-ckpt-wrap").style.display = trainMode === "sft" ? "block" : "none";
+      $("mode-hint").textContent = trainMode === "sft"
+        ? "SFT：用对话数据把 base 教成会答问；默认写到 checkpoints/sft，需从 stage0/best.pt 初始化。"
+        : "预训练：学语言；Dense→stage0，MoE→stage1。";
+      // SFT 暂不支持 MoE
+      $("arch-moe").disabled = trainMode === "sft";
+      $("arch-row").style.opacity = trainMode === "sft" ? "0.5" : "1";
+      if (trainMode === "sft") applyArch("dense");
+      else applyArch(trainArch);
+      refreshCheckpoints();
+    }
+
+    async function refreshProcs() {
+      const res = await fetch("/api/train/processes");
+      const data = await res.json();
+      const sel = $("proc-select");
+      const current = sel.value;
+      sel.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = (data.processes || []).length ? "选择进程" : "没有扫到训练进程";
+      sel.appendChild(empty);
+      for (const proc of data.processes || []) {
+        const opt = document.createElement("option");
+        opt.value = String(proc.pid);
+        opt.textContent = proc.label + (proc.attached ? " · 已接入" : "");
+        sel.appendChild(opt);
+      }
+      const prefer = data.attached_pid ? String(data.attached_pid) : current;
+      if ([...sel.options].some((opt) => opt.value === prefer)) sel.value = prefer;
+    }
+
+    async function refreshEnv() {
+      const res = await fetch("/api/env");
+      $("env-box").textContent = (await res.json()).text;
+    }
+
+    function num(id) { return Number($(id).value); }
+
+    async function readError(res) {
+      try {
+        const body = await res.json();
+        return body.detail || body.message || res.statusText;
+      } catch (_) {
+        return res.statusText;
+      }
+    }
+
+    $("mode-pretrain").addEventListener("click", () => applyMode("pretrain"));
+    $("mode-sft").addEventListener("click", () => applyMode("sft"));
+    $("arch-dense").addEventListener("click", () => { if (trainMode === "pretrain") applyArch("dense"); });
+    $("arch-moe").addEventListener("click", () => { if (trainMode === "pretrain") applyArch("moe"); });
+
+    $("btn-start").addEventListener("click", async () => {
+      $("action-msg").textContent = "正在启动…";
+      const res = await fetch("/api/train/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: trainMode,
+          arch: trainArch,
+          aux_coef: 0.01,
+          data_path: $("data-path").value,
+          out_dir: $("out-dir").value,
+          batch_size: num("batch-size"),
+          max_seq_len: num("seq-len"),
+          lr: num("lr"),
+          min_lr: num("min-lr"),
+          warmup_steps: num("warmup"),
+          epochs: num("epochs"),
+          max_steps: num("max-steps"),
+          log_every: num("log-every"),
+          plot_every: num("plot-every"),
+          grad_clip: num("grad-clip"),
+          save_loss_thresholds: $("thresholds").value,
+          stable_steps: num("stable-steps"),
+          save_every: num("save-every"),
+          resume: $("resume").value,
+          init_ckpt: trainMode === "sft" ? $("init-ckpt").value : "",
+        }),
+      });
+      $("action-msg").textContent = res.ok ? (await res.json()).message : await readError(res);
+      refreshStatus();
+    });
+
+    $("btn-scan-proc").addEventListener("click", refreshProcs);
+    $("btn-attach").addEventListener("click", async () => {
+      const pid = Number($("proc-select").value);
+      if (!pid) {
+        $("proc-msg").textContent = "先选一个进程。";
+        return;
+      }
+      $("proc-msg").textContent = "正在接入…";
+      const res = await fetch("/api/train/attach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pid, plot_every: num("plot-every") }),
+      });
+      if (!res.ok) {
+        $("proc-msg").textContent = await readError(res);
+        return;
+      }
+      const body = await res.json();
+      $("proc-msg").textContent = body.message;
+      if (body.status) renderStatus(body.status);
+      refreshProcs();
+    });
+
+    $("btn-stop").addEventListener("click", async () => {
+      const res = await fetch("/api/train/stop", { method: "POST" });
+      const body = await res.json();
+      $("action-msg").textContent = body.message;
+      if (body.status) renderStatus(body.status);
+    });
+
+    const chatState = { messages: [], streaming: false, abort: null };
+
+    function setChatStatus(text, on) {
+      $("chat-status-text").textContent = text;
+      $("chat-dot").classList.toggle("on", !!on);
+    }
+
+    function renderChat() {
+      const box = $("chat-messages");
+      const empty = $("chat-empty");
+      [...box.querySelectorAll(".msg-row")].forEach((el) => el.remove());
+      if (!chatState.messages.length) {
+        if (empty) empty.style.display = "";
+        return;
+      }
+      if (empty) empty.style.display = "none";
+      for (const m of chatState.messages) {
+        const row = document.createElement("div");
+        row.className = `msg-row ${m.role}`;
+        row.innerHTML = `<div class="msg-bubble"><div class="msg-avatar">${m.role === "user" ? "你" : "AI"}</div><div class="msg-body"></div></div>`;
+        row.querySelector(".msg-body").textContent = m.content || "";
+        if (m.streaming) row.querySelector(".msg-body").classList.add("streaming");
+        box.appendChild(row);
+      }
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function autosizeInput() {
+      const el = $("chat-input");
+      el.style.height = "auto";
+      el.style.height = Math.min(160, el.scrollHeight) + "px";
+    }
+
+    async function loadCheckpoint() {
+      $("load-msg").textContent = "正在加载…";
+      setChatStatus("加载中…", false);
+      const res = await fetch("/api/infer/load", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ckpt_path: $("ckpt-select").value }),
+      });
+      const msg = res.ok ? (await res.json()).message : await readError(res);
+      $("load-msg").textContent = msg;
+      setChatStatus(res.ok ? msg : "加载失败", res.ok);
+    }
+
+    function parseSseChunk(buffer) {
+      const events = [];
+      const parts = buffer.split("\n\n");
+      const rest = parts.pop() || "";
+      for (const block of parts) {
+        let event = "message";
+        let data = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        try { events.push({ event, data: JSON.parse(data) }); }
+        catch (_) { events.push({ event, data: { text: data } }); }
+      }
+      return { events, rest };
+    }
+
+    async function sendChat() {
+      if (chatState.streaming) return;
+      const text = ($("chat-input").value || "").trim();
+      if (!text) return;
+      $("chat-input").value = "";
+      autosizeInput();
+      chatState.messages.push({ role: "user", content: text });
+      const assistant = { role: "assistant", content: "", streaming: true };
+      chatState.messages.push(assistant);
+      renderChat();
+      chatState.streaming = true;
+      $("btn-send").style.display = "none";
+      $("btn-stop-gen").style.display = "";
+      const controller = new AbortController();
+      chatState.abort = controller;
+      const history = chatState.messages
+        .filter((m) => !m.streaming)
+        .map((m) => ({ role: m.role, content: m.content }));
+      try {
+        const res = await fetch("/api/infer/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            messages: history,
+            max_new_tokens: num("gen-len"),
+            temperature: num("temperature"),
+            top_k: num("top-k"),
+            seed: num("seed"),
+          }),
+        });
+        if (!res.ok) {
+          assistant.content = await readError(res);
+          assistant.streaming = false;
+          renderChat();
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parsed = parseSseChunk(buf);
+          buf = parsed.rest;
+          for (const ev of parsed.events) {
+            if (ev.event === "token" && ev.data.text) {
+              assistant.content += ev.data.text;
+              renderChat();
+            } else if (ev.event === "error") {
+              assistant.content += (assistant.content ? "\n" : "") + ("错误: " + (ev.data.message || "unknown"));
+              renderChat();
+            } else if (ev.event === "done") {
+              if (ev.data && typeof ev.data.text === "string" && !assistant.content) {
+                assistant.content = ev.data.text;
+              }
+              setChatStatus(
+                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s`,
+                true
+              );
+            }
+          }
+        }
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          if (!assistant.content) assistant.content = "（已停止）";
+        } else {
+          assistant.content += (assistant.content ? "\n" : "") + String(err);
+        }
+      } finally {
+        assistant.streaming = false;
+        chatState.streaming = false;
+        chatState.abort = null;
+        $("btn-send").style.display = "";
+        $("btn-stop-gen").style.display = "none";
+        renderChat();
+      }
+    }
+
+    $("btn-refresh-ckpt").addEventListener("click", refreshCheckpoints);
+    $("btn-load").addEventListener("click", loadCheckpoint);
+    $("btn-clear-chat").addEventListener("click", () => {
+      if (chatState.streaming && chatState.abort) chatState.abort.abort();
+      chatState.messages = [];
+      renderChat();
+    });
+    $("btn-send").addEventListener("click", sendChat);
+    $("btn-stop-gen").addEventListener("click", () => {
+      if (chatState.abort) chatState.abort.abort();
+    });
+    $("chat-input").addEventListener("input", autosizeInput);
+    $("chat-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChat();
+      }
+    });
+    $("btn-env").addEventListener("click", refreshEnv);
+
+    async function boot() {
+      modeDefaults = await (await fetch("/api/defaults")).json();
+      trainArch = modeDefaults.arch || "dense";
+      applyMode(modeDefaults.mode || "pretrain");
+      connectLogs();
+      drawLoss();
+      refreshStatus();
+      refreshProcs();
+      refreshEnv();
+      setInterval(refreshStatus, 1000);
+      setInterval(refreshProcs, 5000);
+    }
+    boot();
+  </script>
+</body>
+</html>
