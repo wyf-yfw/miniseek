@@ -29,15 +29,48 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def create_task(*, name: str, arch: str, mode: str, hparams: Dict[str, Any]) -> Dict[str, Any]:
+
+def normalize_name(name: str) -> str:
+    return (name or "").strip()
+
+
+def name_taken(name: str, *, exclude_id: Optional[str] = None) -> bool:
+    key = normalize_name(name).casefold()
+    if not key:
+        return False
+    for row in list_tasks():
+        if exclude_id and row.get("id") == exclude_id:
+            continue
+        if normalize_name(str(row.get("name") or "")).casefold() == key:
+            return True
+    return False
+
+
+def allocate_unique_name(base: str) -> str:
+    """Return base, or base-2, base-3, ... until free."""
+    base = normalize_name(base) or "task"
+    if not name_taken(base):
+        return base
+    n = 2
+    while name_taken(f"{base}-{n}"):
+        n += 1
+    return f"{base}-{n}"
+
+
+def create_task(*, name: str, arch: str, mode: str, hparams: Dict[str, Any], uniquify: bool = False) -> Dict[str, Any]:
     tid = new_task_id()
     d = task_dir(tid)
     ckpt = d / "checkpoints"
     ckpt.mkdir(parents=True, exist_ok=False)
     now = datetime.now().isoformat(timespec="seconds")
+    display = normalize_name(name) or f"{arch}-{mode}"
+    if uniquify:
+        display = allocate_unique_name(display)
+    elif name_taken(display):
+        raise ValueError(f"已存在同名 Task：{display}")
     data = {
         "id": tid,
-        "name": name or f"{arch}-{mode}-{tid}",
+        "name": display,
         "status": "draft",
         "arch": arch,
         "mode": mode,

@@ -151,6 +151,8 @@
     }
     h2 { margin: 0 0 12px; font-size: 15px; }
     label { display: block; margin: 10px 0; color: var(--muted); font-size: 12px; }
+    label .field-title { color: var(--ink); font-weight: 600; }
+    label .field-hint { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.35; }
     input, select, textarea {
       width: 100%;
       margin-top: 4px;
@@ -301,29 +303,29 @@
                 <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
               </div>
               <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：尚未实现；Tiny：d=64 L=2 冒烟档。</p>
-              <label>名称<input id="task-name" type="text" /></label>
-              <label>数据路径<input id="data-path" type="text" /></label>
+              <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
+              <label><span class="field-title">数据路径</span><span class="field-hint">训练用 jsonl 文件路径（每行一条文本样本）。</span><input id="data-path" type="text" /></label>
               <div class="grid">
-                <label>Batch<input id="batch-size" type="number" min="1" /></label>
-                <label>Max Seq Len<input id="max-seq-len" type="number" min="8" /></label>
-                <label>LR<input id="lr" type="number" step="any" /></label>
-                <label>Min LR<input id="min-lr" type="number" step="any" /></label>
-                <label>Warmup<input id="warmup-steps" type="number" min="0" /></label>
-                <label>Epochs<input id="epochs" type="number" min="1" /></label>
-                <label>Max Steps<input id="max-steps" type="number" min="0" /></label>
-                <label>Log Every<input id="log-every" type="number" min="1" /></label>
-                <label>Plot Every<input id="plot-every" type="number" min="1" /></label>
-                <label>Grad Clip<input id="grad-clip" type="number" step="any" /></label>
+                <label><span class="field-title">Batch</span><span class="field-hint">每次更新用多少条样本；越大越稳但更吃显存/内存。</span><input id="batch-size" type="number" min="1" /></label>
+                <label><span class="field-title">Max Seq Len</span><span class="field-hint">单条样本截断/填充的最大 token 长度。</span><input id="max-seq-len" type="number" min="8" /></label>
+                <label><span class="field-title">LR</span><span class="field-hint">学习率峰值（warmup 结束后的最高 lr）。</span><input id="lr" type="number" step="any" /></label>
+                <label><span class="field-title">Min LR</span><span class="field-hint">余弦衰减后的学习率下限。</span><input id="min-lr" type="number" step="any" /></label>
+                <label><span class="field-title">Warmup</span><span class="field-hint">前多少步线性升温到峰值 LR；0 表示不升温。</span><input id="warmup-steps" type="number" min="0" /></label>
+                <label><span class="field-title">Epochs</span><span class="field-hint">完整扫过数据集的轮数。</span><input id="epochs" type="number" min="1" /></label>
+                <label><span class="field-title">Max Steps</span><span class="field-hint">最多训练多少步；0 或空表示不按步数截断，只跑完 epochs。</span><input id="max-steps" type="number" min="0" /></label>
+                <label><span class="field-title">Log Every</span><span class="field-hint">每隔多少步往日志打印一次 loss 等指标。</span><input id="log-every" type="number" min="1" /></label>
+                <label><span class="field-title">Plot Every</span><span class="field-hint">每隔多少步给 Loss 曲线记一个点。</span><input id="plot-every" type="number" min="1" /></label>
+                <label><span class="field-title">Grad Clip</span><span class="field-hint">梯度裁剪阈值，抑制爆炸；常见 1.0。</span><input id="grad-clip" type="number" step="any" /></label>
               </div>
               <details>
                 <summary>更多</summary>
                 <div class="grid">
-                  <label>Loss Thresholds<input id="save-loss-thresholds" type="text" /></label>
-                  <label>Stable Steps<input id="stable-steps" type="number" min="1" /></label>
-                  <label>Save Every<input id="save-every" type="number" min="0" /></label>
-                  <label>Aux Coef<input id="aux-coef" type="number" step="any" /></label>
-                  <label>Resume<input id="resume" type="text" placeholder="可选 .pt" /></label>
-                  <label>Init Ckpt (SFT)<input id="init-ckpt" type="text" placeholder="可选 .pt" /></label>
+                  <label><span class="field-title">Loss Thresholds</span><span class="field-hint">loss 连续低于这些阈值时触发里程碑存盘（逗号分隔，降序）。</span><input id="save-loss-thresholds" type="text" /></label>
+                  <label><span class="field-title">Stable Steps</span><span class="field-hint">某个阈值需连续多少步 loss≤阈值才写入对应 checkpoint。</span><input id="stable-steps" type="number" min="1" /></label>
+                  <label><span class="field-title">Save Every</span><span class="field-hint">每 N 步额外存 step-N.pt；0=关闭，只靠里程碑与结束时的 last.pt。</span><input id="save-every" type="number" min="0" /></label>
+                  <label><span class="field-title">Aux Coef</span><span class="field-hint">MoE 负载均衡辅助损失系数；Dense/Tiny 可忽略。</span><input id="aux-coef" type="number" step="any" /></label>
+                  <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态），填 .pt 路径。</span><input id="resume" type="text" placeholder="可选 .pt" /></label>
+                  <label><span class="field-title">Init Ckpt (SFT)</span><span class="field-hint">SFT 时从该预训练权重初始化（非断点续训）。</span><input id="init-ckpt" type="text" placeholder="可选 .pt" /></label>
                 </div>
               </details>
               <div class="actions">
@@ -769,6 +771,7 @@
           arch,
           mode: "pretrain",
           hparams: base,
+          uniquify: true,
         }),
       });
       if (!res.ok) {
@@ -886,10 +889,11 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: `${(currentTask.name || arch).replace(/-\d+$/, "")}-new`,
+          name: currentTask.name || `${arch}-pretrain`,
           arch,
           mode,
           hparams: hp,
+          uniquify: true,
         }),
       });
       if (!res.ok) {

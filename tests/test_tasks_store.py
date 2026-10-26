@@ -40,3 +40,19 @@ def test_list_and_delete(tasks_root):
     assert {r["id"] for r in rows} == {a["id"], b["id"]}
     ts.delete_task(a["id"])
     assert not ts.task_dir(a["id"]).exists()
+
+
+def test_reject_duplicate_name(tasks_root):
+    ts.create_task(name="same", arch="tiny", mode="pretrain", hparams={})
+    try:
+        ts.create_task(name="same", arch="tiny", mode="pretrain", hparams={})
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "同名" in str(e)
+
+
+def test_allocate_unique_name(tasks_root):
+    ts.create_task(name="tiny-pretrain", arch="tiny", mode="pretrain", hparams={})
+    assert ts.allocate_unique_name("tiny-pretrain") == "tiny-pretrain-2"
+    ts.create_task(name="tiny-pretrain-2", arch="tiny", mode="pretrain", hparams={})
+    assert ts.allocate_unique_name("tiny-pretrain") == "tiny-pretrain-3"

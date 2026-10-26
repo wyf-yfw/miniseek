@@ -243,6 +243,7 @@ class TaskCreate(BaseModel):
     arch: str = "dense"
     mode: str = "pretrain"
     hparams: Dict[str, Any] = Field(default_factory=dict)
+    uniquify: bool = False
 
 
 class TaskPatch(BaseModel):
@@ -497,7 +498,10 @@ def api_create_task(body: TaskCreate) -> dict:
     base["arch"] = arch
     base.pop("out_dir", None)  # out_dir forced by store
     name = (body.name or "").strip() or f"{arch}-{mode}"
-    return ts.create_task(name=name, arch=arch, mode=mode, hparams=base)
+    try:
+        return ts.create_task(name=name, arch=arch, mode=mode, hparams=base, uniquify=bool(body.uniquify))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/tasks/{task_id}")
@@ -509,7 +513,10 @@ def api_get_task(task_id: str) -> dict:
 def api_patch_task(task_id: str, body: TaskPatch) -> dict:
     task = reconcile_task(_get_task_or_404(task_id))
     if body.name is not None:
-        task["name"] = body.name.strip() or task["name"]
+        new_name = body.name.strip() or task["name"]
+        if ts.name_taken(new_name, exclude_id=task_id):
+            raise HTTPException(status_code=409, detail=f"已存在同名 Task：{new_name}")
+        task["name"] = new_name
     if task.get("status") == "draft":
         if body.arch is not None:
             arch = body.arch.strip().lower()
