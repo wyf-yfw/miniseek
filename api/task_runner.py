@@ -235,11 +235,10 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         fused_on = fused_on.strip().lower() not in {"0", "false", "no", "off"}
     cmd.append("--fused-adamw" if bool(fused_on) else "--no-fused-adamw")
 
-    if mode == "pretrain":
-        batch_mode = str(_hp(hp, "batch_mode", "pack")).strip().lower()
-        if batch_mode not in {"random", "bucket", "pack"}:
-            batch_mode = "pack"
-        cmd.extend(["--batch-mode", batch_mode])
+    batch_mode = str(_hp(hp, "batch_mode", "pack")).strip().lower()
+    if batch_mode not in {"random", "bucket", "pack"}:
+        batch_mode = "pack"
+    cmd.extend(["--batch-mode", batch_mode])
 
     return cmd
 

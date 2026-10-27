@@ -31,11 +31,17 @@ import math
 import random
 import time
 from pathlib import Path
+from functools import partial
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from algo.batching import (
+    LengthBucketBatchSampler,
+    PackedSFTBatchIter,
+    truncate_keep_tail_with_eos,
+)
 from algo.model import build_model
 from algo.model.config import ModelConfig
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
@@ -91,10 +97,11 @@ class JsonlSFTDataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        conv = self.samples[idx]
+    def encode_conversation(self, conv: List[dict]) -> Tuple[List[int], List[int]]:
+        """Encode one multi-turn sample to full ids/labels (keep-tail + trailing eos)."""
         bos = getattr(self.tokenizer, "bos_token", "<|im_start|>") or "<|im_start|>"
         eos = getattr(self.tokenizer, "eos_token", "<|im_end|>") or "<|im_end|>"
+        eos_id = int(getattr(self.tokenizer, "eos_token_id", 2) or 2)
 
         input_ids: List[int] = []
         labels: List[int] = []
@@ -115,14 +122,22 @@ class JsonlSFTDataset(Dataset):
             else:
                 labels.extend([-100] * len(ids))
 
-        # 截断到 max_seq_len；保证至少有一对可训练 token
-        input_ids = input_ids[: self.max_seq_len]
-        labels = labels[: self.max_seq_len]
+        input_ids, labels = truncate_keep_tail_with_eos(
+            input_ids, self.max_seq_len, eos_id, labels=labels
+        )
+        assert labels is not None
         if len(input_ids) < 2:
-            eos_id = int(getattr(self.tokenizer, "eos_token_id", 2) or 2)
             input_ids = [eos_id, eos_id]
             labels = [-100, eos_id]
+        return input_ids, labels
 
+    def approx_length(self, idx: int) -> int:
+        """Char-length proxy for bucket sampling (same idea as pretrain)."""
+        text = format_chat(self.samples[idx])
+        return min(self.max_seq_len, max(2, len(text)))
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        input_ids, labels = self.encode_conversation(self.samples[idx])
         # next-token：x = ids[:-1], y = labels[1:]
         x = torch.tensor(input_ids[:-1], dtype=torch.long)
         y = torch.tensor(labels[1:], dtype=torch.long)
@@ -286,6 +301,13 @@ def main() -> None:
         default=True,
         help="CUDA 上默认 AdamW(fused=True)；--no-fused-adamw 关闭",
     )
+    p.add_argument(
+        "--batch-mode",
+        choices=["random", "bucket", "pack"],
+        default="pack",
+        help="组批方式：pack=拼接样本（默认，少 pad）；"
+        "bucket=长度分桶；random=随机 pad。pack 不做跨样本 attention mask",
+    )
     args = p.parse_args()
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
@@ -328,13 +350,50 @@ def main() -> None:
         raise SystemExit(f"[sft] 缺少数据文件: {args.data}")
 
     ds = JsonlSFTDataset(args.data, tok, max_seq_len=args.max_seq_len, max_samples=args.max_samples)
-    loader = DataLoader(
-        ds,
-        batch_size=args.batch_size,
-        shuffle=True,
-        collate_fn=lambda b: collate_pad(b, pad_id=pad_id),
-        num_workers=0,
-    )
+    batch_mode = str(args.batch_mode).lower()
+    shuffle_seed = int(args.seed) % (2**31 - 1)
+    packed_iter_factory = None
+    if batch_mode == "pack":
+        def packed_iter_factory(epoch: int):
+            return PackedSFTBatchIter(
+                ds.samples,
+                ds.encode_conversation,
+                max_seq_len=args.max_seq_len,
+                batch_size=args.batch_size,
+                pad_id=pad_id,
+                seed=(shuffle_seed + epoch) % (2**31 - 1),
+            )
+
+        loader = None
+        steps_per_epoch = PackedSFTBatchIter(
+            ds.samples,
+            ds.encode_conversation,
+            max_seq_len=args.max_seq_len,
+            batch_size=args.batch_size,
+            pad_id=pad_id,
+            seed=shuffle_seed,
+        ).estimate_len()
+    elif batch_mode == "bucket":
+        lengths = [ds.approx_length(i) for i in range(len(ds))]
+        batch_sampler = LengthBucketBatchSampler(
+            lengths, args.batch_size, seed=shuffle_seed, drop_last=False
+        )
+        loader = DataLoader(
+            ds,
+            batch_sampler=batch_sampler,
+            collate_fn=partial(collate_pad, pad_id=pad_id),
+            num_workers=0,
+        )
+        steps_per_epoch = len(batch_sampler)
+    else:
+        loader = DataLoader(
+            ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            collate_fn=partial(collate_pad, pad_id=pad_id),
+            num_workers=0,
+        )
+        steps_per_epoch = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
 
     valid_loader = None
     valid_path = str(args.valid or "").strip()
@@ -350,7 +409,7 @@ def main() -> None:
                 valid_ds,
                 batch_size=args.batch_size,
                 shuffle=False,
-                collate_fn=lambda b: pretrain_collate_pad(b, pad_id=pad_id),
+                collate_fn=partial(pretrain_collate_pad, pad_id=pad_id),
                 num_workers=0,
             )
             print(
@@ -361,16 +420,16 @@ def main() -> None:
         else:
             print(f"[sft] WARN: valid 文件不存在，跳过: {valid_path}", flush=True)
 
-    steps_per_epoch = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
     if args.max_steps is not None:
         total_steps = args.max_steps
     else:
         total_steps = steps_per_epoch * max(1, args.epochs)
     print(
-        f"[sft] samples={len(ds)} steps/epoch≈{steps_per_epoch} "
+        f"[sft] batch_mode={batch_mode} samples={len(ds)} steps/epoch≈{steps_per_epoch} "
         f"total_steps={total_steps} warmup={args.warmup_steps} "
         f"lr={args.lr}→{args.min_lr} thresholds={thresholds} "
-        f"stable_steps={args.stable_steps}"
+        f"stable_steps={args.stable_steps}",
+        flush=True,
     )
 
     opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
@@ -453,7 +512,12 @@ def main() -> None:
         print(f"[sft] step save @ step={step} loss={loss_val:.4f} -> {step_path}", flush=True)
 
     for epoch in range(args.epochs):
-        for input_ids, labels in loader:
+        if batch_mode == "pack":
+            assert packed_iter_factory is not None
+            epoch_iter = packed_iter_factory(epoch)
+        else:
+            epoch_iter = loader
+        for input_ids, labels in epoch_iter:
             input_ids = input_ids.to(device)
             labels = labels.to(device)
 

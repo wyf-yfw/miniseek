@@ -257,3 +257,165 @@ class PackedTextBatchIter:
         return estimate_pack_steps(
             len(self.texts), avg, self.batch_size, self.max_seq_len
         )
+
+def truncate_keep_tail_with_eos(
+    ids: Sequence[int],
+    max_seq_len: int,
+    eos_id: int,
+    labels: Optional[Sequence[int]] = None,
+) -> Tuple[List[int], Optional[List[int]]]:
+    """Keep the tail of a token sequence; preserve a trailing eos when present.
+
+    If the untruncated sequence ended with ``eos_id``, the returned sequence also
+    ends with ``eos_id`` (forced onto the last position if needed). Labels, when
+    provided, are truncated in lockstep; a forced trailing eos uses label=eos_id
+    so SFT still trains the stop token.
+    """
+    if max_seq_len < 2:
+        raise ValueError("max_seq_len must be >= 2")
+    ids_list = [int(t) for t in ids]
+    lab_list: Optional[List[int]] = None
+    if labels is not None:
+        lab_list = [int(t) for t in labels]
+        if len(lab_list) != len(ids_list):
+            raise ValueError("ids/labels length mismatch")
+    ended_with_eos = bool(ids_list) and ids_list[-1] == int(eos_id)
+    if len(ids_list) > max_seq_len:
+        ids_list = ids_list[-max_seq_len:]
+        if lab_list is not None:
+            lab_list = lab_list[-max_seq_len:]
+    if ended_with_eos:
+        if not ids_list:
+            ids_list = [int(eos_id)]
+            if lab_list is not None:
+                lab_list = [int(eos_id)]
+        else:
+            ids_list[-1] = int(eos_id)
+            if lab_list is not None:
+                # Keep stop-token in the loss when the sample ended with eos.
+                lab_list[-1] = int(eos_id)
+    return ids_list, lab_list
+
+
+def stack_sft_pack_group(
+    group: Sequence[Tuple[Sequence[int], Sequence[int]]],
+    max_seq: int,
+    pad_id: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Stack packed SFT (ids, labels) chunks into [B, max_seq-1] x/y.
+
+    Pad ids with pad_id and labels with -100 beyond real_len; then
+    x=ids[:-1], y=labels[1:] (pad positions in y already -100).
+    """
+    if not group:
+        raise ValueError("empty SFT pack group")
+    pad = int(pad_id)
+    xs: List[torch.Tensor] = []
+    ys: List[torch.Tensor] = []
+    for ids, labs in group:
+        id_list = [int(t) for t in ids]
+        lab_list = [int(t) for t in labs]
+        if len(id_list) != len(lab_list):
+            raise ValueError("ids/labels length mismatch in pack chunk")
+        real_len = min(len(id_list), max_seq)
+        if len(id_list) < max_seq:
+            pad_n = max_seq - len(id_list)
+            id_list = id_list + [pad] * pad_n
+            lab_list = lab_list + [-100] * pad_n
+        else:
+            id_list = id_list[:max_seq]
+            lab_list = lab_list[:max_seq]
+        x_ids = id_list[:-1]
+        y_labs = []
+        for j, tok in enumerate(lab_list[1:]):
+            if j + 1 >= real_len:
+                y_labs.append(-100)
+            else:
+                y_labs.append(int(tok))
+        xs.append(torch.tensor(x_ids, dtype=torch.long))
+        ys.append(torch.tensor(y_labs, dtype=torch.long))
+    return torch.stack(xs, dim=0), torch.stack(ys, dim=0)
+
+
+class PackedSFTBatchIter:
+    """Online packer for SFT (ids, labels) sequences (one epoch).
+
+    Encodes via ``encode_fn(sample) -> (ids, labels)`` (full sequences, already
+    truncated). Concatenates samples into a stream, cuts max_seq windows, stacks
+    batch_size chunks. No cross-sample attention mask (same as pretrain pack).
+    """
+
+    def __init__(
+        self,
+        samples: Sequence,
+        encode_fn,
+        *,
+        max_seq_len: int,
+        batch_size: int,
+        pad_id: int = 0,
+        seed: int = 0,
+    ) -> None:
+        self.samples = list(samples)
+        self.encode_fn = encode_fn
+        self.max_seq_len = int(max_seq_len)
+        self.batch_size = int(batch_size)
+        self.pad_id = int(pad_id)
+        self.seed = int(seed)
+
+    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+        rng = random.Random(self.seed)
+        order = list(range(len(self.samples)))
+        rng.shuffle(order)
+        stream_ids: List[int] = []
+        stream_labs: List[int] = []
+        ready: List[Tuple[List[int], List[int]]] = []
+        for idx in order:
+            ids, labs = self.encode_fn(self.samples[idx])
+            if not ids or len(ids) < 2:
+                continue
+            if len(ids) != len(labs):
+                raise ValueError("encode_fn returned mismatched ids/labels")
+            stream_ids.extend(int(t) for t in ids)
+            stream_labs.extend(int(t) for t in labs)
+            while len(stream_ids) >= self.max_seq_len:
+                chunk_i = stream_ids[: self.max_seq_len]
+                chunk_l = stream_labs[: self.max_seq_len]
+                stream_ids = stream_ids[self.max_seq_len :]
+                stream_labs = stream_labs[self.max_seq_len :]
+                ready.append((chunk_i, chunk_l))
+                if len(ready) >= self.batch_size:
+                    group = ready[: self.batch_size]
+                    ready = ready[self.batch_size :]
+                    yield stack_sft_pack_group(
+                        group, max_seq=self.max_seq_len, pad_id=self.pad_id
+                    )
+        if len(stream_ids) >= 2:
+            ready.append((stream_ids, stream_labs))
+        for i in range(0, len(ready) - self.batch_size + 1, self.batch_size):
+            yield stack_sft_pack_group(
+                ready[i : i + self.batch_size],
+                max_seq=self.max_seq_len,
+                pad_id=self.pad_id,
+            )
+
+    def estimate_len(self) -> int:
+        if not self.samples:
+            return 1
+        # Cheap char proxy (same idea as PackedTextBatchIter)
+        avg = 0.0
+        n = 0
+        for s in self.samples[: min(256, len(self.samples))]:
+            try:
+                ids, _labs = self.encode_fn(s)
+            except Exception:
+                continue
+            if ids:
+                avg += float(len(ids))
+                n += 1
+        if n <= 0:
+            avg = float(self.max_seq_len)
+        else:
+            avg /= float(n)
+        return estimate_pack_steps(
+            len(self.samples), avg, self.batch_size, self.max_seq_len
+        )

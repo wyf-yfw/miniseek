@@ -784,24 +784,17 @@
                 <label><span class="field-title">Init Ckpt<span class="req-mark" id="init-ckpt-req" title="必填">*</span></span><span class="field-hint" id="init-ckpt-hint">必填：预训练 base 权重 .pt（Dense/MoE 须与上方架构一致）。填了 Resume 时可空。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="必填：预训练 .pt" required /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
               </div>
 
-              <div class="param-group mode-pretrain" id="group-pretrain-only">
-                <div class="group-title">Pretrain 专属</div>
-                <p class="group-desc">只对 Pretrain 生效；SFT 脚本没有这些参数，切到 SFT 后本区会隐藏。</p>
+              <div class="param-group" id="group-train">
+                <div class="group-title">训练超参</div>
+                <p class="group-desc">Pretrain / SFT 共用，但默认值不同（SFT 通常更小 batch、更短 warmup）。Batch Mode 两种模式都可用。</p>
                 <div class="grid">
-                  <label><span class="field-title">Batch Mode</span><span class="field-hint">组批：pack=拼接文档（默认最快）；bucket=长度分桶；random=随机 pad。</span>
+                  <label><span class="field-title">Batch Mode</span><span class="field-hint">组批：pack=拼接样本（默认最快，少 pad）；bucket=长度分桶；random=随机 pad。SFT pack 保留 assistant mask。</span>
                     <select id="batch-mode">
                       <option value="pack">pack（默认）</option>
                       <option value="bucket">bucket</option>
                       <option value="random">random</option>
                     </select>
                   </label>
-                </div>
-              </div>
-
-              <div class="param-group" id="group-train">
-                <div class="group-title">训练超参</div>
-                <p class="group-desc">Pretrain / SFT 共用，但默认值不同（SFT 通常更小 batch、更短 warmup）。</p>
-                <div class="grid">
                   <label><span class="field-title">Batch</span><span class="field-hint">每次更新用多少条样本；越大越稳但更吃显存/内存。</span><input id="batch-size" type="number" min="1" /></label>
                   <label><span class="field-title">Max Seq Len</span><span class="field-hint">单条样本截断/填充的最大 token 长度。</span><input id="max-seq-len" type="number" min="8" /></label>
                   <label><span class="field-title">LR</span><span class="field-hint">学习率峰值（warmup 结束后的最高 lr）。</span><input id="lr" type="number" step="any" /></label>
@@ -2147,9 +2140,8 @@
         ["resume", hp.resume || ""],
         ["out_dir", t.out_dir || "-"],
       ];
-      if (mode === "pretrain") {
-        rows.splice(5, 0, ["batch_mode", hp.batch_mode || "pack"]);
-      } else {
+      rows.splice(5, 0, ["batch_mode", hp.batch_mode || "pack"]);
+      if (mode === "sft") {
         rows.splice(4, 0, ["init_ckpt", hp.init_ckpt || ""]);
       }
       if (arch === "moe") {

@@ -208,3 +208,21 @@ def test_build_train_cmd_speed_opt_out(tasks_root):
     assert "--no-compile" in cmd
     assert "--no-fused-adamw" in cmd
     assert cmd[cmd.index("--batch-mode") + 1] == "bucket"
+
+
+def test_build_train_cmd_sft_batch_mode(tasks_root, tmp_path):
+    ckpt = tmp_path / "base.pt"
+    ckpt.write_bytes(b"x")
+    t = ts.create_task(
+        name="sft-bm",
+        arch="dense",
+        mode="sft",
+        hparams={
+            "max_steps": 2,
+            "init_ckpt": str(ckpt),
+            "batch_mode": "bucket",
+        },
+    )
+    cmd = tr.build_train_cmd(ts.load_task(t["id"]))
+    assert "--batch-mode" in cmd
+    assert cmd[cmd.index("--batch-mode") + 1] == "bucket"
