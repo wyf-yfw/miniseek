@@ -268,7 +268,37 @@
       font-size: 12px;
       white-space: pre-wrap;
     }
-    #loss-canvas { width: 100%; height: 180px; background: #fafafa; border-radius: 8px; border: 1px solid var(--line); }
+    #loss-canvas { width: 100%; height: 210px; background: #fff; border-radius: 8px; border: 1px solid var(--line); display: block; }
+    .loss-caption {
+      display: flex; flex-wrap: wrap; gap: 4px 16px;
+      margin: 6px 2px 0; font-size: 12px; color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .loss-caption b { color: var(--ink); font-weight: 600; }
+
+    .train-progress { margin-bottom: 12px; }
+    .tp-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 12px; color: var(--muted); margin-bottom: 6px;
+    }
+    .tp-head b { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .tp-track {
+      position: relative; height: 10px; border-radius: 999px;
+      background: var(--line); overflow: hidden;
+    }
+    .tp-fill {
+      position: absolute; top: 0; bottom: 0; left: 0; width: 0%;
+      border-radius: 999px; background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+      transition: width .4s ease;
+    }
+    .tp-fill.indeterminate { width: 35%; animation: tp-slide 1.4s ease-in-out infinite; }
+    @keyframes tp-slide { 0% { left: -35%; } 100% { left: 100%; } }
+    .tp-foot {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px;
+      margin-top: 6px; font-size: 12px; color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .tp-foot b { color: var(--ink); font-weight: 600; }
     .empty-hint { color: var(--muted); padding: 24px; text-align: center; }
     .phase-badge {
       display: inline-flex; align-items: center; gap: 6px;
@@ -692,6 +722,18 @@
 
             <div id="phase-run" style="display:none">
               <div id="status-box">—</div>
+              <div class="train-progress" id="train-progress" hidden>
+                <div class="tp-head">
+                  <span>进度 <b id="tp-percent">—</b></span>
+                  <span>预计剩余 <b id="tp-eta">—</b></span>
+                </div>
+                <div class="tp-track"><div class="tp-fill" id="tp-fill"></div></div>
+                <div class="tp-foot">
+                  <span>步数 <b id="tp-steps">—</b></span>
+                  <span>速度 <b id="tp-rate">—</b></span>
+                  <span>已用 <b id="tp-elapsed">—</b></span>
+                </div>
+              </div>
               <div class="run-actions">
                 <button type="button" id="btn-stop">Stop</button>
                 <button type="button" id="btn-delete">删除</button>
@@ -702,7 +744,8 @@
                 <div class="frozen-config" id="frozen-config"></div>
               </details>
               <h2 style="margin-top:16px">Loss</h2>
-              <canvas id="loss-canvas" width="800" height="180"></canvas>
+              <canvas id="loss-canvas" width="800" height="210"></canvas>
+              <div class="loss-caption" id="loss-caption"></div>
               <h2 style="margin-top:16px">日志</h2>
               <div id="log"></div>
               <h2 style="margin-top:16px">本 Task Checkpoints</h2>
@@ -1344,9 +1387,54 @@
       return parts.join(" | ");
     }
 
+    function currentMaxSteps() {
+      const hp = (currentTask && currentTask.hparams) || {};
+      const n = Number(hp.max_steps);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    function updateProgress(s) {
+      const box = $("train-progress");
+      if (!box) return;
+      const status = (s && s.status) || (currentTask && currentTask.status) || "";
+      const liveStep = s && s.step != null ? Number(s.step) : null;
+      const curveStep = lossPoints.length ? Number(lossPoints[lossPoints.length - 1].step) : null;
+      const step = liveStep != null ? liveStep : curveStep;
+      const total = currentMaxSteps();
+      if (step == null || !Number.isFinite(step) || step <= 0) { box.hidden = true; return; }
+      box.hidden = false;
+
+      const elapsed = s && s.elapsed_sec != null ? Number(s.elapsed_sec) : null;
+      let rate = s && s.step_s != null ? Number(s.step_s) : null;
+      if (!rate && elapsed) rate = step / Math.max(1, elapsed);
+      const active = status === "running" || status === "stopping";
+      const fill = $("tp-fill");
+      const pct = total > 0 ? Math.max(0, Math.min(100, (step / total) * 100)) : null;
+
+      if (pct == null) {
+        fill.classList.add("indeterminate");
+        fill.style.width = "";
+        $("tp-percent").textContent = "—";
+        $("tp-eta").textContent = "未限制步数";
+      } else {
+        fill.classList.remove("indeterminate");
+        fill.style.width = pct.toFixed(2) + "%";
+        $("tp-percent").textContent = pct.toFixed(1) + "%";
+        let eta = "—";
+        if (!active) eta = "已结束";
+        else if (step >= total) eta = "即将结束";
+        else if (rate && rate > 0) eta = formatElapsed(Math.round((total - step) / rate));
+        $("tp-eta").textContent = eta;
+      }
+      $("tp-steps").textContent = total > 0 ? step + " / " + total : String(step);
+      $("tp-rate").textContent = rate && rate > 0 ? rate.toFixed(2) + " step/s" : "—";
+      $("tp-elapsed").textContent = elapsed != null ? formatElapsed(elapsed) : "—";
+    }
+
     function applyLiveStatus(s) {
       if (!s) return;
       lastLiveStatus = s;
+      updateProgress(s);
       const box = $("status-box");
       const raw = box.textContent || "";
       const base = raw.split("\n").filter((ln) => ln && !ln.startsWith("显存:"));
@@ -1365,6 +1453,7 @@
         (t.error ? `error: ${t.error}\n` : "") +
         (t.exit_code != null ? `exit: ${t.exit_code}` : "");
       if (lastLiveStatus && lastLiveStatus.id === t.id) applyLiveStatus(lastLiveStatus);
+      else updateProgress({ status: t.status, step: null });
       $("hdr-dot").className = "dot " + statusDotClass(t.status);
       $("hdr-status").textContent = `${t.name} · ${t.status}`;
     }
@@ -1377,38 +1466,171 @@
       $("log").scrollTop = $("log").scrollHeight;
     }
 
+    const AXIS_COLOR = "#d1d5db";
+    const GRID_COLOR = "#f1f2f4";
+    const TEXT_COLOR = "#6b7280";
+
+    // 取"好看"的刻度：1/2/5 × 10^n
+    function niceTicks(min, max, count) {
+      if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return [min];
+      const raw = (max - min) / Math.max(1, count);
+      const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const norm = raw / mag;
+      const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+      const ticks = [];
+      for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) {
+        ticks.push(Number(v.toPrecision(12)));
+      }
+      return ticks;
+    }
+
+    function fmtAxis(v) {
+      const a = Math.abs(v);
+      if (a >= 10000) return (v / 1000).toFixed(0) + "k";
+      if (a >= 1000) return v.toFixed(0);
+      if (a >= 100) return v.toFixed(1);
+      if (a >= 10) return v.toFixed(2);
+      if (a >= 1) return v.toFixed(3);
+      return v.toFixed(4);
+    }
+
     function drawLoss() {
       const canvas = $("loss-canvas");
+      if (!canvas) return;
+      const cssH = 210;
+      const cssW = Math.max(320, Math.round(canvas.clientWidth || 800));
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+        canvas.width = Math.round(cssW * dpr);
+        canvas.height = Math.round(cssH * dpr);
+      }
       const ctx = canvas.getContext("2d");
-      const w = canvas.width, h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#fafafa";
-      ctx.fillRect(0, 0, w, h);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssW, cssH);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cssW, cssH);
+
+      const padL = 54, padR = 18, padT = 16, padB = 30;
+      const plotW = Math.max(10, cssW - padL - padR);
+      const plotH = Math.max(10, cssH - padT - padB);
+      const mono = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
       if (!lossPoints.length) {
         ctx.fillStyle = "#9ca3af";
-        ctx.fillText("暂无 loss 点", 16, 24);
+        ctx.font = "12px system-ui, sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText("暂无 loss 点", padL, cssH / 2);
+        const cap0 = $("loss-caption");
+        if (cap0) cap0.textContent = "";
         return;
       }
-      const xs = lossPoints.map((p) => p.step);
-      const ys = lossPoints.map((p) => p.loss);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const minY = Math.min(...ys), maxY = Math.max(...ys);
-      const pad = 24;
-      const sx = (x) => pad + ((x - minX) / Math.max(1, maxX - minX)) * (w - 2 * pad);
-      const sy = (y) => h - pad - ((y - minY) / Math.max(1e-6, maxY - minY)) * (h - 2 * pad);
-      ctx.strokeStyle = "#1d4ed8";
-      ctx.lineWidth = 2;
+
+      const xs = lossPoints.map((q) => q.step);
+      const ys = lossPoints.map((q) => q.loss);
+      let minX = Math.min(...xs), maxX = Math.max(...xs);
+      let minY = Math.min(...ys), maxY = Math.max(...ys);
+      if (maxX === minX) { minX -= 1; maxX += 1; }
+      const padY = (maxY - minY) * 0.12 || Math.abs(maxY) * 0.12 || 1;
+      minY = Math.max(0, minY - padY);
+      maxY = maxY + padY;
+
+      const sx = (x) => padL + ((x - minX) / (maxX - minX)) * plotW;
+      const sy = (y) => padT + plotH - ((y - minY) / Math.max(1e-9, maxY - minY)) * plotH;
+
+      // --- Y 轴：水平网格 + 刻度值
+      ctx.font = mono;
+      ctx.lineWidth = 1;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (const v of niceTicks(minY, maxY, 4)) {
+        const y = Math.round(sy(v)) + 0.5;
+        ctx.strokeStyle = GRID_COLOR;
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(padL + plotW, y);
+        ctx.stroke();
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.fillText(fmtAxis(v), padL - 8, y);
+      }
+
+      // --- X 轴：垂直网格 + 刻度值
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      for (const v of niceTicks(minX, maxX, Math.max(2, Math.floor(plotW / 96)))) {
+        const x = Math.round(sx(v)) + 0.5;
+        ctx.strokeStyle = GRID_COLOR;
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + plotH);
+        ctx.stroke();
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.fillText(fmtAxis(v), x, padT + plotH + 9);
+      }
+
+      // --- 坐标轴
+      ctx.strokeStyle = AXIS_COLOR;
       ctx.beginPath();
-      lossPoints.forEach((p, i) => {
-        const x = sx(p.step), y = sy(p.loss);
+      ctx.moveTo(padL + 0.5, padT);
+      ctx.lineTo(padL + 0.5, padT + plotH + 0.5);
+      ctx.lineTo(padL + plotW, padT + plotH + 0.5);
+      ctx.stroke();
+
+      // --- 轴标签
+      ctx.fillStyle = TEXT_COLOR;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText("loss", 8, padT - 4);
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText("step", padL + plotW, cssH - 4);
+
+      // --- 曲线
+      ctx.strokeStyle = "#1d4ed8";
+      ctx.lineWidth = 1.8;
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      lossPoints.forEach((q, i) => {
+        const x = sx(q.step), y = sy(q.loss);
         if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       });
       ctx.stroke();
+
+      // --- 最低点 / 最新点
+      let best = lossPoints[0];
+      for (const q of lossPoints) if (q.loss < best.loss) best = q;
+      const last = lossPoints[lossPoints.length - 1];
+
+      ctx.fillStyle = "#047857";
+      ctx.beginPath();
+      ctx.arc(sx(best.step), sy(best.loss), 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#1d4ed8";
+      ctx.beginPath();
+      ctx.arc(sx(last.step), sy(last.loss), 3.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // --- 图下说明
+      const cap = $("loss-caption");
+      if (cap) {
+        const lrTxt = last.lr != null ? Number(last.lr).toExponential(1) : "—";
+        const pplTxt = last.ppl != null ? Number(last.ppl).toFixed(2) : "—";
+        cap.innerHTML =
+          '<span>最新 <b>loss ' + fmtAxis(last.loss) + '</b> @ step ' + last.step + '</span>' +
+          '<span>最低 <b>loss ' + fmtAxis(best.loss) + '</b> @ step ' + best.step + '</span>' +
+          '<span>ppl <b>' + pplTxt + '</b></span>' +
+          '<span>lr <b>' + lrTxt + '</b></span>' +
+          '<span>采样 <b>' + lossPoints.length + '</b> 点</span>';
+      }
     }
+
+    window.addEventListener("resize", () => { drawLoss(); });
 
     function applyMetrics(m) {
       lossPoints = (m && m.loss) || [];
       drawLoss();
+      updateProgress(lastLiveStatus);
     }
 
     function disconnectLogs() {
@@ -1495,6 +1717,8 @@
       $("phase-badge").textContent = config ? "配置" : "执行";
       if (!config && t) renderFrozenConfig(t);
       $("btn-stop").style.display = (t && t.status === "running") ? "" : "none";
+      // 面板刚从 display:none 切出来时 clientWidth 才是有效值，重画一次让 canvas 对齐真实宽度
+      if (!config) requestAnimationFrame(() => { drawLoss(); });
     }
 
     async function selectTask(id, opts = {}) {
