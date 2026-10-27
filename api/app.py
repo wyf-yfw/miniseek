@@ -534,18 +534,65 @@ class InferenceEngine:
         }
 
 
+    @staticmethod
+    def _escape_token_piece(s: str) -> str:
+        """Readable repr for byte-level / incomplete UTF-8 pieces (never blank or bare U+FFFD)."""
+        if s is None:
+            return ""
+        s = str(s)
+        if not s:
+            return "<empty>"
+        out = []
+        for ch in s:
+            o = ord(ch)
+            if ch == "\n":
+                out.append("\\n")
+            elif ch == "\t":
+                out.append("\\t")
+            elif ch == "\r":
+                out.append("\\r")
+            elif ch == " ":
+                out.append("·")
+            elif ch == "�" or o < 32 or o == 127:
+                out.append(f"\\u{o:04x}")
+            elif not ch.isprintable():
+                out.append(f"\\u{o:04x}")
+            else:
+                out.append(ch)
+        rendered = "".join(out)
+        if all(c == "�" for c in s):
+            return " ".join(f"\\u{ord(c):04x}" for c in s) or "<empty>"
+        return rendered
+
     def _token_str(self, token_id: int) -> str:
+        """Surface form for top-k / step label. Never return blank or lone U+FFFD."""
         tok = self.tokenizer
+        tid = int(token_id)
+        decoded = ""
         try:
-            piece = tok.decode([int(token_id)], skip_special_tokens=False)
+            decoded = tok.decode([tid], skip_special_tokens=False)
         except Exception:
-            piece = ""
-        if not piece:
-            try:
-                piece = str(tok.convert_ids_to_tokens(int(token_id)))
-            except Exception:
-                piece = f"<id:{token_id}>"
-        return piece
+            decoded = ""
+        raw = None
+        try:
+            raw = tok.convert_ids_to_tokens(tid)
+            if raw is not None:
+                raw = str(raw)
+        except Exception:
+            raw = None
+
+        # Whole UTF-8 piece from a single id.
+        if decoded and "�" not in decoded:
+            if any(c in decoded for c in ("\n", "\t", "\r", " ")) or any(ord(c) < 32 for c in decoded):
+                return self._escape_token_piece(decoded)
+            return decoded
+
+        # Byte-level BPE: vocab surface (bytes_to_unicode) or unicode escapes — never bare U+FFFD.
+        if raw:
+            return self._escape_token_piece(raw)
+        if decoded:
+            return self._escape_token_piece(decoded)
+        return f"<id:{tid}>"
 
     def _format_topk(self, chosen_id: int, info: dict) -> list:
         rows = []
@@ -615,6 +662,7 @@ class InferenceEngine:
                             "text": "",
                             "token_id": int(token),
                             "token": self._token_str(int(token)),
+                            "incomplete_utf8": False,
                             "topk": topk_rows,
                             "eos": True,
                             "step": n,
@@ -625,8 +673,11 @@ class InferenceEngine:
                 full = self.tokenizer.decode(token_ids, skip_special_tokens=False)
                 for special in ("<|im_start|>", "<|im_end|>", "<|endoftext|>"):
                     full = full.replace(special, "")
+                token_disp = self._token_str(int(token))
+                incomplete = "�" in full
                 piece = ""
-                if "\ufffd" not in full:
+                if not incomplete:
+                    # Complete UTF-8 so far: emit delta vs previously shown clean text.
                     if full.startswith(prev_text):
                         piece = full[len(prev_text):]
                     else:
@@ -637,7 +688,8 @@ class InferenceEngine:
                     "data": {
                         "text": piece,
                         "token_id": int(token),
-                        "token": self._token_str(int(token)),
+                        "token": token_disp,
+                        "incomplete_utf8": incomplete,
                         "topk": topk_rows,
                         "eos": False,
                         "step": n,

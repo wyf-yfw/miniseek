@@ -2519,8 +2519,21 @@
       const panel = $("debug-panel");
       if (panel) panel.classList.toggle("on", on || !!chatState.debug);
     }
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    function formatTokDisplay(s) {
+      // Never show blank or bare U+FFFD in top-k / step label.
+      let t = String(s ?? "");
+      if (!t) return "<empty>";
+      if ([...t].every((c) => c === "\uFFFD")) {
+        return [...t].map((c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")).join(" ");
+      }
+      t = t.replace(/\uFFFD/g, "\\ufffd").replace(/\n/g, "\\n").replace(/\t/g, "\\t").replace(/\r/g, "\\r").replace(/ /g, "·");
+      return t || "<empty>";
+    }
     function escapeTok(s) {
-      return String(s ?? "").replace(/\n/g, "\\n").replace(/\t/g, "\\t").replace(/ /g, "·");
+      return formatTokDisplay(s);
     }
     function renderTopk(pending) {
       const body = $("topk-body");
@@ -2532,7 +2545,9 @@
         return;
       }
       if (label) {
-        label.textContent = `step ${pending.step || "?"} · 选中 「${escapeTok(pending.token)}」${pending.eos ? " · EOS" : ""} · 队列 ${chatState.debugQueue.length}`;
+        const tok = formatTokDisplay(pending.token);
+        const pend = pending.incomplete_utf8 ? " · 半截UTF-8" : "";
+        label.textContent = `step ${pending.step || "?"} · 选中 「${tok}」${pending.eos ? " · EOS" : ""}${pend} · 队列 ${chatState.debugQueue.length}`;
       }
       const rows = pending.topk || [];
       if (!rows.length) {
@@ -2542,7 +2557,8 @@
       body.innerHTML = rows.map((r, i) => {
         const prob = (r.prob == null) ? "—" : (Number(r.prob) * 100).toFixed(2) + "%";
         const logit = (r.logit == null) ? "—" : Number(r.logit).toFixed(3);
-        return `<tr class="${r.chosen ? "chosen" : ""}"><td>${i + 1}</td><td class="topk-token" title="${escapeTok(r.token)}">${escapeTok(r.token)}</td><td>${r.id}</td><td>${prob}</td><td>${logit}</td></tr>`;
+        const disp = formatTokDisplay(r.token);
+        return `<tr class="${r.chosen ? "chosen" : ""}"><td>${i + 1}</td><td class="topk-token" title="${escapeHtml(disp)}">${escapeHtml(disp)}</td><td>${r.id}</td><td>${prob}</td><td>${logit}</td></tr>`;
       }).join("");
     }
     function stopDebugAuto() {
@@ -2600,14 +2616,36 @@
       renderTopk(null);
       renderChat();
     }
+    function clearPendingEsc(assistant) {
+      if (!assistant || !assistant._pendingEsc) return;
+      const esc = assistant._pendingEsc;
+      if (assistant.content.endsWith(esc)) {
+        assistant.content = assistant.content.slice(0, -esc.length);
+      }
+      assistant._pendingEsc = "";
+    }
+    function appendDebugPiece(assistant, data) {
+      if (!assistant || !data) return;
+      const incomplete = !!data.incomplete_utf8;
+      const real = data.text || "";
+      if (real && !incomplete) {
+        // Valid UTF-8 delta arrived: drop any provisional byte escapes, then append real text.
+        clearPendingEsc(assistant);
+        assistant.content += real;
+        renderChat();
+        return;
+      }
+      // Incomplete / empty decode: still show a visible escape so 下一步 is not a no-op.
+      const esc = "⟨" + formatTokDisplay(data.token) + "⟩";
+      assistant.content += esc;
+      assistant._pendingEsc = (assistant._pendingEsc || "") + esc;
+      renderChat();
+    }
     function commitDebugStep() {
       if (!chatState.debugPending) return false;
       const pending = chatState.debugPending;
       const assistant = chatState.debugAssistant;
-      if (assistant && pending.text) {
-        assistant.content += pending.text;
-        renderChat();
-      }
+      appendDebugPiece(assistant, pending);
       chatState.debugPending = chatState.debugQueue.shift() || null;
       if (chatState.debugPending) {
         renderTopk(chatState.debugPending);
@@ -2619,11 +2657,7 @@
       return true;
     }
     function applyDebugTokenText(data) {
-      const assistant = chatState.debugAssistant;
-      if (assistant && data && data.text) {
-        assistant.content += data.text;
-        renderChat();
-      }
+      appendDebugPiece(chatState.debugAssistant, data);
     }
     function flushDebugAllRemaining() {
       if (!chatState.debug) return;
