@@ -89,9 +89,9 @@ class MoELayer(nn.Module):
         topk_prob = topk_prob / topk_prob.sum(dim=-1, keepdim=True).clamp_min(1e-9)
 
         if self._record_usage:
-            batch_counts = torch.bincount(
-                topk_idx.reshape(-1), minlength=self.n_routed
-            ).detach().cpu()
+            # 留在 GPU 上累加：end_expert_usage() 取的时候才 .cpu()，
+            # 之前这里每层每步都同步一次，纯属浪费
+            batch_counts = torch.bincount(topk_idx.reshape(-1), minlength=self.n_routed)
             if self._usage_counts is None:
                 self._usage_counts = batch_counts
             else:
@@ -124,11 +124,12 @@ class MoELayer(nn.Module):
         gathered = flat.index_select(0, token_sorted)  # (T*K, D)
         expert_out = torch.empty_like(gathered)
 
-        # One contiguous mm (via ExpertMLP) per expert with tokens
-        # counts/offsets are tiny (n_routed); .item() is fine here
+        # One contiguous mm (via ExpertMLP) per expert with tokens.
+        # 边界一次性搬到 CPU：原来每个专家两次 .item()，8 层 × 32 专家 = 256 次
+        # 强制同步，每次都要抽干 GPU 流水线。
+        bounds = offsets.tolist()
         for e in range(self.n_routed):
-            start = int(offsets[e].item())
-            end = int(offsets[e + 1].item())
+            start, end = bounds[e], bounds[e + 1]
             if start == end:
                 continue
             expert_out[start:end] = self.experts[e](gathered[start:end])
