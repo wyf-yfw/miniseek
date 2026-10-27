@@ -898,11 +898,11 @@
         </aside>
         <div class="chat-main">
           <div class="chat-toolbar">
-            <div class="title">对话</div>
+            <div class="title">对话 <span class="field-hint" style="font-weight:400">（单轮）</span></div>
             <div id="chat-status" class="live"><span class="dot" id="chat-dot"></span><span id="chat-status-text">未加载模型</span></div>
           </div>
           <div id="chat-messages" class="chat-messages">
-            <div class="chat-empty" id="chat-empty">像 ChatGPT 一样提问吧。先在左侧加载权重。</div>
+            <div class="chat-empty" id="chat-empty">单轮对话：发新消息会清掉上一轮。先在左侧加载权重。</div>
           </div>
           <div class="chat-composer">
             <textarea id="chat-input" rows="1" placeholder="发消息给 MiniSeek…"></textarea>
@@ -2494,7 +2494,11 @@
       if (!text) return;
       $("chat-input").value = "";
       autosizeInput();
-      chatState.messages.push({ role: "user", content: text });
+      // 单轮：发新消息前清掉上一轮历史（展示与请求均只保留本轮）
+      const priorSystem = chatState.messages
+        .filter((m) => m.role === "system" && (m.content || "").trim())
+        .map((m) => ({ role: "system", content: m.content }));
+      chatState.messages = priorSystem.concat([{ role: "user", content: text }]);
       const assistant = { role: "assistant", content: "", streaming: true };
       chatState.messages.push(assistant);
       renderChat();
@@ -2503,9 +2507,8 @@
       $("btn-stop-gen").style.display = "";
       const controller = new AbortController();
       chatState.abort = controller;
-      const history = chatState.messages
-        .filter((m) => !m.streaming)
-        .map((m) => ({ role: m.role, content: m.content }));
+      // 请求只带 system（若有）+ 最新 user，不带历史多轮
+      const history = priorSystem.concat([{ role: "user", content: text }]);
       try {
         const res = await fetch("/api/infer/chat/stream", {
           method: "POST",

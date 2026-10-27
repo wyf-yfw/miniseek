@@ -1533,11 +1533,29 @@ def infer_generate(req: GenerateRequest) -> dict:
     )}
 
 
+def _single_turn_messages(messages: List[dict]) -> List[dict]:
+    """对话平台只做单轮：保留 system + 最后一条 user，丢掉历史多轮。"""
+    systems: List[dict] = []
+    last_user: Optional[dict] = None
+    for m in messages:
+        role = (m.get("role") or "").strip().lower()
+        content = str(m.get("content") or "")
+        if role == "system" and content.strip():
+            systems.append({"role": "system", "content": content})
+        elif role == "user":
+            last_user = {"role": "user", "content": content}
+    if last_user is None:
+        return systems
+    return systems + [last_user]
+
+
 @app.post("/api/infer/chat/stream")
 async def infer_chat_stream(req: ChatRequest) -> StreamingResponse:
     if not req.messages:
         raise HTTPException(status_code=400, detail="messages 不能为空")
-    payload = [m.model_dump() for m in req.messages]
+    payload = _single_turn_messages([m.model_dump() for m in req.messages])
+    if not payload or (payload[-1].get("role") or "").strip().lower() != "user":
+        raise HTTPException(status_code=400, detail="messages 中需要至少一条 user")
 
     def event_iter():
         try:
