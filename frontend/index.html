@@ -395,7 +395,7 @@
     .chat-composer textarea { resize: none; min-height: 40px; max-height: 160px; }
     #btn-send { background: var(--accent); color: white; border-color: var(--accent); }
     #btn-stop-gen { background: var(--stop); color: white; border-color: var(--stop); }
-    #btn-send:disabled, #btn-stop-gen:disabled, #btn-debug-step:disabled, #btn-debug-auto:disabled {
+    #btn-send:disabled, #btn-stop-gen:disabled, #btn-debug-step:disabled, #btn-debug-auto:disabled, #btn-debug-finish:disabled {
       opacity: 0.45; cursor: not-allowed; filter: grayscale(0.2);
     }
     .debug-panel {
@@ -412,7 +412,7 @@
       margin-bottom: 8px; font-size: 12px; color: var(--muted);
     }
     .debug-bar strong { color: var(--text); font-weight: 600; }
-    #btn-debug-step, #btn-debug-auto { padding: 4px 10px; font-size: 12px; }
+    #btn-debug-step, #btn-debug-auto, #btn-debug-finish { padding: 4px 10px; font-size: 12px; }
     #btn-debug-auto.active {
       background: var(--accent); color: #fff; border-color: var(--accent);
     }
@@ -953,6 +953,7 @@
               <span id="debug-step-label">等待生成…</span>
               <button type="button" id="btn-debug-step" disabled>下一步</button>
               <button type="button" id="btn-debug-auto" disabled>自动</button>
+              <button type="button" id="btn-debug-finish" disabled>完成</button>
             </div>
             <table class="topk-table" id="topk-table">
               <thead><tr><th>#</th><th>token</th><th>id</th><th>prob</th><th>logit</th></tr></thead>
@@ -2482,7 +2483,7 @@
     const chatState = {
       messages: [], streaming: false, abort: null,
       debug: false, debugQueue: [], debugPending: null, debugDone: false,
-      debugAutoTimer: null, debugAssistant: null,
+      debugAutoTimer: null, debugAssistant: null, debugFlushAll: false,
     };
     function setChatStatus(text, on) {
       $("chat-status-text").textContent = text;
@@ -2555,8 +2556,11 @@
     function setDebugControls(active) {
       const step = $("btn-debug-step");
       const auto = $("btn-debug-auto");
-      if (step) step.disabled = !active || !chatState.debugPending;
-      if (auto) auto.disabled = !active;
+      const fin = $("btn-debug-finish");
+      const flushing = !!chatState.debugFlushAll;
+      if (step) step.disabled = !active || !chatState.debugPending || flushing;
+      if (auto) auto.disabled = !active || flushing;
+      if (fin) fin.disabled = !active;
     }
     function resetDebugState() {
       stopDebugAuto();
@@ -2565,6 +2569,7 @@
       chatState.debugPending = null;
       chatState.debugDone = false;
       chatState.debugAssistant = null;
+      chatState.debugFlushAll = false;
       setDebugControls(false);
       syncDebugOpts();
       renderTopk(null);
@@ -2613,7 +2618,47 @@
       }
       return true;
     }
+    function applyDebugTokenText(data) {
+      const assistant = chatState.debugAssistant;
+      if (assistant && data && data.text) {
+        assistant.content += data.text;
+        renderChat();
+      }
+    }
+    function flushDebugAllRemaining() {
+      if (!chatState.debug) return;
+      stopDebugAuto();
+      chatState.debugFlushAll = true;
+      const chunks = [];
+      if (chatState.debugPending) chunks.push(chatState.debugPending);
+      if (chatState.debugQueue.length) chunks.push(...chatState.debugQueue);
+      let last = null;
+      for (const item of chunks) {
+        applyDebugTokenText(item);
+        last = item;
+      }
+      chatState.debugPending = null;
+      chatState.debugQueue = [];
+      if (last) renderTopk(last);
+      else renderTopk(null);
+      const label = $("debug-step-label");
+      if (chatState.debugDone) {
+        if (label) label.textContent = "已全部输出";
+        finishDebugIfIdle();
+      } else {
+        if (label) label.textContent = "完成模式 · 后续 token 直接输出…";
+        setDebugControls(true);
+      }
+    }
     function enqueueDebugToken(data) {
+      if (chatState.debugFlushAll) {
+        applyDebugTokenText(data);
+        chatState.debugPending = null;
+        chatState.debugQueue = [];
+        renderTopk(data);
+        setDebugControls(true);
+        return;
+      }
       if (!chatState.debugPending) {
         chatState.debugPending = data;
         renderTopk(data);
@@ -2688,6 +2733,7 @@
       chatState.debugQueue = [];
       chatState.debugPending = null;
       chatState.debugDone = false;
+      chatState.debugFlushAll = false;
       chatState.debugAssistant = debug ? assistant : null;
       syncDebugOpts();
       if (debug) {
@@ -2789,6 +2835,7 @@
             chatState.debugAssistant = null;
             chatState.debugQueue = [];
             chatState.debugPending = null;
+            chatState.debugFlushAll = false;
             setDebugControls(false);
             syncDebugOpts();
             renderTopk(null);
@@ -2849,6 +2896,12 @@
             }
           }
         }, ms);
+      });
+    }
+    if ($("btn-debug-finish")) {
+      $("btn-debug-finish").addEventListener("click", () => {
+        if (!chatState.debug) return;
+        flushDebugAllRemaining();
       });
     }
     $("chat-input").addEventListener("input", autosizeInput);
