@@ -148,6 +148,36 @@ def collate_pad(batch, pad_id: int = 0):
     return x, y
 
 
+@torch.no_grad()
+def evaluate_valid(model: torch.nn.Module, loader, device: torch.device) -> Dict[str, float]:
+    """Mean token NLL / ppl on a validation loader (CE only; MoE aux ignored)."""
+    was_training = model.training
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+    for input_ids, labels in loader:
+        input_ids = input_ids.to(device)
+        labels = labels.to(device)
+        out = model(input_ids, labels=labels)
+        if isinstance(out, tuple) and len(out) == 3:
+            _logits, ce, _aux = out
+        else:
+            _logits, ce = out
+        n = int((labels != -100).sum().item())
+        if n <= 0:
+            continue
+        total_loss += float(ce.item()) * n
+        total_tokens += n
+    if was_training:
+        model.train()
+    mean = total_loss / max(1, total_tokens)
+    return {
+        "loss": mean,
+        "ppl": math.exp(min(mean, 20.0)),
+        "tokens": total_tokens,
+    }
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -334,6 +364,24 @@ def main() -> None:
         default=None,
         help="从 checkpoint 继续（含 optimizer）",
     )
+    p.add_argument(
+        "--valid",
+        type=str,
+        default="",
+        help="验证集 jsonl（每行 text 字段）；空=不跑 valid",
+    )
+    p.add_argument(
+        "--valid-every",
+        type=int,
+        default=0,
+        help="每隔多少 step 跑一次 valid；0=关闭",
+    )
+    p.add_argument(
+        "--valid-max-samples",
+        type=int,
+        default=512,
+        help="valid 最多用多少条样本",
+    )
     args = p.parse_args()
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
@@ -411,6 +459,32 @@ def main() -> None:
         num_workers=max(0, int(args.num_workers)),
         pin_memory=(device.type == "cuda"),
     )
+
+    valid_loader = None
+    valid_path = str(args.valid or "").strip()
+    if int(args.valid_every) > 0 and valid_path:
+        if Path(valid_path).exists():
+            valid_ds = JsonlTextDataset(
+                valid_path,
+                tok,
+                max_seq_len=args.max_seq_len,
+                max_samples=int(args.valid_max_samples) if int(args.valid_max_samples) > 0 else None,
+            )
+            valid_loader = DataLoader(
+                valid_ds,
+                batch_size=args.batch_size,
+                shuffle=False,
+                collate_fn=partial(collate_pad, pad_id=pad_id),
+                num_workers=0,
+                pin_memory=(device.type == "cuda"),
+            )
+            print(
+                f"[train] valid={valid_path} every={args.valid_every} "
+                f"samples={len(valid_ds)} max_samples={args.valid_max_samples}",
+                flush=True,
+            )
+        else:
+            print(f"[train] WARN: valid 文件不存在，跳过: {valid_path}", flush=True)
 
     steps_per_epoch = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
     plan_steps = steps_per_epoch * max(1, args.epochs)
@@ -593,6 +667,19 @@ def main() -> None:
                         cfg=cfg,
                     )
                     expert_window_steps = 0
+
+            if (
+                valid_loader is not None
+                and int(args.valid_every) > 0
+                and global_step % int(args.valid_every) == 0
+            ):
+                stats = evaluate_valid(model, valid_loader, device)
+                print(
+                    f"valid step={global_step} loss={stats['loss']:.4f} "
+                    f"ppl={stats['ppl']:.2f} tokens={int(stats['tokens'])}",
+                    flush=True,
+                )
+                model.train()
 
             # loss milestones: need consecutive --stable-steps below each threshold
             for th in thresholds:
