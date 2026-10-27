@@ -1,4 +1,4 @@
-"""PT data-clean jobs under data/clean/<id>/."""
+"""PT data-clean jobs under data/clean/<id>/ (disk-safe defaults)."""
 from __future__ import annotations
 
 import json
@@ -20,6 +20,16 @@ DEFAULT_OPERATORS: Dict[str, Any] = {
     "exact_dedup": {"enabled": True, "lowercase": True},
     "sensitive": {"enabled": True, "wordlist_path": ""},
 }
+
+# Disk-safe: streaming builtin by default (no HF datasets cache pile-up).
+# Set engine_pref to "data-juicer" only when DJ is explicitly wanted.
+DEFAULT_ENGINE_PREF = "builtin"
+DEFAULT_WRITE_DROPPED = False
+DISK_HINT = (
+    "默认 builtin 流式清洗（峰值约 输入+clean.jsonl）。"
+    "启动前校验可用空间 ≥ 约 4× 输入（≥8GiB 输入另有 50GiB 下限）。"
+    "不默认写 dropped.jsonl；DJ 缓存仅落在 job/.dj_work 并在结束后删除。"
+)
 
 
 def new_job_id() -> str:
@@ -98,6 +108,8 @@ def create_job(
         "status": "draft",
         "input_path": inp,
         "operators": _merge_operators(operators),
+        "engine_pref": DEFAULT_ENGINE_PREF,
+        "write_dropped": DEFAULT_WRITE_DROPPED,
         "pid": None,
         "created_at": now,
         "started_at": None,

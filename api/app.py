@@ -1731,7 +1731,13 @@ def api_clean_list_jobs() -> dict:
             "stats": row.get("stats"),
             "engine": row.get("engine"),
         })
-    return {"jobs": rows, "defaults": {"operators": cs.DEFAULT_OPERATORS, "input_path": str(PROJECT_ROOT / "data" / "pretrain_mix_12g.jsonl")}}
+    return {"jobs": rows, "defaults": {
+        "operators": cs.DEFAULT_OPERATORS,
+        "input_path": str(PROJECT_ROOT / "data" / "pretrain_mix_12g.jsonl"),
+        "engine_pref": cs.DEFAULT_ENGINE_PREF,
+        "write_dropped": cs.DEFAULT_WRITE_DROPPED,
+        "disk_hint": cs.DISK_HINT,
+    }}
 
 
 @app.post("/api/clean/jobs")

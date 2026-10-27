@@ -1,7 +1,7 @@
 """Background PT clean jobs under data/clean/<id>/."""
 from __future__ import annotations
 
-import json
+import importlib.util
 import os
 import subprocess
 import sys
@@ -14,6 +14,16 @@ from api.task_runner import _popen_isolation_kwargs, _terminate_pid, pid_alive
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _owned_procs: Dict[str, subprocess.Popen] = {}
+
+
+def _load_pt_clean_mod():
+    mod_path = PROJECT_ROOT / "scripts" / "pt_clean_job.py"
+    spec = importlib.util.spec_from_file_location("pt_clean_job", mod_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load pt_clean_job")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _any_clean_running() -> Optional[str]:
@@ -74,6 +84,12 @@ def reconcile_job(job: Dict[str, Any]) -> Dict[str, Any]:
     job["pid"] = None
     job["ended_at"] = now
     job["exit_code"] = exit_code
+    # Wipe DJ leftovers even if the child died mid-run.
+    try:
+        mod = _load_pt_clean_mod()
+        mod.cleanup_job_intermediates(cs.job_dir(job["id"]))
+    except Exception:  # noqa: BLE001
+        pass
     if _ingest_report(job) and (exit_code in (0, None)):
         job["status"] = "finished"
         job["error"] = None
@@ -103,11 +119,20 @@ def start_job(job_id: str) -> Dict[str, Any]:
     input_path = (job.get("input_path") or "").strip()
     if not input_path:
         raise ValueError("input_path 不能为空")
-    if not Path(input_path).is_file():
+    inp = Path(input_path)
+    if not inp.is_file():
         raise FileNotFoundError(input_path)
 
     out_dir = cs.job_dir(job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    mod = _load_pt_clean_mod()
+    # Preflight: refuse before spawning if free disk << 4× input.
+    try:
+        info = mod.preflight_disk(inp, anchor=out_dir)
+    except mod.DiskSpaceError as exc:
+        raise ValueError(str(exc)) from exc
+
     for name in ("clean.jsonl", "dropped.jsonl", "report.json"):
         p = out_dir / name
         if p.is_file():
@@ -115,6 +140,8 @@ def start_job(job_id: str) -> Dict[str, Any]:
                 p.unlink()
             except OSError:
                 pass
+    # Clear prior DJ/HF workdir so a restart does not pile onto old caches.
+    mod.cleanup_job_intermediates(out_dir)
 
     cmd = [
         sys.executable,
@@ -129,6 +156,12 @@ def start_job(job_id: str) -> Dict[str, Any]:
     env.pop("all_proxy", None)
     env.pop("ALL_PROXY", None)
     env["PYTHONUNBUFFERED"] = "1"
+    # Even builtin path: keep process temp under the job dir when possible.
+    tmp = out_dir / ".dj_work" / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    env.setdefault("TMPDIR", str(tmp))
+    env.setdefault("TMP", str(tmp))
+    env.setdefault("TEMP", str(tmp))
     log_fh = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
     try:
         proc = subprocess.Popen(
@@ -151,6 +184,11 @@ def start_job(job_id: str) -> Dict[str, Any]:
     job["error"] = None
     job["stats"] = None
     job["engine"] = None
+    job["disk_preflight"] = {
+        "input_bytes": info["input_bytes"],
+        "need_bytes": info["need_bytes"],
+        "free_bytes": info["free_bytes"],
+    }
     cs.save_job(job)
     _owned_procs[job_id] = proc
     return cs.load_job(job_id)
@@ -177,6 +215,11 @@ def stop_job(job_id: str) -> Dict[str, Any]:
     job["pid"] = None
     job["exit_code"] = code
     job["ended_at"] = datetime.now().isoformat(timespec="seconds")
+    try:
+        mod = _load_pt_clean_mod()
+        mod.cleanup_job_intermediates(cs.job_dir(job_id))
+    except Exception:  # noqa: BLE001
+        pass
     if _ingest_report(job):
         job["status"] = "finished"
         job["error"] = None
@@ -228,11 +271,5 @@ def run_preview(input_path: str, operators: Dict[str, Any], *, limit: int = 200)
         raise FileNotFoundError(str(path))
     limit = max(1, min(int(limit or 200), 5000))
     ops = cs._merge_operators(operators)
-    import importlib.util
-    mod_path = PROJECT_ROOT / "scripts" / "pt_clean_job.py"
-    spec = importlib.util.spec_from_file_location("pt_clean_job", mod_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("cannot load pt_clean_job")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = _load_pt_clean_mod()
     return mod.preview_samples(str(path), ops, limit=limit)

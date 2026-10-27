@@ -1290,6 +1290,7 @@
             <p id="clean-msg"></p>
             <div id="clean-phase-config">
               <p class="config-note">仅 Pretrain jsonl（每行 text）。勾选算子后可抽样预览，再「创建并启动」；全量经 worker CPU 跑，不抢 GPU 训练。</p>
+              <p class="config-note" id="clean-disk-hint">磁盘：默认 <b>builtin 流式</b>（不堆 HF/DJ 缓存）。启动前若可用空间 &lt; 约 4× 输入（大文件另有 50GiB 下限）会直接拒绝。默认不写 dropped.jsonl；成功后只留 clean.jsonl / report / log。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名；可空。</span><input id="clean-name" type="text" placeholder="例如 smoke / mix12g-clean" /></label>
               <label for="clean-input"><span class="field-title">输入 jsonl</span><span class="field-hint">默认 data/pretrain_mix_12g.jsonl（含清洗余量）。</span></label>
               <div class="path-row">
@@ -4157,6 +4158,10 @@ $("btn-bench-edit").addEventListener("click", async () => {
       if (!r.ok) return;
       const data = await r.json();
       if (data.defaults) cleanDefaults = data.defaults;
+      const hint = $("clean-disk-hint");
+      if (hint && data.defaults && data.defaults.disk_hint) {
+        hint.textContent = data.defaults.disk_hint;
+      }
       const ul = $("clean-job-list");
       ul.innerHTML = "";
       for (const j of (data.jobs || [])) {

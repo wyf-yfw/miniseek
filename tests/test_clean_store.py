@@ -8,6 +8,8 @@ def test_create_and_list(tmp_path, monkeypatch):
     row = cs.create_job(name="demo", input_path="data/pretrain_mix_5g.jsonl")
     assert row["status"] == "draft"
     assert row["operators"]["length"]["enabled"] is True
+    assert row["engine_pref"] == "builtin"
+    assert row["write_dropped"] is False
     assert (tmp_path / "clean" / row["id"] / "job.json").is_file()
     assert cs.list_jobs()[0]["id"] == row["id"]
 
