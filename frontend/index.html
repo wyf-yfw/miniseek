@@ -356,7 +356,154 @@
     .run-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .config-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
 
+
+    /* Data clean ops — dense settings rows (override global label/input) */
+    #clean-ops.clean-ops {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 12px 0 4px;
+      padding: 0;
+    }
+    .clean-ops-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 4px 0 0;
+    }
+    .clean-ops-head .field-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+    .clean-ops-head .field-hint { display: inline; margin: 0; font-size: 11px; color: var(--muted); }
+    .clean-op-row {
+      display: grid;
+      grid-template-columns: minmax(108px, 140px) 1fr;
+      gap: 8px 12px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fafbfc;
+    }
+    .clean-op-row:hover { background: #f3f4f6; border-color: #d1d5db; }
+    .clean-op-row.is-off { opacity: 0.55; }
+    .clean-op-enable {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 8px;
+      margin: 0 !important;
+      padding: 0;
+      color: var(--ink) !important;
+      font-size: 13px !important;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      width: auto;
+    }
+    .clean-op-enable input[type="checkbox"] {
+      width: 15px !important;
+      height: 15px;
+      margin: 0 !important;
+      padding: 0;
+      flex: 0 0 auto;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .clean-op-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 10px;
+      min-width: 0;
+      justify-content: flex-end;
+    }
+    .clean-op-controls .ctl {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+    }
+    .clean-op-controls .ctl > span {
+      display: inline !important;
+      margin: 0 !important;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .clean-op-controls input[type="number"],
+    .clean-op-controls input[type="text"] {
+      width: auto !important;
+      min-width: 0;
+      margin: 0 !important;
+      padding: 5px 8px;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    .clean-op-controls input.w-sm { width: 56px !important; }
+    .clean-op-controls input.w-md { width: 72px !important; }
+    .clean-op-controls input.w-lg { width: 96px !important; }
+    .clean-op-controls input.w-xl { width: 120px !important; }
+    .clean-op-controls input.w-path {
+      width: min(280px, 100%) !important;
+      flex: 1 1 160px;
+      min-width: 140px;
+    }
+    .clean-op-controls .mini-check {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 5px;
+      margin: 0 !important;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink) !important;
+      font-size: 12px !important;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .clean-op-controls .mini-check input {
+      width: 14px !important;
+      height: 14px;
+      margin: 0 !important;
+      padding: 0;
+      accent-color: var(--accent);
+    }
+    #clean .path-row { margin-top: 4px; }
+    #clean .path-row input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+    #btn-clean-start {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+    }
+    #btn-clean-start:disabled { opacity: 0.55; }
+    #btn-new-clean-job { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); width: 100%; }
+    #clean-job-list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+    #clean-job-list li {
+      padding: 10px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      border: 1px solid transparent;
+    }
+    #clean-job-list li:hover { background: #f9fafb; }
+    #clean-job-list li.active { background: #eff6ff; border-color: #bfdbfe; }
+    #clean-job-list .name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #clean-job-list .sub { color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
+    #clean-preview {
+      margin-top: 12px;
+      max-height: 220px;
+      min-height: 72px;
+    }
+    #clean-detail > h2 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+
     /* Chat */
+
     #infer.panel.active, #continue.panel.active { height: calc(100vh - 140px); }
     .cont-prefix { flex: 0 0 auto; padding: 16px; border-bottom: 1px solid var(--line); }
     .cont-prefix textarea { min-height: 100px; resize: vertical; }
@@ -1142,45 +1289,59 @@
             <h2><span id="clean-detail-title">Job</span><span class="phase-badge" id="clean-phase-badge">配置</span></h2>
             <p id="clean-msg"></p>
             <div id="clean-phase-config">
-              <p class="config-note">仅 Pretrain jsonl（每行 text）。勾选算子后可抽样预览，再 Start；全量经 worker CPU 跑，不抢 GPU 训练。</p>
-              <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名；可空。</span><input id="clean-name" type="text" /></label>
-              <label for="clean-input"><span class="field-title">输入 jsonl</span><span class="field-hint">默认 data/pretrain_mix_5g.jsonl。</span></label>
+              <p class="config-note">仅 Pretrain jsonl（每行 text）。勾选算子后可抽样预览，再「创建并启动」；全量经 worker CPU 跑，不抢 GPU 训练。</p>
+              <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名；可空。</span><input id="clean-name" type="text" placeholder="例如 smoke / mix12g-clean" /></label>
+              <label for="clean-input"><span class="field-title">输入 jsonl</span><span class="field-hint">默认 data/pretrain_mix_12g.jsonl（含清洗余量）。</span></label>
               <div class="path-row">
-                <input id="clean-input" type="text" placeholder="data/xxx.jsonl" />
+                <input id="clean-input" type="text" placeholder="data/pretrain_mix_12g.jsonl" />
                 <button type="button" class="btn-browse" data-for="clean-input">浏览</button>
               </div>
-              <div class="bench-tasks" id="clean-ops" style="flex-direction:column;align-items:stretch;gap:10px">
-                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <input type="checkbox" id="clean-op-length" checked /> 长度
-                  <span class="field-hint">min</span><input id="clean-min-len" type="number" min="0" value="50" style="width:90px" />
-                  <span class="field-hint">max</span><input id="clean-max-len" type="number" min="1" value="100000" style="width:110px" />
-                </label>
-                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <input type="checkbox" id="clean-op-language" checked /> 语言
-                  <input id="clean-lang" type="text" value="zh" style="width:60px" />
-                  <span class="field-hint">min_score</span><input id="clean-lang-score" type="number" min="0" max="1" step="0.05" value="0.5" style="width:80px" />
-                </label>
-                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <input type="checkbox" id="clean-op-repetition" checked /> 字符重复
-                  <span class="field-hint">rep_len</span><input id="clean-rep-len" type="number" min="2" value="10" style="width:70px" />
-                  <span class="field-hint">max_ratio</span><input id="clean-rep-ratio" type="number" min="0" max="1" step="0.05" value="0.5" style="width:80px" />
-                </label>
-                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <input type="checkbox" id="clean-op-dedup" checked /> 精确去重
-                  <label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="clean-dedup-lower" /> lowercase</label>
-                </label>
-                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <input type="checkbox" id="clean-op-sensitive" checked /> 敏感词
-                  <input id="clean-wordlist" type="text" placeholder="可选词表路径" style="flex:1;min-width:160px" />
-                </label>
+              <div class="clean-ops-head">
+                <span class="field-title">清洗算子</span>
+                <span class="field-hint">勾选启用；右侧调阈值</span>
               </div>
-              <div class="actions" style="margin-top:12px">
+              <div class="clean-ops" id="clean-ops">
+                <div class="clean-op-row" data-op="length">
+                  <label class="clean-op-enable" for="clean-op-length"><input type="checkbox" id="clean-op-length" checked />长度</label>
+                  <div class="clean-op-controls">
+                    <label class="ctl"><span>min</span><input id="clean-min-len" class="w-md" type="number" min="0" value="50" /></label>
+                    <label class="ctl"><span>max</span><input id="clean-max-len" class="w-xl" type="number" min="1" value="100000" /></label>
+                  </div>
+                </div>
+                <div class="clean-op-row" data-op="language">
+                  <label class="clean-op-enable" for="clean-op-language"><input type="checkbox" id="clean-op-language" checked />语言</label>
+                  <div class="clean-op-controls">
+                    <label class="ctl"><span>lang</span><input id="clean-lang" class="w-sm" type="text" value="zh" /></label>
+                    <label class="ctl"><span>min_score</span><input id="clean-lang-score" class="w-md" type="number" min="0" max="1" step="0.05" value="0.5" /></label>
+                  </div>
+                </div>
+                <div class="clean-op-row" data-op="repetition">
+                  <label class="clean-op-enable" for="clean-op-repetition"><input type="checkbox" id="clean-op-repetition" checked />字符重复</label>
+                  <div class="clean-op-controls">
+                    <label class="ctl"><span>rep_len</span><input id="clean-rep-len" class="w-md" type="number" min="2" value="10" /></label>
+                    <label class="ctl"><span>max_ratio</span><input id="clean-rep-ratio" class="w-md" type="number" min="0" max="1" step="0.05" value="0.5" /></label>
+                  </div>
+                </div>
+                <div class="clean-op-row" data-op="dedup">
+                  <label class="clean-op-enable" for="clean-op-dedup"><input type="checkbox" id="clean-op-dedup" checked />精确去重</label>
+                  <div class="clean-op-controls">
+                    <label class="mini-check" for="clean-dedup-lower"><input type="checkbox" id="clean-dedup-lower" />lowercase</label>
+                  </div>
+                </div>
+                <div class="clean-op-row" data-op="sensitive">
+                  <label class="clean-op-enable" for="clean-op-sensitive"><input type="checkbox" id="clean-op-sensitive" checked />敏感词</label>
+                  <div class="clean-op-controls">
+                    <input id="clean-wordlist" class="w-path" type="text" placeholder="可选词表路径，空则用内置" />
+                  </div>
+                </div>
+              </div>
+              <div class="actions" style="margin-top:14px">
                 <button type="button" id="btn-clean-preview">抽样预览</button>
                 <button type="button" id="btn-clean-save">保存配置</button>
                 <button type="button" id="btn-clean-start">Start</button>
                 <button type="button" id="btn-clean-delete-draft">删除</button>
               </div>
-              <pre class="bench-log" id="clean-preview" style="margin-top:12px;max-height:180px">（预览结果）</pre>
+              <pre class="bench-log" id="clean-preview">（预览结果）</pre>
             </div>
             <div id="clean-phase-run" style="display:none">
               <div class="title-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
@@ -3910,6 +4071,13 @@ $("btn-bench-edit").addEventListener("click", async () => {
       };
     }
 
+    function cleanSyncOpRowState() {
+      document.querySelectorAll("#clean-ops .clean-op-row").forEach((row) => {
+        const cb = row.querySelector(".clean-op-enable input[type=checkbox]");
+        if (cb) row.classList.toggle("is-off", !cb.checked);
+      });
+    }
+
     function cleanApplyOperators(ops) {
       ops = ops || (cleanDefaults && cleanDefaults.operators) || {};
       const L = ops.length || {};
@@ -3930,6 +4098,7 @@ $("btn-bench-edit").addEventListener("click", async () => {
       const S = ops.sensitive || {};
       $("clean-op-sensitive").checked = S.enabled !== false;
       $("clean-wordlist").value = S.wordlist_path || "";
+      cleanSyncOpRowState();
     }
 
     function syncCleanUnsavedButtons() {
@@ -4053,7 +4222,7 @@ $("btn-bench-edit").addEventListener("click", async () => {
       $("clean-detail").style.display = "";
       $("clean-detail-title").textContent = "新 Job";
       $("clean-name").value = "";
-      $("clean-input").value = (cleanDefaults && cleanDefaults.input_path) || "data/pretrain_mix_5g.jsonl";
+      $("clean-input").value = (cleanDefaults && cleanDefaults.input_path) || "data/pretrain_mix_12g.jsonl";
       cleanApplyOperators(cleanDefaults && cleanDefaults.operators);
       $("clean-preview").textContent = "（预览结果）";
       $("clean-msg").textContent = "";
@@ -4063,6 +4232,9 @@ $("btn-bench-edit").addEventListener("click", async () => {
     }
 
     $("btn-new-clean-job").addEventListener("click", newCleanJobForm);
+    document.querySelectorAll("#clean-ops .clean-op-enable input[type=checkbox]").forEach((cb) => {
+      cb.addEventListener("change", cleanSyncOpRowState);
+    });
 
     $("btn-clean-preview").addEventListener("click", async () => {
       $("clean-preview").textContent = "预览中…";

@@ -1731,7 +1731,7 @@ def api_clean_list_jobs() -> dict:
             "stats": row.get("stats"),
             "engine": row.get("engine"),
         })
-    return {"jobs": rows, "defaults": {"operators": cs.DEFAULT_OPERATORS, "input_path": str(PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl")}}
+    return {"jobs": rows, "defaults": {"operators": cs.DEFAULT_OPERATORS, "input_path": str(PROJECT_ROOT / "data" / "pretrain_mix_12g.jsonl")}}
 
 
 @app.post("/api/clean/jobs")
