@@ -716,7 +716,7 @@
                   <label><span class="field-title">Stable Steps</span><span class="field-hint">某个阈值需连续多少步 loss≤阈值才写入对应 checkpoint。</span><input id="stable-steps" type="number" min="1" /></label>
                   <label><span class="field-title">Save Every</span><span class="field-hint">每 N 步额外存 step-N.pt；默认 0=关闭（推荐，避免占满磁盘）。</span><input id="save-every" type="number" min="0" /></label>
                   <label><span class="field-title">Aux Coef</span><span class="field-hint">MoE 负载均衡辅助损失系数；Dense/Tiny 可忽略。</span><input id="aux-coef" type="number" step="any" /></label>
-                  <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态），填 .pt 路径。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
+                  <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态）。数据会重新打乱、不接着上次的位置；步数预算从起点累加。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
                   <label><span class="field-title">Init Ckpt (SFT)</span><span class="field-hint">SFT 时从该预训练权重初始化（非断点续训）。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
                 </div>
               </details>

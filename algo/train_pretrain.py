@@ -26,6 +26,7 @@ except Exception:
     pass
 
 import argparse
+import hashlib
 import json
 import math
 import random
@@ -150,6 +151,16 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def run_salt(args: argparse.Namespace) -> int:
+    """每次任务一个不同的打乱种子。
+
+    同一个 out_dir + 同样参数可复现；换任务、换数据、换 resume 起点必然是不同排列。
+    这样续训看到的是新的一遍随机数据，而不是把开头那段原样重放一遍。
+    """
+    key = f"{args.out_dir}|{args.data}|{args.seed}|{args.resume}"
+    return int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % (2**31 - 1)
 
 
 def parse_loss_thresholds(s: str) -> List[float]:
@@ -352,26 +363,23 @@ def main() -> None:
     ds = JsonlTextDataset(
         args.data, tok, max_seq_len=args.max_seq_len, max_samples=args.max_samples
     )
+    # 打乱顺序按任务派生，避免每次续训都重放同一批开头样本
+    salt = run_salt(args)
+    shuffle_gen = torch.Generator()
+    shuffle_gen.manual_seed((int(args.seed) + salt) % (2**31 - 1))
     loader = DataLoader(
         ds,
         batch_size=args.batch_size,
         shuffle=True,
+        generator=shuffle_gen,
         collate_fn=partial(collate_pad, pad_id=pad_id),
         num_workers=max(0, int(args.num_workers)),
         pin_memory=(device.type == "cuda"),
     )
 
     steps_per_epoch = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
-    if args.max_steps is not None:
-        total_steps = args.max_steps
-    else:
-        total_steps = steps_per_epoch * max(1, args.epochs)
-    print(
-        f"[train] samples={len(ds)} steps/epoch≈{steps_per_epoch} "
-        f"total_steps={total_steps} warmup={args.warmup_steps} "
-        f"lr={args.lr}→{args.min_lr} thresholds={thresholds} "
-        f"stable_steps={args.stable_steps}"
-    )
+    plan_steps = steps_per_epoch * max(1, args.epochs)
+    total_steps = int(args.max_steps) if args.max_steps is not None else plan_steps
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     out_dir = Path(args.out_dir)
@@ -401,7 +409,24 @@ def main() -> None:
         global_step = int(blob.get("step", 0))
         if blob.get("loss") is not None:
             best_loss = float(blob["loss"])
+        if args.max_steps is None:
+            # 续训没给绝对步数时，"epochs" 表示再扫几遍数据：
+            # 总预算 = 已跑 + 本次，LR 余弦才会覆盖整段而不是从头重算
+            total_steps = global_step + plan_steps
         print(f"[train] resumed from {resume_path} step={global_step} best_loss={best_loss}")
+
+    print(
+        f"[train] samples={len(ds)} steps/epoch≈{steps_per_epoch} "
+        f"start_step={global_step} total_steps={total_steps} "
+        f"shuffle_salt={salt} warmup={args.warmup_steps} "
+        f"lr={args.lr}→{args.min_lr} thresholds={thresholds} "
+        f"stable_steps={args.stable_steps}"
+    )
+    if global_step >= total_steps:
+        print(
+            f"[train] WARN: 起点 step={global_step} 已不低于 total_steps={total_steps}，"
+            f"本次不会再有有效训练步"
+        )
 
     model.train()
     t0 = time.time()
