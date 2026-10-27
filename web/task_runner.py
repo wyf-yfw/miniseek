@@ -181,6 +181,65 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     return cmd
 
 
+def _popen_isolation_kwargs() -> dict:
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
+        kwargs["creationflags"] = flags
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def _terminate_pid(
+    pid: int,
+    *,
+    owned: Optional[subprocess.Popen] = None,
+    timeout_s: float = 5.0,
+) -> Optional[int]:
+    """SIGTERM process group (POSIX session leader) or CTRL_BREAK (Windows); then SIGKILL."""
+    pid_i = int(pid)
+    try:
+        if sys.platform == "win32":
+            os.kill(pid_i, signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
+        else:
+            os.killpg(pid_i, signal.SIGTERM)
+    except (OSError, ProcessLookupError, AttributeError):
+        try:
+            os.kill(pid_i, signal.SIGTERM)
+        except OSError:
+            pass
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if owned is not None and owned.poll() is not None:
+            return owned.poll()
+        if not pid_alive(pid_i):
+            break
+        time.sleep(0.1)
+    else:
+        try:
+            if sys.platform == "win32":
+                os.kill(pid_i, signal.SIGTERM)
+            else:
+                os.killpg(pid_i, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                os.kill(pid_i, signal.SIGKILL)
+            except OSError:
+                pass
+
+    code = None
+    if owned is not None:
+        try:
+            code = owned.wait(timeout=2)
+        except Exception:  # noqa: BLE001
+            code = owned.poll()
+    return code
+
+
 def _spawn_training(cmd: List[str], log_path: Path) -> subprocess.Popen:
     env = os.environ.copy()
     env.pop("all_proxy", None)
@@ -196,6 +255,7 @@ def _spawn_training(cmd: List[str], log_path: Path) -> subprocess.Popen:
             stderr=subprocess.STDOUT,
             cwd=str(PROJECT_ROOT),
             env=env,
+            **_popen_isolation_kwargs(),
         )
     finally:
         os.close(fd)
@@ -342,30 +402,9 @@ def stop_task(task_id: str) -> Dict[str, Any]:
         return task
 
     assert pid is not None
-    try:
-        os.kill(int(pid), signal.SIGTERM)
-    except OSError:
-        pass
     owned = _owned_procs.get(task_id)
-    for _ in range(50):
-        if owned is not None and owned.poll() is not None:
-            break
-        if not pid_alive(pid):
-            break
-        time.sleep(0.1)
-    else:
-        try:
-            os.kill(int(pid), signal.SIGKILL)
-        except OSError:
-            pass
-
-    owned = _owned_procs.pop(task_id, None)
-    code = None
-    if owned is not None:
-        try:
-            code = owned.wait(timeout=2)
-        except Exception:  # noqa: BLE001
-            code = owned.poll()
+    code = _terminate_pid(int(pid), owned=owned)
+    _owned_procs.pop(task_id, None)
 
     with _tail_lock:
         _tail_tokens[task_id] = _tail_tokens.get(task_id, 0) + 1  # cancel tailer
@@ -377,3 +416,43 @@ def stop_task(task_id: str) -> Dict[str, Any]:
     task["ended_at"] = datetime.now().isoformat(timespec="seconds")
     ts.save_task(task)
     return task
+
+def reattach_running_tails() -> List[str]:
+    """Worker boot: for disk status=running with live pid, restart log→metrics tail (no new Popen)."""
+    attached: List[str] = []
+    for row in ts.list_tasks():
+        if row.get("status") != "running":
+            continue
+        task = ts.load_task(row["id"])
+        pid = task.get("pid")
+        if not pid_alive(pid):
+            reconcile_task(task)
+            continue
+        task_id = task["id"]
+        plot_every = int(
+            (task.get("hparams") or {}).get("plot_every")
+            or (1 if task.get("arch") == "tiny" else 500)
+        )
+        with _tail_lock:
+            token = _tail_tokens.get(task_id, 0) + 1
+            _tail_tokens[task_id] = token
+        threading.Thread(
+            target=_tail_log,
+            args=(task_id, int(pid), token, max(1, plot_every)),
+            daemon=True,
+        ).start()
+        attached.append(task_id)
+    return attached
+
+
+def stop_all_owned() -> None:
+    """Worker shutdown hook: stop every running train task (owned or disk-running)."""
+    ids = set(_owned_procs.keys())
+    for row in ts.list_tasks():
+        if row.get("status") == "running":
+            ids.add(row["id"])
+    for tid in list(ids):
+        try:
+            stop_task(tid)
+        except Exception:  # noqa: BLE001
+            pass

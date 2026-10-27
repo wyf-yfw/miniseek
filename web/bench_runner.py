@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 import torch
 
 from web import bench_store as bs
-from web.task_runner import pid_alive
+from web.task_runner import _popen_isolation_kwargs, _terminate_pid, pid_alive
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _owned_procs: Dict[str, subprocess.Popen] = {}
@@ -167,12 +167,6 @@ def start_run(run_id: str, *, training_busy: bool) -> Dict[str, Any]:
     env["PYTHONUNBUFFERED"] = "1"
     env["BENCH_PROGRESS_PATH"] = str(out_dir / "progress.json")
     env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-    creationflags = 0
-    if sys.platform == "win32":
-        creationflags = (
-            getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        )
     log_fh = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
     try:
         proc = subprocess.Popen(
@@ -181,7 +175,7 @@ def start_run(run_id: str, *, training_busy: bool) -> Dict[str, Any]:
             stderr=subprocess.STDOUT,
             cwd=str(PROJECT_ROOT),
             env=env,
-            creationflags=creationflags,
+            **_popen_isolation_kwargs(),
         )
     finally:
         log_fh.close()
@@ -213,30 +207,9 @@ def stop_run(run_id: str) -> Dict[str, Any]:
         return run
 
     assert pid is not None
-    try:
-        os.kill(int(pid), signal.SIGTERM)
-    except OSError:
-        pass
     owned = _owned_procs.get(run_id)
-    for _ in range(50):
-        if owned is not None and owned.poll() is not None:
-            break
-        if not pid_alive(pid):
-            break
-        time.sleep(0.1)
-    else:
-        try:
-            os.kill(int(pid), signal.SIGKILL)
-        except OSError:
-            pass
-
-    owned = _owned_procs.pop(run_id, None)
-    code = None
-    if owned is not None:
-        try:
-            code = owned.wait(timeout=2)
-        except Exception:  # noqa: BLE001
-            code = owned.poll()
+    code = _terminate_pid(int(pid), owned=owned)
+    _owned_procs.pop(run_id, None)
 
     run = bs.load_run(run_id)
     run["pid"] = None
@@ -262,3 +235,26 @@ def read_log(run_id: str, *, tail: Optional[int] = None) -> str:
         return text
     lines = text.splitlines()
     return "\n".join(lines[-tail:])
+
+def reattach_running() -> List[str]:
+    """Mark live running benches as known; no log-tail thread today."""
+    attached: List[str] = []
+    for row in bs.list_runs():
+        if row.get("status") != "running":
+            continue
+        run = reconcile_run(bs.load_run(row["id"]))
+        if run.get("status") == "running" and pid_alive(run.get("pid")):
+            attached.append(run["id"])
+    return attached
+
+
+def stop_all_owned() -> None:
+    ids = set(_owned_procs.keys())
+    for row in bs.list_runs():
+        if row.get("status") == "running":
+            ids.add(row["id"])
+    for rid in list(ids):
+        try:
+            stop_run(rid)
+        except Exception:  # noqa: BLE001
+            pass

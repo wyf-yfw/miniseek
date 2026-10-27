@@ -65,3 +65,59 @@ def test_pid_alive_true_when_owned_running(tasks_root, monkeypatch):
         assert tr.pid_alive(434343) is True
     finally:
         tr._owned_procs.pop("owned-run", None)
+
+
+import subprocess
+import sys
+from unittest.mock import MagicMock, patch
+
+
+def test_spawn_training_uses_new_session_on_posix(tasks_root, tmp_path, monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("POSIX session test")
+    log = tmp_path / "t.log"
+    captured = {}
+
+    def fake_popen(*args, **kwargs):
+        captured.update(kwargs)
+        m = MagicMock()
+        m.pid = 55501
+        m.poll.return_value = None
+        return m
+
+    monkeypatch.setattr(tr.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(tr.os, "open", lambda *a, **k: 3)
+    monkeypatch.setattr(tr.os, "close", lambda *a, **k: None)
+    tr._spawn_training([sys.executable, "-c", "pass"], log)
+    assert captured.get("start_new_session") is True
+
+
+def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("POSIX killpg test")
+    t = ts.create_task(name="killpg", arch="tiny", mode="pretrain", hparams={"max_steps": 1})
+    t["status"] = "running"
+    t["pid"] = 77701
+    ts.save_task(t)
+
+    class FakeProc:
+        pid = 77701
+        def poll(self):
+            return 0
+        def wait(self, timeout=None):
+            return 0
+
+    tr._owned_procs[t["id"]] = FakeProc()
+    calls = []
+
+    def fake_killpg(pgid, sig):
+        calls.append((pgid, sig))
+
+    monkeypatch.setattr(tr, "pid_alive", lambda pid: len(calls) == 0)
+    monkeypatch.setattr(tr.os, "killpg", fake_killpg, raising=False)
+    # Ensure module has killpg attribute for patch path used by implementation
+    if not hasattr(tr.os, "killpg"):
+        monkeypatch.setattr(tr.os, "killpg", fake_killpg)
+    out = tr.stop_task(t["id"])
+    assert out["status"] == "stopped"
+    assert calls and calls[0][0] == 77701
