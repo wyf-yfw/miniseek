@@ -1786,8 +1786,13 @@ def api_clean_delete_job(job_id: str) -> dict:
 
 @app.post("/api/clean/jobs/{job_id}/start")
 def api_clean_start_job(job_id: str) -> dict:
+    """Start clean job. Prefer worker; if worker lacks /v1/clean (old binary while
+    train holds it), fall back to local Popen with start_new_session so API
+    restart still will not reap the clean child.
+    """
     _get_clean_or_404(job_id)
-    if wc.use_monolith():
+
+    def _local():
         try:
             return clean_start_job(job_id)
         except FileNotFoundError as exc:
@@ -1796,7 +1801,15 @@ def api_clean_start_job(job_id: str) -> dict:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _worker_request("POST", f"/v1/clean/{job_id}/start")
+
+    if wc.use_monolith():
+        return _local()
+    try:
+        return _worker_request("POST", f"/v1/clean/{job_id}/start")
+    except HTTPException as exc:
+        if exc.status_code in {404, 502}:
+            return _local()
+        raise
 
 
 @app.post("/api/clean/jobs/{job_id}/stop")
@@ -1804,7 +1817,12 @@ def api_clean_stop_job(job_id: str) -> dict:
     _get_clean_or_404(job_id)
     if wc.use_monolith():
         return clean_stop_job(job_id)
-    return _worker_request("POST", f"/v1/clean/{job_id}/stop")
+    try:
+        return _worker_request("POST", f"/v1/clean/{job_id}/stop")
+    except HTTPException as exc:
+        if exc.status_code in {404, 502}:
+            return clean_stop_job(job_id)
+        raise
 
 
 @app.get("/api/clean/jobs/{job_id}/logs")
