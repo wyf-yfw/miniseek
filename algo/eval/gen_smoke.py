@@ -10,9 +10,9 @@ from pathlib import Path
 
 import torch
 
-from model.config import ModelConfig
-from model.dense import DenseLM
-from model.tokenizer import load_tokenizer
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.model.tokenizer import load_tokenizer
 
 PROMPTS = [
     "请用一句话介绍人工智能。",
@@ -47,7 +47,7 @@ def set_seed(seed: int) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", type=str, default="checkpoints/stage0/last.pt")
+    ap.add_argument("--ckpt", type=str, default="tasks/_default_pretrain/last.pt")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-new-tokens", type=int, default=48)
     ap.add_argument("--temperature", type=float, default=0.8)

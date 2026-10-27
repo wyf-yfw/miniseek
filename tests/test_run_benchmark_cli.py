@@ -15,7 +15,7 @@ def test_run_bench_writes_results(tmp_path):
             "ceval-valid": {"acc,none": 0.5, "acc_stderr,none": 0.1},
         }
     }
-    with patch("eval.run_benchmark.simple_evaluate", return_value=fake):
+    with patch("algo.eval.run_benchmark.simple_evaluate", return_value=fake):
         run_bench(
             ckpt=str(tmp_path / "dummy.pt"),
             tasks=["ceval-valid"],

@@ -5,8 +5,8 @@
 
 示例::
 
-    python train_sft.py --data data/sft_t2t_mini.jsonl \\
-        --init-ckpt checkpoints/stage0/best.pt --out-dir checkpoints/sft \\
+    python -m algo.train_sft --data data/sft_t2t_mini.jsonl \\
+        --init-ckpt tasks/_default_pretrain/best.pt --out-dir tasks/_default_sft \\
         --max-steps 100
 """
 
@@ -31,9 +31,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from model.config import ModelConfig
-from model.dense import DenseLM
-from model.tokenizer import detect_vocab_size, load_tokenizer
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.model.tokenizer import detect_vocab_size, load_tokenizer
 
 
 def format_chat(conversations: List[dict]) -> str:
@@ -213,7 +213,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="miniseek SFT")
     p.add_argument("--data", type=str, default="data/sft_t2t_mini.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
-    p.add_argument("--out-dir", type=str, default="checkpoints/sft")
+    p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
     p.add_argument("--max-seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--lr", type=float, default=5e-5, help="peak LR after warmup (SFT 通常低于预训练)")

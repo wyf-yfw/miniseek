@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 import torch
@@ -21,6 +23,7 @@ def test_load_training_blob(tmp_path):
 
 
 def test_loglikelihood_and_generate(tmp_path):
+    pytest.importorskip("lm_eval")
     cfg = ModelConfig.tiny()
     model = DenseLM(cfg)
     ckpt = tmp_path / "t.pt"

@@ -11,16 +11,16 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from model.config import ModelConfig
-from model.dense import DenseLM
-from model.tokenizer import load_tokenizer
-from train_pretrain import JsonlTextDataset, collate_pad
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.model.tokenizer import load_tokenizer
+from algo.train_pretrain import JsonlTextDataset, collate_pad
 
 
 @torch.no_grad()
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", type=str, default="checkpoints/stage0/last.pt")
+    ap.add_argument("--ckpt", type=str, default="tasks/_default_pretrain/last.pt")
     ap.add_argument("--valid", type=str, default="data/valid.jsonl")
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--max-seq-len", type=int, default=512)

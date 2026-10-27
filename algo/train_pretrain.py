@@ -3,8 +3,8 @@
 
 示例::
 
-    python train_pretrain.py --data data/pretrain_mix_5g.jsonl --max-steps 2
-    python train_pretrain.py --data data/pretrain_mix_5g.jsonl --epochs 1 --batch-size 32
+    python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --max-steps 2
+    python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --epochs 1 --batch-size 32
     # 默认只写 best.pt + last.pt；可选 --save-loss-thresholds / --save-every（占盘，慎用）
 """
 
@@ -32,9 +32,9 @@ from typing import Any, Dict, List, Optional, Set
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from model import build_model
-from model.config import ModelConfig
-from model.tokenizer import detect_vocab_size, load_tokenizer
+from algo.model import build_model
+from algo.model.config import ModelConfig
+from algo.model.tokenizer import detect_vocab_size, load_tokenizer
 
 
 def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
@@ -226,7 +226,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="miniseek Stage-0 pretrain")
     p.add_argument("--data", type=str, default="data/pretrain_mix_5g.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
-    p.add_argument("--out-dir", type=str, default="checkpoints/stage0")
+    p.add_argument("--out-dir", type=str, default="tasks/_default_pretrain")
     p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")
     p.add_argument("--aux-coef", type=float, default=0.01, help="MoE load-balance aux weight")
     p.add_argument("--max-seq-len", type=int, default=512)

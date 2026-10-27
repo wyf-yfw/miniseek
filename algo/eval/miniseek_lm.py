@@ -9,12 +9,20 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from lm_eval.api.model import TemplateLM
-from lm_eval.api.registry import register_model
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.model.tokenizer import load_tokenizer
 
-from model.config import ModelConfig
-from model.dense import DenseLM
-from model.tokenizer import load_tokenizer
+try:
+    from lm_eval.api.model import TemplateLM
+    from lm_eval.api.registry import register_model
+except ModuleNotFoundError:  # pragma: no cover - optional dep for harness
+    TemplateLM = object  # type: ignore[misc,assignment]
+
+    def register_model(*_a, **_k):  # type: ignore[misc]
+        def deco(cls):
+            return cls
+        return deco
 
 
 
@@ -67,7 +75,7 @@ def load_miniseek_blob(path: Union[str, Path]):
         blob = torch.load(path, map_location="cpu", weights_only=False)
     cfg = ModelConfig.from_dict(blob["config"])
     if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
-        from model.moe import MoELM
+        from algo.model.moe import MoELM
 
         model = MoELM(cfg)
     else:

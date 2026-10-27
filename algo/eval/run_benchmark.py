@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from eval.bench_results import ALLOWED_TASKS, normalize_lm_eval_results
+from algo.eval.bench_results import ALLOWED_TASKS, normalize_lm_eval_results
 
 
 def simple_evaluate(**kwargs):
@@ -51,7 +51,7 @@ def run_bench(
     progress_path = Path(os.environ["BENCH_PROGRESS_PATH"]) if os.environ.get("BENCH_PROGRESS_PATH") else (out_dir / "progress.json")
     os.environ["BENCH_PROGRESS_PATH"] = str(progress_path)
 
-    import eval.miniseek_lm  # noqa: F401  # register model
+    import algo.eval.miniseek_lm  # noqa: F401  # register model
 
     merged_metrics: Dict[str, Any] = {}
     suite_total = len(tasks)

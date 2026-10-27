@@ -10,8 +10,8 @@ from pathlib import Path
 
 import torch
 
-from model.config import ModelConfig
-from model.tokenizer import load_tokenizer
+from algo.model.config import ModelConfig
+from algo.model.tokenizer import load_tokenizer
 
 # Explicit continuation stems (not chat Q&A)
 PROMPTS = [
@@ -41,12 +41,12 @@ def load_model(ckpt_path: str, device: torch.device):
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     cfg = ModelConfig.from_dict(ckpt["config"])
     if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
-        from model.moe import MoELM
+        from algo.model.moe import MoELM
 
         model = MoELM(cfg)
         arch = "moe"
     else:
-        from model.dense import DenseLM
+        from algo.model.dense import DenseLM
 
         model = DenseLM(cfg)
         arch = "dense"
