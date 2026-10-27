@@ -2819,6 +2819,43 @@
         : "当前子集";
     }
 
+    let benchUnsaved = false;
+
+    function syncBenchUnsavedButtons() {
+      // 未保存表单：没有草稿可删，也不需要单独的"保存"——Start 就是创建
+      const save = $("btn-bench-save");
+      const delDraft = $("btn-bench-delete-draft");
+      const start = $("btn-bench-start");
+      if (save) save.style.display = benchUnsaved ? "none" : "";
+      if (delDraft) delDraft.style.display = benchUnsaved ? "none" : "";
+      if (start) start.textContent = benchUnsaved ? "创建并启动" : "Start";
+    }
+
+    function openNewBenchForm() {
+      benchSelectedId = null;
+      benchCurrent = null;
+      benchUnsaved = true;
+      stopBenchPoll();
+      $("bench-detail-empty").style.display = "none";
+      $("bench-detail").style.display = "";
+      $("bench-detail-title").textContent = "新建评测 Task（未保存）";
+      $("bench-msg").textContent = "尚未创建：点「创建并启动」才会落盘并开始评测。";
+      $("bench-name").value = "";
+      $("bench-ckpt").value = "";
+      $("bench-limit").value = "";
+      const defaults = new Set(["ceval-valid", "cmmlu", "gsm8k"]);
+      document.querySelectorAll("#bench-task-checks input").forEach((el) => {
+        el.checked = defaults.has(el.value);
+      });
+      $("bench-status-text").textContent = "未开始";
+      $("bench-dot").className = "dot";
+      $("bench-run-meta").textContent = "";
+      $("bench-log").textContent = "（空）";
+      setBenchFormEnabled(true);
+      applyBenchPhase({ status: "draft" });
+      syncBenchUnsavedButtons();
+    }
+
     function isBenchConfigPhase(status) {
       return !status || status === "draft";
     }
@@ -2882,6 +2919,8 @@
 
     async function selectBenchTask(id, opts = {}) {
       benchSelectedId = id;
+      benchUnsaved = false;
+      syncBenchUnsavedButtons();
       const r = await fetch(`/api/bench/tasks/${id}`);
       if (!r.ok) {
         $("bench-msg").textContent = await readError(r);
@@ -2935,29 +2974,13 @@
       return { name, ckpt_path, tasks, limit };
     }
 
-    $("btn-new-bench-task").addEventListener("click", async () => {
-      $("bench-msg").textContent = "";
-      const r = await fetch("/api/bench/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "",
-          ckpt_path: "",
-          tasks: ["ceval-valid", "cmmlu", "gsm8k"],
-          limit: null,
-        }),
-      });
-      if (!r.ok) {
-        $("bench-msg").textContent = await readError(r);
-        return;
-      }
-      const t = await r.json();
-      await refreshBenchTasks();
-      await selectBenchTask(t.id);
+    $("btn-new-bench-task").addEventListener("click", () => {
+      // 只打开空表单，不落盘；点「创建并启动」才真正创建评测任务
+      openNewBenchForm();
     });
 
     $("btn-bench-save").addEventListener("click", async () => {
-      if (!benchSelectedId) return;
+      if (benchUnsaved || !benchSelectedId) return;
       const body = readBenchForm();
       if (!body.tasks.length) {
         $("bench-msg").textContent = "至少勾选一个子集";
@@ -2977,7 +3000,6 @@
     });
 
     $("btn-bench-start").addEventListener("click", async () => {
-      if (!benchSelectedId) return;
       const body = readBenchForm();
       $("bench-msg").textContent = "";
       if (!body.ckpt_path) {
@@ -2988,22 +3010,39 @@
         $("bench-msg").textContent = "至少勾选一个子集";
         return;
       }
-      let r = await fetch(`/api/bench/tasks/${benchSelectedId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        $("bench-msg").textContent = await readError(r);
-        return;
+      let targetId = benchSelectedId;
+      if (benchUnsaved || !targetId) {
+        const createRes = await fetch("/api/bench/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!createRes.ok) {
+          $("bench-msg").textContent = await readError(createRes);
+          return;
+        }
+        targetId = (await createRes.json()).id;
+        benchUnsaved = false;
+        benchSelectedId = targetId;
+        await refreshBenchTasks();
+      } else {
+        const saved = await fetch(`/api/bench/tasks/${targetId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!saved.ok) {
+          $("bench-msg").textContent = await readError(saved);
+          return;
+        }
       }
-      r = await fetch(`/api/bench/tasks/${benchSelectedId}/start`, { method: "POST" });
+      const r = await fetch(`/api/bench/tasks/${targetId}/start`, { method: "POST" });
       if (!r.ok) {
         $("bench-msg").textContent = await readError(r);
         return;
       }
       $("bench-msg").textContent = "已启动";
-      await selectBenchTask(benchSelectedId);
+      await selectBenchTask(targetId);
     });
 
     $("btn-bench-stop").addEventListener("click", async () => {
@@ -3018,7 +3057,16 @@
 
     
     async function deleteSelectedBenchTask() {
-      if (!benchSelectedId) return;
+      if (benchUnsaved || !benchSelectedId) {
+        benchUnsaved = false;
+        benchCurrent = null;
+        benchSelectedId = null;
+        $("bench-detail").style.display = "none";
+        $("bench-detail-empty").style.display = "";
+        syncBenchUnsavedButtons();
+        $("bench-msg").textContent = "已放弃未保存的配置";
+        return;
+      }
       if (!confirm("确认删除该评测 Task 目录？不可恢复。")) return;
       const r = await fetch(`/api/bench/tasks/${benchSelectedId}`, { method: "DELETE" });
       if (!r.ok) {
