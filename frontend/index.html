@@ -275,6 +275,13 @@
       font-variant-numeric: tabular-nums;
     }
     .loss-caption b { color: var(--ink); font-weight: 600; }
+    .loss-tools {
+      display: flex; align-items: center; gap: 8px;
+      margin: 0 2px 8px; font-size: 12px; color: var(--muted);
+    }
+    .loss-tools input[type="range"] { width: 140px; accent-color: var(--accent); }
+    .loss-tools b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .loss-hint { margin-left: auto; color: #9ca3af; }
 
     .train-progress { margin-bottom: 12px; }
     .tp-head {
@@ -745,6 +752,12 @@
                 <div class="frozen-config" id="frozen-config"></div>
               </details>
               <h2 style="margin-top:16px">Loss</h2>
+              <div class="loss-tools">
+                <span>平滑</span>
+                <input id="loss-smooth" type="range" min="0" max="0.95" step="0.05" value="0.6" />
+                <b id="loss-smooth-value">0.60</b>
+                <span class="loss-hint">浅色 = 原始值，深色 = 平滑趋势</span>
+              </div>
               <canvas id="loss-canvas" width="800" height="210"></canvas>
               <div class="loss-caption" id="loss-caption"></div>
               <h2 style="margin-top:16px">日志</h2>
@@ -1509,6 +1522,20 @@
       return v.toFixed(4);
     }
 
+    let lossSmooth = 0.6; // 0 = 不平滑；越大越平滑（TensorBoard 默认量级）
+
+    // 指数移动平均：acc = acc*w + x*(1-w)，用首点做种子，没有冷启动偏差
+    function smoothLosses(points, weight) {
+      const w = Math.max(0, Math.min(0.98, Number(weight) || 0));
+      const out = [];
+      let acc = null;
+      for (const q of points) {
+        acc = acc == null ? q.loss : acc * w + q.loss * (1 - w);
+        out.push(acc);
+      }
+      return out;
+    }
+
     function drawLoss() {
       const canvas = $("loss-canvas");
       if (!canvas) return;
@@ -1525,7 +1552,7 @@
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, cssW, cssH);
 
-      const padL = 54, padR = 18, padT = 16, padB = 30;
+      const padL = 54, padR = 18, padT = 28, padB = 42;
       const plotW = Math.max(10, cssW - padL - padR);
       const plotH = Math.max(10, cssH - padT - padB);
       const mono = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -1591,39 +1618,51 @@
       ctx.lineTo(padL + plotW, padT + plotH + 0.5);
       ctx.stroke();
 
-      // --- 轴标签
+      // --- 轴标签（贴在图外，别压刻度）
       ctx.fillStyle = TEXT_COLOR;
+      ctx.font = "11px system-ui, sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.fillText("loss", 8, padT - 4);
+      ctx.fillText("loss", padL - 46, 6);
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
       ctx.fillText("step", padL + plotW, cssH - 4);
 
-      // --- 曲线
-      ctx.strokeStyle = "#1d4ed8";
-      ctx.lineWidth = 1.8;
+      // --- 曲线：原始值画淡，EMA 平滑画实
+      const smoothed = smoothLosses(lossPoints, lossSmooth);
+      const showRaw = lossSmooth > 0.001;
       ctx.lineJoin = "round";
-      ctx.beginPath();
-      lossPoints.forEach((q, i) => {
-        const x = sx(q.step), y = sy(q.loss);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
+      ctx.lineCap = "round";
 
-      // --- 最低点 / 最新点
+      const strokeSeries = (values, color, width) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        lossPoints.forEach((q, i) => {
+          const x = sx(q.step), y = sy(values[i]);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      };
+
+      if (showRaw) strokeSeries(ys, "rgba(29,78,216,0.20)", 1);
+
+      const series = showRaw ? smoothed : ys;
+      strokeSeries(series, "#1d4ed8", 2);
+
+      // --- 最低点（原始）/ 最新点（落在实线上）
       let best = lossPoints[0];
       for (const q of lossPoints) if (q.loss < best.loss) best = q;
       const last = lossPoints[lossPoints.length - 1];
 
-      ctx.fillStyle = "#047857";
+      ctx.fillStyle = "rgba(4,120,87,0.75)";
       ctx.beginPath();
-      ctx.arc(sx(best.step), sy(best.loss), 3, 0, Math.PI * 2);
+      ctx.arc(sx(best.step), sy(best.loss), 2.6, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = "#1d4ed8";
       ctx.beginPath();
-      ctx.arc(sx(last.step), sy(last.loss), 3.4, 0, Math.PI * 2);
+      ctx.arc(sx(last.step), sy(series[series.length - 1]), 3.4, 0, Math.PI * 2);
       ctx.fill();
 
       // --- 图下说明
@@ -1633,6 +1672,7 @@
         const pplTxt = last.ppl != null ? Number(last.ppl).toFixed(2) : "—";
         cap.innerHTML =
           '<span>最新 <b>loss ' + fmtAxis(last.loss) + '</b> @ step ' + last.step + '</span>' +
+          '<span>趋势 <b>' + fmtAxis(smoothed[smoothed.length - 1]) + '</b></span>' +
           '<span>最低 <b>loss ' + fmtAxis(best.loss) + '</b> @ step ' + best.step + '</span>' +
           '<span>ppl <b>' + pplTxt + '</b></span>' +
           '<span>lr <b>' + lrTxt + '</b></span>' +
@@ -1641,6 +1681,16 @@
     }
 
     window.addEventListener("resize", () => { drawLoss(); });
+
+    const lossSmoothInput = $("loss-smooth");
+    if (lossSmoothInput) {
+      lossSmoothInput.addEventListener("input", () => {
+        lossSmooth = Number(lossSmoothInput.value) || 0;
+        const label = $("loss-smooth-value");
+        if (label) label.textContent = lossSmooth.toFixed(2);
+        drawLoss();
+      });
+    }
 
     function applyMetrics(m) {
       lossPoints = (m && m.loss) || [];
