@@ -734,6 +734,7 @@
       <button type="button" role="tab" aria-selected="false" data-tab="continue">续写</button>
       <button type="button" role="tab" aria-selected="false" data-tab="arch">架构</button>
       <button type="button" role="tab" aria-selected="false" data-tab="bench">评测</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="clean">数据清洗</button>
       <button type="button" role="tab" aria-selected="false" data-tab="moe-load">专家负载</button>
     </nav>
 
@@ -1119,6 +1120,82 @@
               </table>
               <h2 style="margin-top:18px">日志</h2>
               <pre class="bench-log" id="bench-log">（空）</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <section id="clean" class="panel">
+      <div class="train-layout">
+        <aside class="task-sidebar">
+          <h2>清洗 Jobs</h2>
+          <button type="button" id="btn-new-clean-job">新建 Job</button>
+          <ul id="clean-job-list"></ul>
+        </aside>
+        <div class="task-main">
+          <div class="card" id="clean-detail-empty">
+            <p class="empty-hint">请新建或选择一个 Pretrain 清洗 Job</p>
+          </div>
+          <div class="card" id="clean-detail" style="display:none">
+            <h2><span id="clean-detail-title">Job</span><span class="phase-badge" id="clean-phase-badge">配置</span></h2>
+            <p id="clean-msg"></p>
+            <div id="clean-phase-config">
+              <p class="config-note">仅 Pretrain jsonl（每行 text）。勾选算子后可抽样预览，再 Start；全量经 worker CPU 跑，不抢 GPU 训练。</p>
+              <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名；可空。</span><input id="clean-name" type="text" /></label>
+              <label for="clean-input"><span class="field-title">输入 jsonl</span><span class="field-hint">默认 data/pretrain_mix_5g.jsonl。</span></label>
+              <div class="path-row">
+                <input id="clean-input" type="text" placeholder="data/xxx.jsonl" />
+                <button type="button" class="btn-browse" data-for="clean-input">浏览</button>
+              </div>
+              <div class="bench-tasks" id="clean-ops" style="flex-direction:column;align-items:stretch;gap:10px">
+                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="checkbox" id="clean-op-length" checked /> 长度
+                  <span class="field-hint">min</span><input id="clean-min-len" type="number" min="0" value="50" style="width:90px" />
+                  <span class="field-hint">max</span><input id="clean-max-len" type="number" min="1" value="100000" style="width:110px" />
+                </label>
+                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="checkbox" id="clean-op-language" checked /> 语言
+                  <input id="clean-lang" type="text" value="zh" style="width:60px" />
+                  <span class="field-hint">min_score</span><input id="clean-lang-score" type="number" min="0" max="1" step="0.05" value="0.5" style="width:80px" />
+                </label>
+                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="checkbox" id="clean-op-repetition" checked /> 字符重复
+                  <span class="field-hint">rep_len</span><input id="clean-rep-len" type="number" min="2" value="10" style="width:70px" />
+                  <span class="field-hint">max_ratio</span><input id="clean-rep-ratio" type="number" min="0" max="1" step="0.05" value="0.5" style="width:80px" />
+                </label>
+                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="checkbox" id="clean-op-dedup" checked /> 精确去重
+                  <label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="clean-dedup-lower" /> lowercase</label>
+                </label>
+                <label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="checkbox" id="clean-op-sensitive" checked /> 敏感词
+                  <input id="clean-wordlist" type="text" placeholder="可选词表路径" style="flex:1;min-width:160px" />
+                </label>
+              </div>
+              <div class="actions" style="margin-top:12px">
+                <button type="button" id="btn-clean-preview">抽样预览</button>
+                <button type="button" id="btn-clean-save">保存配置</button>
+                <button type="button" id="btn-clean-start">Start</button>
+                <button type="button" id="btn-clean-delete-draft">删除</button>
+              </div>
+              <pre class="bench-log" id="clean-preview" style="margin-top:12px;max-height:180px">（预览结果）</pre>
+            </div>
+            <div id="clean-phase-run" style="display:none">
+              <div class="title-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+                <div class="title">运行中 / 结果</div>
+                <div class="live"><span class="dot" id="clean-dot"></span><span id="clean-status-text">未开始</span></div>
+              </div>
+              <p id="clean-run-meta" class="field-hint"></p>
+              <div id="clean-stats" class="caption" style="white-space:pre-wrap;margin:8px 0"></div>
+              <div class="run-actions" style="margin:10px 0">
+                <button type="button" id="btn-clean-stop" class="danger" disabled>Stop</button>
+                <button type="button" id="btn-clean-delete">删除</button>
+                <button type="button" id="btn-clean-edit">改配置再跑</button>
+              </div>
+              <h2 style="margin-top:18px">日志</h2>
+              <pre class="bench-log" id="clean-log">（空）</pre>
             </div>
           </div>
         </div>
@@ -3797,6 +3874,335 @@ $("btn-bench-edit").addEventListener("click", async () => {
         if (btn.dataset.tab === "bench") refreshBenchTasks();
       });
     });
+
+    // --- 数据清洗 Jobs (Data-Juicer / builtin) ---
+    let cleanSelectedId = null;
+    let cleanPollTimer = null;
+    let cleanCurrent = null;
+    let cleanUnsaved = false;
+    let cleanDefaults = null;
+
+    function cleanCollectOperators() {
+      return {
+        length: {
+          enabled: $("clean-op-length").checked,
+          min_len: Number($("clean-min-len").value || 50),
+          max_len: Number($("clean-max-len").value || 100000),
+        },
+        language: {
+          enabled: $("clean-op-language").checked,
+          lang: ($("clean-lang").value || "zh").trim(),
+          min_score: Number($("clean-lang-score").value || 0.5),
+        },
+        repetition: {
+          enabled: $("clean-op-repetition").checked,
+          rep_len: Number($("clean-rep-len").value || 10),
+          max_ratio: Number($("clean-rep-ratio").value || 0.5),
+        },
+        exact_dedup: {
+          enabled: $("clean-op-dedup").checked,
+          lowercase: $("clean-dedup-lower").checked,
+        },
+        sensitive: {
+          enabled: $("clean-op-sensitive").checked,
+          wordlist_path: ($("clean-wordlist").value || "").trim(),
+        },
+      };
+    }
+
+    function cleanApplyOperators(ops) {
+      ops = ops || (cleanDefaults && cleanDefaults.operators) || {};
+      const L = ops.length || {};
+      $("clean-op-length").checked = L.enabled !== false;
+      $("clean-min-len").value = L.min_len != null ? L.min_len : 50;
+      $("clean-max-len").value = L.max_len != null ? L.max_len : 100000;
+      const G = ops.language || {};
+      $("clean-op-language").checked = G.enabled !== false;
+      $("clean-lang").value = G.lang || "zh";
+      $("clean-lang-score").value = G.min_score != null ? G.min_score : 0.5;
+      const R = ops.repetition || {};
+      $("clean-op-repetition").checked = R.enabled !== false;
+      $("clean-rep-len").value = R.rep_len != null ? R.rep_len : 10;
+      $("clean-rep-ratio").value = R.max_ratio != null ? R.max_ratio : 0.5;
+      const D = ops.exact_dedup || {};
+      $("clean-op-dedup").checked = D.enabled !== false;
+      $("clean-dedup-lower").checked = !!D.lowercase;
+      const S = ops.sensitive || {};
+      $("clean-op-sensitive").checked = S.enabled !== false;
+      $("clean-wordlist").value = S.wordlist_path || "";
+    }
+
+    function syncCleanUnsavedButtons() {
+      const save = $("btn-clean-save");
+      const delDraft = $("btn-clean-delete-draft");
+      const start = $("btn-clean-start");
+      if (save) save.style.display = cleanUnsaved ? "none" : "";
+      if (delDraft) delDraft.style.display = cleanUnsaved ? "none" : "";
+      if (start) start.textContent = cleanUnsaved ? "创建并启动" : "Start";
+    }
+
+    function setCleanPhase(job) {
+      const config = !job || job.status === "draft" || cleanUnsaved;
+      $("clean-phase-config").style.display = config ? "" : "none";
+      $("clean-phase-run").style.display = config ? "none" : "";
+      $("clean-phase-badge").textContent = config ? "配置" : ({
+        running: "运行中", stopped: "已停止", finished: "完成", failed: "失败"
+      }[job && job.status] || job.status || "");
+      $("btn-clean-stop").disabled = !(job && job.status === "running");
+      const delOn = !!(job && job.status !== "running" && !cleanUnsaved);
+      $("btn-clean-delete").disabled = !delOn;
+      $("btn-clean-delete-draft").disabled = !delOn;
+      $("btn-clean-edit").style.display = (!config && job && job.status !== "running") ? "" : "none";
+      syncCleanUnsavedButtons();
+      const on = !!config;
+      $("btn-clean-save").disabled = !on || cleanUnsaved;
+      $("btn-clean-start").disabled = !on;
+      $("btn-clean-preview").disabled = !on;
+    }
+
+    function renderCleanStats(job) {
+      const el = $("clean-stats");
+      const st = (job && job.stats) || (job && job.report) || null;
+      const engine = (job && job.engine) || (st && st.engine) || "";
+      if (!st) {
+        el.textContent = engine ? `引擎 ${engine}` : "尚无统计";
+        return;
+      }
+      const lines = [
+        engine ? `引擎：${engine}` : "",
+        `输入 ${st.input_rows ?? "—"} · 保留 ${st.kept ?? "—"} · 丢弃 ${st.dropped ?? "—"}`,
+        st.seconds != null ? `耗时 ${st.seconds}s` : "",
+        job && job.output_dir ? `输出目录：${job.output_dir}` : "",
+      ];
+      if (st.per_operator) {
+        lines.push("分算子丢弃：" + JSON.stringify(st.per_operator));
+      }
+      el.textContent = lines.filter(Boolean).join("\n");
+    }
+
+    async function refreshCleanJobs() {
+      const r = await fetch("/api/clean/jobs");
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data.defaults) cleanDefaults = data.defaults;
+      const ul = $("clean-job-list");
+      ul.innerHTML = "";
+      for (const j of (data.jobs || [])) {
+        const li = document.createElement("li");
+        li.dataset.id = j.id;
+        if (j.id === cleanSelectedId) li.classList.add("active");
+        li.innerHTML = `<div class="name">${j.name || j.id}</div><div class="sub"><span class="dot ${statusDotClass(j.status)}"></span> ${j.status} · ${(j.input_path || "").split("/").pop() || "—"}</div>`;
+        li.addEventListener("click", () => selectCleanJob(j.id));
+        ul.appendChild(li);
+      }
+    }
+
+    async function selectCleanJob(id) {
+      cleanUnsaved = false;
+      cleanSelectedId = id;
+      await refreshCleanJobs();
+      const r = await fetch(`/api/clean/jobs/${id}`);
+      if (!r.ok) {
+        $("clean-msg").textContent = await readError(r);
+        return;
+      }
+      const job = await r.json();
+      cleanCurrent = job;
+      $("clean-detail-empty").style.display = "none";
+      $("clean-detail").style.display = "";
+      $("clean-detail-title").textContent = job.name || job.id;
+      $("clean-name").value = job.name || "";
+      $("clean-input").value = job.input_path || "";
+      cleanApplyOperators(job.operators);
+      $("clean-msg").textContent = "";
+      $("clean-status-text").textContent = job.status || "";
+      $("clean-dot").className = "dot " + statusDotClass(job.status);
+      $("clean-run-meta").textContent = [
+        job.started_at ? `开始 ${job.started_at}` : "",
+        job.ended_at ? `结束 ${job.ended_at}` : "",
+        job.pid ? `pid ${job.pid}` : "",
+      ].filter(Boolean).join(" · ");
+      renderCleanStats(job);
+      setCleanPhase(job);
+      const lr = await fetch(`/api/clean/jobs/${id}/logs?tail=300`);
+      if (lr.ok) {
+        const lj = await lr.json();
+        $("clean-log").textContent = lj.text || "（空）";
+      }
+      if (job.status === "running") startCleanPoll();
+      else stopCleanPoll();
+    }
+
+    function startCleanPoll() {
+      stopCleanPoll();
+      cleanPollTimer = setInterval(async () => {
+        if (!cleanSelectedId) return;
+        await selectCleanJob(cleanSelectedId);
+      }, 2000);
+    }
+    function stopCleanPoll() {
+      if (cleanPollTimer) clearInterval(cleanPollTimer);
+      cleanPollTimer = null;
+    }
+
+    function newCleanJobForm() {
+      cleanUnsaved = true;
+      cleanSelectedId = null;
+      cleanCurrent = null;
+      $("clean-detail-empty").style.display = "none";
+      $("clean-detail").style.display = "";
+      $("clean-detail-title").textContent = "新 Job";
+      $("clean-name").value = "";
+      $("clean-input").value = (cleanDefaults && cleanDefaults.input_path) || "data/pretrain_mix_5g.jsonl";
+      cleanApplyOperators(cleanDefaults && cleanDefaults.operators);
+      $("clean-preview").textContent = "（预览结果）";
+      $("clean-msg").textContent = "";
+      setCleanPhase({ status: "draft" });
+      stopCleanPoll();
+      refreshCleanJobs();
+    }
+
+    $("btn-new-clean-job").addEventListener("click", newCleanJobForm);
+
+    $("btn-clean-preview").addEventListener("click", async () => {
+      $("clean-preview").textContent = "预览中…";
+      const body = {
+        input_path: $("clean-input").value.trim(),
+        operators: cleanCollectOperators(),
+        limit: 200,
+      };
+      const r = await fetch("/api/clean/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        $("clean-preview").textContent = await readError(r);
+        return;
+      }
+      const data = await r.json();
+      const lines = [
+        `扫描 ${data.scanned} · 保留 ${data.kept} · 丢弃 ${data.dropped}`,
+        "分算子：" + JSON.stringify(data.per_operator || {}),
+        "保留样例：",
+        ...(data.kept_examples || []).map((x, i) => `  [${i}] ${(x.text || "").replace(/\n/g, " ").slice(0, 120)}`),
+        "丢弃样例：",
+        ...(data.dropped_examples || []).map((x, i) => `  [${i}] (${x.reason}) ${(x.text || "").replace(/\n/g, " ").slice(0, 120)}`),
+      ];
+      $("clean-preview").textContent = lines.join("\n");
+    });
+
+    $("btn-clean-save").addEventListener("click", async () => {
+      if (!cleanSelectedId || cleanUnsaved) return;
+      const body = {
+        name: $("clean-name").value.trim(),
+        input_path: $("clean-input").value.trim(),
+        operators: cleanCollectOperators(),
+      };
+      const r = await fetch(`/api/clean/jobs/${cleanSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        $("clean-msg").textContent = await readError(r);
+        return;
+      }
+      await selectCleanJob(cleanSelectedId);
+    });
+
+    $("btn-clean-start").addEventListener("click", async () => {
+      const body = {
+        name: $("clean-name").value.trim(),
+        input_path: $("clean-input").value.trim(),
+        operators: cleanCollectOperators(),
+      };
+      let targetId = cleanSelectedId;
+      if (cleanUnsaved || !targetId) {
+        const createRes = await fetch("/api/clean/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!createRes.ok) {
+          $("clean-msg").textContent = await readError(createRes);
+          return;
+        }
+        const created = await createRes.json();
+        targetId = created.id;
+        cleanUnsaved = false;
+      } else {
+        const saved = await fetch(`/api/clean/jobs/${targetId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!saved.ok) {
+          $("clean-msg").textContent = await readError(saved);
+          return;
+        }
+      }
+      const r = await fetch(`/api/clean/jobs/${targetId}/start`, { method: "POST" });
+      if (!r.ok) {
+        $("clean-msg").textContent = await readError(r);
+        await selectCleanJob(targetId);
+        return;
+      }
+      await selectCleanJob(targetId);
+    });
+
+    $("btn-clean-stop").addEventListener("click", async () => {
+      if (!cleanSelectedId) return;
+      const r = await fetch(`/api/clean/jobs/${cleanSelectedId}/stop`, { method: "POST" });
+      if (!r.ok) $("clean-msg").textContent = await readError(r);
+      await selectCleanJob(cleanSelectedId);
+    });
+
+    async function deleteSelectedCleanJob() {
+      if (!cleanSelectedId) return;
+      if (!confirm("删除该清洗 Job 及 data/clean 下产物？")) return;
+      const r = await fetch(`/api/clean/jobs/${cleanSelectedId}`, { method: "DELETE" });
+      if (!r.ok) {
+        $("clean-msg").textContent = await readError(r);
+        return;
+      }
+      cleanSelectedId = null;
+      cleanCurrent = null;
+      $("clean-detail").style.display = "none";
+      $("clean-detail-empty").style.display = "";
+      stopCleanPoll();
+      await refreshCleanJobs();
+    }
+    $("btn-clean-delete").addEventListener("click", deleteSelectedCleanJob);
+    $("btn-clean-delete-draft").addEventListener("click", deleteSelectedCleanJob);
+
+    $("btn-clean-edit").addEventListener("click", async () => {
+      if (!cleanSelectedId) return;
+      const body = {
+        name: $("clean-name").value.trim(),
+        input_path: $("clean-input").value.trim(),
+        operators: cleanCollectOperators(),
+      };
+      // patch to flip finished→draft when operators/input change
+      const r = await fetch(`/api/clean/jobs/${cleanSelectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        $("clean-msg").textContent = await readError(r);
+        return;
+      }
+      await selectCleanJob(cleanSelectedId);
+    });
+
+    document.querySelectorAll(".page-tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.tab === "clean") refreshCleanJobs();
+      });
+    });
+
+
 
     async function refreshMoeCheckpoints() {
       const res = await fetch("/api/checkpoints");

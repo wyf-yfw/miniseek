@@ -67,3 +67,7 @@ data/hf_upload_MiniSeek-dataset_real/
 data/raw/
 algo/eval/reports/cont_smoke_*.jsonl
 algo/eval/reports/*.log
+
+# Clean job outputs
+data/clean/
+.venv-dj/

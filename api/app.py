@@ -33,12 +33,20 @@ from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
 from api import tasks_store as ts
 from api import bench_store as bs
+from api import clean_store as cs
 from api.task_runner import pid_alive, reconcile_task, start_task, stop_task, validate_sft_init_ckpt
 from api.bench_runner import (
     reconcile_run,
     start_run as bench_start_run,
     stop_run as bench_stop_run,
     read_log as bench_read_log,
+)
+from api.clean_runner import (
+    reconcile_job as reconcile_clean,
+    start_job as clean_start_job,
+    stop_job as clean_stop_job,
+    read_log as clean_read_log,
+    run_preview as clean_run_preview,
 )
 from api.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
 from api import worker_client as wc
@@ -850,6 +858,24 @@ class BenchPatch(BaseModel):
     ckpt_path: Optional[str] = None
     tasks: Optional[List[str]] = None
     limit: Optional[int] = None
+
+
+class CleanCreate(BaseModel):
+    name: str = ""
+    input_path: str = ""
+    operators: Optional[Dict[str, Any]] = None
+
+
+class CleanPatch(BaseModel):
+    name: Optional[str] = None
+    input_path: Optional[str] = None
+    operators: Optional[Dict[str, Any]] = None
+
+
+class CleanPreviewRequest(BaseModel):
+    input_path: str
+    operators: Optional[Dict[str, Any]] = None
+    limit: int = 200
 
 
 class GenerateRequest(BaseModel):
@@ -1678,6 +1704,133 @@ def api_bench_runs_gone() -> None:
 @app.delete("/api/bench/runs/{run_id}")
 def api_bench_runs_id_gone(run_id: str) -> None:
     _bench_runs_gone()
+
+
+def _get_clean_or_404(job_id: str) -> dict:
+    try:
+        return reconcile_clean(cs.load_job(job_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"clean job not found: {job_id}") from exc
+
+
+@app.get("/api/clean/jobs")
+def api_clean_list_jobs() -> dict:
+    rows = []
+    for row in cs.list_jobs():
+        if row.get("status") == "running":
+            row = reconcile_clean(cs.load_job(row["id"]))
+        rows.append({
+            "id": row["id"],
+            "name": row.get("name") or row["id"],
+            "status": row.get("status"),
+            "input_path": row.get("input_path"),
+            "created_at": row.get("created_at"),
+            "started_at": row.get("started_at"),
+            "ended_at": row.get("ended_at"),
+            "pid": row.get("pid"),
+            "stats": row.get("stats"),
+            "engine": row.get("engine"),
+        })
+    return {"jobs": rows, "defaults": {"operators": cs.DEFAULT_OPERATORS, "input_path": str(PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl")}}
+
+
+@app.post("/api/clean/jobs")
+def api_clean_create_job(body: CleanCreate) -> dict:
+    try:
+        return cs.create_job(
+            name=body.name or "",
+            input_path=body.input_path or "",
+            operators=body.operators,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/clean/jobs/{job_id}")
+def api_clean_get_job(job_id: str) -> dict:
+    job = _get_clean_or_404(job_id)
+    out = dict(job)
+    out["report"] = cs.read_report(job_id)
+    return out
+
+
+@app.patch("/api/clean/jobs/{job_id}")
+def api_clean_patch_job(job_id: str, body: CleanPatch) -> dict:
+    _get_clean_or_404(job_id)
+    try:
+        kwargs = {}
+        if body.name is not None:
+            kwargs["name"] = body.name
+        if body.input_path is not None:
+            kwargs["input_path"] = body.input_path
+        if body.operators is not None:
+            kwargs["operators"] = body.operators
+        return cs.patch_job(job_id, **kwargs)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/clean/jobs/{job_id}")
+def api_clean_delete_job(job_id: str) -> dict:
+    job = _get_clean_or_404(job_id)
+    if job.get("status") == "running" and pid_alive(job.get("pid")):
+        raise HTTPException(status_code=409, detail="running job 不能删除，请先 Stop")
+    try:
+        cs.delete_job(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "id": job_id}
+
+
+@app.post("/api/clean/jobs/{job_id}/start")
+def api_clean_start_job(job_id: str) -> dict:
+    _get_clean_or_404(job_id)
+    if wc.use_monolith():
+        try:
+            return clean_start_job(job_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, NotImplementedError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _worker_request("POST", f"/v1/clean/{job_id}/start")
+
+
+@app.post("/api/clean/jobs/{job_id}/stop")
+def api_clean_stop_job(job_id: str) -> dict:
+    _get_clean_or_404(job_id)
+    if wc.use_monolith():
+        return clean_stop_job(job_id)
+    return _worker_request("POST", f"/v1/clean/{job_id}/stop")
+
+
+@app.get("/api/clean/jobs/{job_id}/logs")
+def api_clean_job_logs(job_id: str, tail: int = 200) -> dict:
+    _get_clean_or_404(job_id)
+    return {"text": clean_read_log(job_id, tail=tail)}
+
+
+@app.get("/api/clean/jobs/{job_id}/report")
+def api_clean_job_report(job_id: str) -> dict:
+    _get_clean_or_404(job_id)
+    report = cs.read_report(job_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="report.json 尚未生成")
+    return report
+
+
+@app.post("/api/clean/preview")
+def api_clean_preview(body: CleanPreviewRequest) -> dict:
+    try:
+        return clean_run_preview(body.input_path, body.operators or {}, limit=body.limit)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 
 
 @app.get("/api/arch/design")

@@ -19,6 +19,12 @@ from api.bench_runner import (
     stop_all_owned as stop_all_bench,
     stop_run as bench_stop_run,
 )
+from api.clean_runner import (
+    reattach_running as reattach_clean,
+    start_job as clean_start_job,
+    stop_all_owned as stop_all_clean,
+    stop_job as clean_stop_job,
+)
 
 
 class BenchStartBody(BaseModel):
@@ -29,11 +35,13 @@ class BenchStartBody(BaseModel):
 async def lifespan(app: FastAPI):
     reattach_running_tails()
     reattach_bench()
+    reattach_clean()
     try:
         yield
     finally:
         stop_all_train()
         stop_all_bench()
+        stop_all_clean()
 
 
 app = FastAPI(title="MiniSeek Worker", lifespan=lifespan)
@@ -81,3 +89,24 @@ def worker_stop_bench(run_id: str) -> dict:
         return bench_stop_run(run_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/v1/clean/{job_id}/start")
+def worker_start_clean(job_id: str) -> dict:
+    try:
+        return clean_start_job(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, NotImplementedError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/v1/clean/{job_id}/stop")
+def worker_stop_clean(job_id: str) -> dict:
+    try:
+        return clean_stop_job(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
