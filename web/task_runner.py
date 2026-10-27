@@ -139,15 +139,15 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         "--out-dir",
         out_dir,
         "--batch-size",
-        str(int(_hp(hp, "batch_size", 4))),
+        str(int(_hp(hp, "batch_size", 32 if mode == "pretrain" and arch != "tiny" else 4))),
         "--max-seq-len",
         str(int(_hp(hp, "max_seq_len", 512))),
         "--lr",
-        str(float(_hp(hp, "lr", 1e-4))),
+        str(float(_hp(hp, "lr", 5e-5))),
         "--min-lr",
-        str(float(_hp(hp, "min_lr", 3e-5))),
+        str(float(_hp(hp, "min_lr", 1e-5))),
         "--warmup-steps",
-        str(int(_hp(hp, "warmup_steps", 200))),
+        str(int(_hp(hp, "warmup_steps", 200 if mode == "pretrain" else 100))),
         "--epochs",
         str(int(_hp(hp, "epochs", 1))),
         "--grad-clip",
@@ -155,7 +155,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         "--save-loss-thresholds",
         str(_hp(hp, "save_loss_thresholds", "")),
         "--stable-steps",
-        str(int(_hp(hp, "stable_steps", 200))),
+        str(int(_hp(hp, "stable_steps", 50 if mode == "pretrain" else 200))),
         "--save-every",
         str(int(_hp(hp, "save_every", 0))),
         "--log-every",
@@ -317,7 +317,7 @@ def start_task(task_id: str) -> Dict[str, Any]:
     ts.save_task(task)
     _owned_procs[task_id] = proc
 
-    plot_every = int((task.get("hparams") or {}).get("plot_every") or (1 if task.get("arch") == "tiny" else 200))
+    plot_every = int((task.get("hparams") or {}).get("plot_every") or (1 if task.get("arch") == "tiny" else 500))
     with _tail_lock:
         token = _tail_tokens.get(task_id, 0) + 1
         _tail_tokens[task_id] = token

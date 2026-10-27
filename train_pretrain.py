@@ -4,7 +4,7 @@
 示例::
 
     python train_pretrain.py --data data/pretrain_mix_5g.jsonl --max-steps 2
-    python train_pretrain.py --data data/pretrain_mix_5g.jsonl --epochs 1 --batch-size 8
+    python train_pretrain.py --data data/pretrain_mix_5g.jsonl --epochs 1 --batch-size 32
     # 默认只写 best.pt + last.pt；可选 --save-loss-thresholds / --save-every（占盘，慎用）
 """
 
@@ -230,9 +230,9 @@ def main() -> None:
     p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")
     p.add_argument("--aux-coef", type=float, default=0.01, help="MoE load-balance aux weight")
     p.add_argument("--max-seq-len", type=int, default=512)
-    p.add_argument("--batch-size", type=int, default=4)
-    p.add_argument("--lr", type=float, default=1e-4, help="peak LR after warmup")
-    p.add_argument("--min-lr", type=float, default=3e-5, help="cosine floor LR")
+    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--lr", type=float, default=5e-5, help="peak LR after warmup")
+    p.add_argument("--min-lr", type=float, default=1e-5, help="cosine floor LR")
     p.add_argument("--warmup-steps", type=int, default=200)
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=None, help="smoke: --max-steps 2")
@@ -262,7 +262,7 @@ def main() -> None:
     p.add_argument(
         "--stable-steps",
         type=int,
-        default=100,
+        default=50,
         help="里程碑/best：连续多少步满足条件才存盘；中途回升则计数清零",
     )
     p.add_argument(
