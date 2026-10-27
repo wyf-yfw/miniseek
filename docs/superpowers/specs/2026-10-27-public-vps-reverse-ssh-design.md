@@ -1,7 +1,7 @@
 # 公网 VPS 反向 SSH：外网访问 wyf（MiniSeek + SSH）
 
 Date: 2026-10-27  
-Status: Approved（grill 对齐：方案 A 反向 SSH；跳转端口 2222；Web 走 VPS :80→wyf :7860；autossh + systemd user；密钥登录）  
+Status: Approved（grill 对齐：方案 A 反向 SSH；跳转端口 2222；Web 走 VPS :7860→wyf :7860；autossh + systemd user；密钥登录）  
 Repo: `wyf-yfw/miniseek`  
 Machine: wyf（隧道客户端）；VPS `60.205.250.186`（公网入口）  
 Depends on: 三服务 Web（frontend `:7860` / api `:8000` / worker `:8001`）；本设计只改对外入口，不改三服务边界
@@ -14,7 +14,7 @@ Depends on: 三服务 Web（frontend `:7860` / api `:8000` / worker `:8001`）�
 
 | 公网（VPS） | 落到 | 用途 |
 |-------------|------|------|
-| `60.205.250.186:80` | wyf `:7860` | MiniSeek 前端（静态 + `/api` 反代） |
+| `60.205.250.186:7860` | wyf `:7860` | MiniSeek 前端（静态 + `/api` 反代） |
 | `60.205.250.186:2222` | wyf `:22` | SSH 跳到内网 3090 |
 | `60.205.250.186:22` | VPS 本机 sshd | 管理公网机本身 |
 
@@ -22,10 +22,10 @@ Depends on: 三服务 Web（frontend `:7860` / api `:8000` / worker `:8001`）�
 
 ## Non-goals
 
-- 本轮 **只写设计**；不落地 unit、不改 sshd、不装软件、不推送密钥。
+- 本轮 **只写设计**；实现已落地：`deploy/miniseek-tunnel.service`（ssh -R，systemd Restart=always）；VPS 已开 GatewayPorts + UFW 2222/7860；因 octonic 占用 80/443，Web 用公网 **7860**。
 - 不引入 FRP / nps / WireGuard / 商业内网穿透；若日后替换，另开 spec。
 - 不把 VPS 变成第二套 MiniSeek 运行环境；VPS **不跑** api/worker/GPU，只做入口与转发。
-- 不在本设计里开 HTTPS / 申请证书（可后续加；首版明文 `:80` 可接受，风险见下）。
+- 不在本设计里开 HTTPS / 申请证书（可后续加；首版明文 `:7860` 可接受，风险见下）。
 - 不暴露 wyf 的 `:8000` / `:8001` 到公网；外网只碰前端 `:7860` 与 SSH。
 - 不强制拆除 Funnel；公网入口就绪后 Funnel **可选**，对「公网访问」不再必需。
 - **文档与仓库不写任何明文密码**；VPS 登录凭据已在保险库，实现时从 vault 取用。
@@ -42,10 +42,10 @@ Depends on: 三服务 Web（frontend `:7860` / api `:8000` / worker `:8001`）�
 ```text
   Internet
       │
-      ├─ browser ──► VPS:80  ──(ssh -R)──► wyf:7860  (miniseek-web)
+      ├─ browser ──► VPS:7860  ──(ssh -R)──► wyf:7860  (miniseek-web)
       │                                      │
-      │                                      ├─ /api → 127.0.0.1:8000 (api)
-      │                                      └─ api → 127.0.0.1:8001 (worker)
+      │                                      ├─ /api → 127.0.0.1:786000 (api)
+      │                                      └─ api → 127.0.0.1:786001 (worker)
       │
       ├─ ssh -p 2222 user@VPS ──(ssh -R)──► wyf:22
       │
@@ -54,7 +54,7 @@ Depends on: 三服务 Web（frontend `:7860` / api `:8000` / worker `:8001`）�
   wyf (systemd --user)
       miniseek-tunnel.service
          autossh → VPS:22 (key)
-            RemoteForward 0.0.0.0:80   → 127.0.0.1:7860
+            RemoteForward 0.0.0.0:7860   → 127.0.0.1:7860
             RemoteForward 0.0.0.0:2222 → 127.0.0.1:22
 ```
 
@@ -63,7 +63,7 @@ Depends on: 三服务 Web（frontend `:7860` / api `:8000` / worker `:8001`）�
 | 角色 | 机器 | 职责 |
 |------|------|------|
 | **隧道客户端** | wyf | `autossh` 连 VPS；携带两条 `-R`；systemd user 保活 |
-| **隧道服务端 / 入口** | VPS | sshd 接受反向绑定；防火墙放行 22/80/2222；可选本机 nginx 仅当日后要 TLS 时再加（首版 **直接** 由 `GatewayPorts` 把 `:80`/`:2222` 绑到公网网卡即可） |
+| **隧道服务端 / 入口** | VPS | sshd 接受反向绑定；防火墙放行 22/80/2222；可选本机 nginx 仅当日后要 TLS 时再加（首版 **直接** 由 `GatewayPorts` 把 `:7860`/`:2222` 绑到公网网卡即可） |
 | **业务** | wyf | 既有 `miniseek-web` / `miniseek-api` / `miniseek-worker`；隧道不替代它们 |
 
 ### 为何不用「公网机主动连内网」
@@ -72,7 +72,7 @@ Depends on: 三服务 Web（frontend `:7860` / api `:8000` / worker `:8001`）�
 
 ## Data / control flow
 
-1. wyf 启动 `miniseek-tunnel` → `autossh` 用专用密钥登录 VPS → 在 VPS 上监听 `0.0.0.0:80` 与 `0.0.0.0:2222`，分别转发到 wyf 本机 `127.0.0.1:7860` 与 `127.0.0.1:22`。
+1. wyf 启动 `miniseek-tunnel` → `autossh` 用专用密钥登录 VPS → 在 VPS 上监听 `0.0.0.0:7860` 与 `0.0.0.0:2222`，分别转发到 wyf 本机 `127.0.0.1:7860` 与 `127.0.0.1:22`。
 2. 用户浏览器访问 `http://60.205.250.186/` → 流量经隧道到 `miniseek-web` → `/api` 仍只打本机 api；训练进程仍只归 worker。
 3. 用户 `ssh -p 2222 <wyf-user>@60.205.250.186` → 落到 wyf 的 sshd（认证是 **wyf 的用户/密钥**，不是 VPS root 会话里的 shell 转发身份混淆：远程端口只是 TCP 接到 wyf:22）。
 4. 管理员 `ssh -p 22 <vps-admin>@60.205.250.186` → 只管理 VPS。
@@ -103,7 +103,7 @@ sshd（示意，实现时改 `/etc/ssh/sshd_config` 或 drop-in）：
 - wyf 上生成 ed25519（或现有）密钥，**私钥只留 wyf**；公钥装到 VPS 隧道用户 `authorized_keys`。
 - 仓库与本 spec **不提交私钥、不写密码**。
 
-注意：Linux 上绑定远程 `:80` 通常需要 VPS 上 sshd 以足够权限允许非特权用户转发到特权端口，或改用 `setcap`/authbind/先绑高位再本机 iptables 转发。实现时若 `:80` 绑定失败，允许等价方案：**VPS 本机 nginx/Caddy 监听 `:80`，proxy 到 `127.0.0.1:<高位>`**，而 autossh 只 `-R 127.0.0.1:<高位>:127.0.0.1:7860`。对外契约仍是「公网 `:80` → MiniSeek」；对内多一层本机反代不算改 Goal。`:2222` 非特权，可直接 `-R 0.0.0.0:2222:127.0.0.1:22`。
+注意：Linux 上绑定远程 `:7860` 通常需要 VPS 上 sshd 以足够权限允许非特权用户转发到特权端口，或改用 `setcap`/authbind/先绑高位再本机 iptables 转发。实现时若 `:7860` 绑定失败，允许等价方案：**VPS 本机 nginx/Caddy 监听 `:7860`，proxy 到 `127.0.0.1:<高位>`**，而 autossh 只 `-R 127.0.0.1:<高位>:127.0.0.1:7860`。对外契约仍是「公网 `:7860` → MiniSeek」；对内多一层本机反代不算改 Goal。`:2222` 非特权，可直接 `-R 0.0.0.0:2222:127.0.0.1:22`。
 
 ## wyf 配置要求
 
@@ -132,7 +132,7 @@ sshd（示意，实现时改 `/etc/ssh/sshd_config` 或 drop-in）：
 | 入口 | 状态 |
 |------|------|
 | Tailscale Funnel → wyf `:7860` | **可选备用**；公网主路径改为 VPS 后可不依赖 |
-| VPS `:80` → wyf `:7860` | **公网主入口**（本设计） |
+| VPS `:7860` → wyf `:7860` | **公网主入口**（本设计） |
 | 直连内网 IP | 仅局域网；不替代本设计 |
 
 ## Security
@@ -157,7 +157,7 @@ sshd（示意，实现时改 `/etc/ssh/sshd_config` 或 drop-in）：
 
 ## Risks
 
-- `:80` 特权端口绑定失败 → 用「VPS 本机反代 → 高位 localhost 转发」等价实现，对外仍是 `:80`。
+- `:7860` 特权端口绑定失败 → 用「VPS 本机反代 → 高位 localhost 转发」等价实现，对外仍是 `:7860`。
 - 家宽上行带宽不足 → Web SSE/大日志卡顿；不改架构，可压缩日志或限流（另议）。
 - 运营商干扰 80 → 可改对外 8080 或上 TLS 443（follow-up）；本设计默认 80。
 - 双入口（Funnel + VPS）同时开 → 行为一致但运维易混；文档标明主入口为 VPS。

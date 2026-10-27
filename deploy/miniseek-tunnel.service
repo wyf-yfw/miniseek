@@ -1,0 +1,21 @@
+[Unit]
+Description=Reverse SSH tunnel to VPS (MiniSeek Web + SSH)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -N \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -o BatchMode=yes \
+  -R 0.0.0.0:7860:127.0.0.1:7860 \
+  -R 0.0.0.0:2222:127.0.0.1:22 \
+  root@60.205.250.186
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
