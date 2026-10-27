@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -56,6 +57,74 @@ def _gpu_text() -> str:
     free, total = torch.cuda.mem_get_info(0)
     used = (total - free) / (1024**3)
     return f"{torch.cuda.get_device_name(0)} | 显存 {used:.1f}/{total / (1024**3):.1f} GB"
+
+
+def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+
+
+def _live_train_status(
+    task_id: str,
+    *,
+    prev_step: Optional[int] = None,
+    prev_mono: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Enriched SSE status: gpu / elapsed / step / step_s (+ sliding snap fields)."""
+    task = reconcile_task(ts.load_task(task_id))
+    metrics = ts.read_metrics(task_id)
+    loss = metrics.get("loss") or []
+    step: Optional[int] = int(loss[-1]["step"]) if loss else None
+    started = _parse_iso(task.get("started_at"))
+    ended = _parse_iso(task.get("ended_at"))
+    now = datetime.now()
+    if started is None:
+        elapsed_sec = 0
+    elif ended is not None:
+        elapsed_sec = max(0, int((ended - started).total_seconds()))
+    else:
+        elapsed_sec = max(0, int((now - started).total_seconds()))
+
+    step_s: Optional[float] = None
+    mono = time.monotonic()
+    if (
+        step is not None
+        and prev_step is not None
+        and prev_mono is not None
+        and step > prev_step
+    ):
+        dt = mono - prev_mono
+        if dt >= 0.5:
+            step_s = (step - prev_step) / dt
+    if step_s is None and step is not None and elapsed_sec > 0:
+        if len(loss) >= 2:
+            first = int(loss[0]["step"])
+            avg = (step - first) / max(elapsed_sec, 1)
+            step_s = step / max(elapsed_sec, 1) if avg < 0 else avg
+        else:
+            step_s = step / max(elapsed_sec, 1)
+
+    return {
+        "id": task["id"],
+        "status": task.get("status"),
+        "pid": task.get("pid"),
+        "gpu": _gpu_text(),
+        "started_at": task.get("started_at"),
+        "ended_at": task.get("ended_at"),
+        "elapsed_sec": elapsed_sec,
+        "step": step,
+        "step_s": None if step_s is None else round(float(step_s), 4),
+        "_mono": mono,
+        "_step_snap": step,
+    }
+
+
+def _public_status(raw: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in raw.items() if not str(k).startswith("_")}
 
 
 def _any_training_running() -> bool:
@@ -996,22 +1065,38 @@ async def api_task_logs(task_id: str, tail: int = 200) -> StreamingResponse:
     log_path = ts.task_dir(task_id) / "train.log"
 
     async def events():
+        prev_step: Optional[int] = None
+        prev_mono: Optional[float] = None
+        last_status_ts = 0.0
+
+        def emit_status(force: bool = False) -> Optional[str]:
+            nonlocal prev_step, prev_mono, last_status_ts
+            now_m = time.monotonic()
+            if not force and (now_m - last_status_ts) < 4.0:
+                return None
+            raw = _live_train_status(task_id, prev_step=prev_step, prev_mono=prev_mono)
+            snap = raw.get("_step_snap")
+            mono = raw.get("_mono")
+            if snap is not None:
+                prev_step = int(snap)
+            if mono is not None:
+                prev_mono = float(mono)
+            last_status_ts = now_m
+            return _sse("status", _public_status(raw))
+
         # Initial dump of last `tail` lines
         try:
-            text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+            text_log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
         except OSError:
-            text = ""
-        lines = [ln for ln in text.splitlines() if ln.strip()]
+            text_log = ""
+        lines = [ln for ln in text_log.splitlines() if ln.strip()]
         for ln in lines[-max(1, tail):]:
             yield _sse("log", {"line": ln})
         metrics = ts.read_metrics(task_id)
         yield _sse("metrics", metrics)
-        task = reconcile_task(ts.load_task(task_id))
-        yield _sse("status", {
-            "id": task["id"],
-            "status": task.get("status"),
-            "pid": task.get("pid"),
-        })
+        st = emit_status(force=True)
+        if st:
+            yield st
 
         pos = log_path.stat().st_size if log_path.exists() else 0
         idle = 0
@@ -1034,19 +1119,19 @@ async def api_task_logs(task_id: str, tail: int = 200) -> StreamingResponse:
                             yield _sse("log", {"line": clean})
                     metrics = ts.read_metrics(task_id)
                     yield _sse("metrics", metrics)
+                    st = emit_status(force=False)
+                    if st:
+                        yield st
                     idle = 0
                 else:
                     idle += 1
                     if idle % 10 == 0:
                         yield ": ping\n\n"
+                        st = emit_status(force=True)
+                        if st:
+                            yield st
                         task = reconcile_task(ts.load_task(task_id))
-                        yield _sse("status", {
-                            "id": task["id"],
-                            "status": task.get("status"),
-                            "pid": task.get("pid"),
-                        })
                         if task.get("status") not in {"running"}:
-                            # Final metrics flush then end stream after a short grace
                             metrics = ts.read_metrics(task_id)
                             yield _sse("metrics", metrics)
                             if idle > 25:

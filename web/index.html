@@ -1321,6 +1321,42 @@
       };
     }
 
+    let lastLiveStatus = null;
+
+    function formatElapsed(sec) {
+      if (sec == null || Number.isNaN(Number(sec)) || Number(sec) < 0) return "—";
+      sec = Math.floor(Number(sec));
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) return `${h}h${String(m).padStart(2, "0")}m${String(s).padStart(2, "0")}s`;
+      if (m > 0) return `${m}m${String(s).padStart(2, "0")}s`;
+      return `${s}s`;
+    }
+
+    function liveMetricsLine(s) {
+      const parts = [];
+      if (s && s.gpu) parts.push(`显存: ${s.gpu}`);
+      if (s && s.elapsed_sec != null) parts.push(`已跑: ${formatElapsed(s.elapsed_sec)}`);
+      const stepTxt = (s && s.step != null) ? String(s.step) : "—";
+      const spd = (s && s.step_s != null) ? `${Number(s.step_s).toFixed(2)} step/s` : "—";
+      parts.push(`step ${stepTxt} · ${spd}`);
+      return parts.join(" | ");
+    }
+
+    function applyLiveStatus(s) {
+      if (!s) return;
+      lastLiveStatus = s;
+      const box = $("status-box");
+      const raw = box.textContent || "";
+      const base = raw.split("\n").filter((ln) => ln && !ln.startsWith("显存:"));
+      if (!base.length || (base.length === 1 && base[0] === "—")) {
+        box.textContent = liveMetricsLine(s);
+        return;
+      }
+      box.textContent = base.join("\n") + "\n" + liveMetricsLine(s);
+    }
+
     function renderStatusBox(t) {
       $("status-box").textContent =
         `id: ${t.id}\nstatus: ${t.status}\narch: ${t.arch}  mode: ${t.mode}\n` +
@@ -1328,6 +1364,7 @@
         `created: ${t.created_at || "—"}  started: ${t.started_at || "—"}  ended: ${t.ended_at || "—"}\n` +
         (t.error ? `error: ${t.error}\n` : "") +
         (t.exit_code != null ? `exit: ${t.exit_code}` : "");
+      if (lastLiveStatus && lastLiveStatus.id === t.id) applyLiveStatus(lastLiveStatus);
       $("hdr-dot").className = "dot " + statusDotClass(t.status);
       $("hdr-status").textContent = `${t.name} · ${t.status}`;
     }
@@ -1381,6 +1418,7 @@
     function connectTaskLogs(taskId) {
       disconnectLogs();
       clearLog();
+      lastLiveStatus = null;
       eventSource = new EventSource(`/api/tasks/${taskId}/logs`);
       eventSource.addEventListener("log", (ev) => {
         try { pushLine(JSON.parse(ev.data).line); } catch (_) {}
@@ -1391,8 +1429,11 @@
       eventSource.addEventListener("status", async (ev) => {
         try {
           const s = JSON.parse(ev.data);
-          if (selectedId === taskId) {
+          if (selectedId !== taskId) return;
+          applyLiveStatus(s);
+          if (s.status && s.status !== "running") {
             await selectTask(taskId, { keepForm: true, silent: true });
+            applyLiveStatus(s);
           }
           refreshTasks();
         } catch (_) {}
