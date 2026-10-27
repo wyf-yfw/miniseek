@@ -128,7 +128,10 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         hp.setdefault("plot_every", 1)
 
     module = "algo.train_sft" if mode == "sft" else "algo.train_pretrain"
-    data_path = str(_hp(hp, "data_path", PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl"))
+    _default_data = PROJECT_ROOT / "data" / (
+        "sft_miniseek_v1.jsonl" if mode == "sft" else "pretrain_mix_5g.jsonl"
+    )
+    data_path = str(_hp(hp, "data_path", _default_data))
     out_dir = str(task["out_dir"])
 
     cmd = [
