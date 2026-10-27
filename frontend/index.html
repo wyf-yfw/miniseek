@@ -1475,10 +1475,18 @@
       if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return [min];
       const raw = (max - min) / Math.max(1, count);
       const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-      const norm = raw / mag;
-      const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+      // 在 1/2/2.5/5/10 × 10^n 里挑最接近目标刻度数的档位
+      let step = null, bestDiff = Infinity;
+      for (const mult of [1, 2, 2.5, 5, 10]) {
+        const cand = mult * mag;
+        const n = Math.floor((max - min) / cand) + 1;
+        if (n < 2) continue;
+        const diff = Math.abs(n - count);
+        if (diff < bestDiff) { bestDiff = diff; step = cand; }
+      }
+      if (step == null) step = mag;
       const ticks = [];
-      for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) {
+      for (let v = Math.ceil(min / step - 1e-9) * step; v <= max + step * 1e-9; v += step) {
         ticks.push(Number(v.toPrecision(12)));
       }
       return ticks;
