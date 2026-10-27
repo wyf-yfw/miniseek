@@ -241,6 +241,38 @@
       border-color: var(--ink);
     }
     .mode-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    .param-group {
+      margin: 12px 0 0;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fafbfc;
+    }
+    .param-group > .group-title {
+      font-weight: 600;
+      font-size: 13px;
+      margin: 0 0 2px;
+    }
+    .param-group > .group-desc {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 8px;
+      line-height: 1.45;
+    }
+    .param-group[hidden] { display: none !important; }
+    .param-group.mode-pretrain {
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+    .param-group.mode-sft {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+    .param-group.mode-moe {
+      border-color: #fcd34d;
+      background: #fffbeb;
+    }
+    .param-group .grid { margin-top: 0; }
     details { margin-top: 8px; }
     summary { cursor: pointer; color: var(--muted); }
     .actions, .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
@@ -694,54 +726,92 @@
                 <button type="button" id="arch-moe" data-arch="moe">MoE</button>
                 <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
               </div>
-              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：MiniSeek-M0.1（1+32 top-2，pretrain/SFT 均可）；Tiny：d=64 L=2 冒烟档。</p>
+              <p id="mode-hint" class="mode-hint">Pretrain：从零/续训语言模型；数据为每行 text 的 jsonl。</p>
+              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：MiniSeek-M0.1（1+32 top-2）；Tiny：d=64 L=2 冒烟档。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
-              <label><span class="field-title">数据路径</span><span class="field-hint">训练用 jsonl 文件路径（每行一条文本样本）。</span><div class="path-row"><input id="data-path" type="text" /><button type="button" class="btn-browse" data-for="data-path">浏览</button></div></label>
-              <div class="grid">
-                <label><span class="field-title">Batch</span><span class="field-hint">每次更新用多少条样本；越大越稳但更吃显存/内存。</span><input id="batch-size" type="number" min="1" /></label>
-                <label><span class="field-title">Max Seq Len</span><span class="field-hint">单条样本截断/填充的最大 token 长度。</span><input id="max-seq-len" type="number" min="8" /></label>
-                <label><span class="field-title">LR</span><span class="field-hint">学习率峰值（warmup 结束后的最高 lr）。</span><input id="lr" type="number" step="any" /></label>
-                <label><span class="field-title">Min LR</span><span class="field-hint">余弦衰减后的学习率下限。</span><input id="min-lr" type="number" step="any" /></label>
-                <label><span class="field-title">Warmup</span><span class="field-hint">前多少步线性升温到峰值 LR；0 表示不升温。</span><input id="warmup-steps" type="number" min="0" /></label>
-                <label><span class="field-title">Epochs</span><span class="field-hint">完整扫过数据集的轮数。</span><input id="epochs" type="number" min="1" /></label>
-                <label><span class="field-title">Max Steps</span><span class="field-hint">最多训练多少步；0 或空表示不按步数截断，只跑完 epochs。</span><input id="max-steps" type="number" min="0" /></label>
-                <label><span class="field-title">Log Every</span><span class="field-hint">每隔多少步往日志打印一次 loss 等指标。</span><input id="log-every" type="number" min="1" /></label>
-                <label><span class="field-title">Plot Every</span><span class="field-hint">每隔多少步给 Loss 曲线记一个点。</span><input id="plot-every" type="number" min="1" /></label>
-                <label><span class="field-title">Grad Clip</span><span class="field-hint">梯度裁剪阈值，抑制爆炸；常见 1.0。</span><input id="grad-clip" type="number" step="any" /></label>
-                <label><span class="field-title">Batch Mode</span><span class="field-hint">组批：pack=拼接文档（默认最快）；bucket=长度分桶；random=随机 pad。仅 Pretrain。</span>
-                  <select id="batch-mode">
-                    <option value="pack">pack（默认）</option>
-                    <option value="bucket">bucket</option>
-                    <option value="random">random</option>
-                  </select>
-                </label>
-                <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；MoE 可能 graph-break，bench 约 +4%。</span>
-                  <select id="compile">
-                    <option value="true">开（默认）</option>
-                    <option value="false">关</option>
-                  </select>
-                </label>
-                <label><span class="field-title">Fused AdamW</span><span class="field-hint">CUDA 融合 AdamW；小模型收益约 +4%。</span>
-                  <select id="fused-adamw">
-                    <option value="true">开（默认）</option>
-                    <option value="false">关</option>
-                  </select>
-                </label>
+
+              <div class="param-group" id="group-data">
+                <div class="group-title">数据</div>
+                <p class="group-desc" id="data-group-desc">训练 / 验证 jsonl。路径与 Resume / Init Ckpt 均由你填写。</p>
+                <label><span class="field-title">数据路径</span><span class="field-hint" id="data-path-hint">Pretrain：每行 {"text": "..."}；可含尾部 &lt;|im_end|&gt;。</span><div class="path-row"><input id="data-path" type="text" /><button type="button" class="btn-browse" data-for="data-path">浏览</button></div></label>
+                <label><span class="field-title">Valid 路径</span><span class="field-hint">验证集 jsonl（每行 text）；空或 Valid Every=0 则只画 train。</span><div class="path-row"><input id="valid-path" type="text" /><button type="button" class="btn-browse" data-for="valid-path">浏览</button></div></label>
+                <div class="grid">
+                  <label><span class="field-title">Valid Every</span><span class="field-hint">每隔多少 step 跑一次验证；0=关闭。</span><input id="valid-every" type="number" min="0" /></label>
+                  <label><span class="field-title">Valid Max Samples</span><span class="field-hint">每次验证最多用多少条样本。</span><input id="valid-max-samples" type="number" min="1" /></label>
+                </div>
               </div>
-              <label><span class="field-title">Valid 路径</span><span class="field-hint">验证集 jsonl（每行 text）；空或 Valid Every=0 则只画 train。</span><div class="path-row"><input id="valid-path" type="text" /><button type="button" class="btn-browse" data-for="valid-path">浏览</button></div></label>
-              <div class="grid">
-                <label><span class="field-title">Valid Every</span><span class="field-hint">每隔多少 step 跑一次验证；0=关闭。</span><input id="valid-every" type="number" min="0" /></label>
-                <label><span class="field-title">Valid Max Samples</span><span class="field-hint">每次验证最多用多少条样本。</span><input id="valid-max-samples" type="number" min="1" /></label>
+
+              <div class="param-group mode-sft" id="group-sft-only">
+                <div class="group-title">SFT 专属</div>
+                <p class="group-desc">只对 SFT 生效。Init Ckpt = 从预训练权重初始化（不含优化器）；与 Resume 二选一优先 Resume。</p>
+                <label><span class="field-title">Init Ckpt</span><span class="field-hint">预训练 base 权重 .pt（Dense/MoE 须与上方架构一致）。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
               </div>
+
+              <div class="param-group mode-pretrain" id="group-pretrain-only">
+                <div class="group-title">Pretrain 专属</div>
+                <p class="group-desc">只对 Pretrain 生效；SFT 脚本没有这些参数，切到 SFT 后本区会隐藏。</p>
+                <div class="grid">
+                  <label><span class="field-title">Batch Mode</span><span class="field-hint">组批：pack=拼接文档（默认最快）；bucket=长度分桶；random=随机 pad。</span>
+                    <select id="batch-mode">
+                      <option value="pack">pack（默认）</option>
+                      <option value="bucket">bucket</option>
+                      <option value="random">random</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div class="param-group" id="group-train">
+                <div class="group-title">训练超参</div>
+                <p class="group-desc">Pretrain / SFT 共用，但默认值不同（SFT 通常更小 batch、更短 warmup）。</p>
+                <div class="grid">
+                  <label><span class="field-title">Batch</span><span class="field-hint">每次更新用多少条样本；越大越稳但更吃显存/内存。</span><input id="batch-size" type="number" min="1" /></label>
+                  <label><span class="field-title">Max Seq Len</span><span class="field-hint">单条样本截断/填充的最大 token 长度。</span><input id="max-seq-len" type="number" min="8" /></label>
+                  <label><span class="field-title">LR</span><span class="field-hint">学习率峰值（warmup 结束后的最高 lr）。</span><input id="lr" type="number" step="any" /></label>
+                  <label><span class="field-title">Min LR</span><span class="field-hint">余弦衰减后的学习率下限。</span><input id="min-lr" type="number" step="any" /></label>
+                  <label><span class="field-title">Warmup</span><span class="field-hint">前多少步线性升温到峰值 LR；0 表示不升温。</span><input id="warmup-steps" type="number" min="0" /></label>
+                  <label><span class="field-title">Epochs</span><span class="field-hint">完整扫过数据集的轮数。</span><input id="epochs" type="number" min="1" /></label>
+                  <label><span class="field-title">Max Steps</span><span class="field-hint">最多训练多少步；0 或空表示不按步数截断，只跑完 epochs。</span><input id="max-steps" type="number" min="0" /></label>
+                  <label><span class="field-title">Log Every</span><span class="field-hint">每隔多少步往日志打印一次 loss 等指标。</span><input id="log-every" type="number" min="1" /></label>
+                  <label><span class="field-title">Plot Every</span><span class="field-hint">每隔多少步给 Loss 曲线记一个点。</span><input id="plot-every" type="number" min="1" /></label>
+                  <label><span class="field-title">Grad Clip</span><span class="field-hint">梯度裁剪阈值，抑制爆炸；常见 1.0。</span><input id="grad-clip" type="number" step="any" /></label>
+                </div>
+              </div>
+
+              <div class="param-group mode-moe" id="group-moe-only" hidden>
+                <div class="group-title">MoE 专属</div>
+                <p class="group-desc">仅 arch=MoE 时写入 train_* --aux-coef；Dense/Tiny 隐藏。</p>
+                <div class="grid">
+                  <label><span class="field-title">Aux Coef</span><span class="field-hint">负载均衡辅助损失系数（默认约 0.01）。</span><input id="aux-coef" type="number" step="any" /></label>
+                </div>
+              </div>
+
+              <div class="param-group" id="group-ckpt">
+                <div class="group-title">断点 / 速度</div>
+                <p class="group-desc">Resume 含优化器；与 SFT 的 Init Ckpt 不同。Compile / Fused 对两种模式都可用。</p>
+                <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态）。数据会重新打乱；步数预算从起点累加。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
+                <div class="grid">
+                  <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；MoE 可能 graph-break。</span>
+                    <select id="compile">
+                      <option value="true">开（默认）</option>
+                      <option value="false">关</option>
+                    </select>
+                  </label>
+                  <label><span class="field-title">Fused AdamW</span><span class="field-hint">CUDA 融合 AdamW。</span>
+                    <select id="fused-adamw">
+                      <option value="true">开（默认）</option>
+                      <option value="false">关</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
               <details>
-                <summary>更多</summary>
+                <summary>更多（存盘策略）</summary>
                 <div class="grid">
                   <label><span class="field-title">Loss Thresholds</span><span class="field-hint">默认空=只存 best.pt 与 last.pt；填逗号降序阈值才写 loss-*.pt 里程碑（很占磁盘，慎用）。</span><input id="save-loss-thresholds" type="text" placeholder="空=仅 best/last" /></label>
                   <label><span class="field-title">Stable Steps</span><span class="field-hint">某个阈值需连续多少步 loss≤阈值才写入对应 checkpoint。</span><input id="stable-steps" type="number" min="1" /></label>
                   <label><span class="field-title">Save Every</span><span class="field-hint">每 N 步额外存 step-N.pt；默认 0=关闭（推荐，避免占满磁盘）。</span><input id="save-every" type="number" min="0" /></label>
-                  <label><span class="field-title">Aux Coef</span><span class="field-hint">MoE 负载均衡辅助损失系数；Dense/Tiny 可忽略。</span><input id="aux-coef" type="number" step="any" /></label>
-                  <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态）。数据会重新打乱、不接着上次的位置；步数预算从起点累加。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
-                  <label><span class="field-title">Init Ckpt (SFT)</span><span class="field-hint">SFT 时从该预训练权重初始化（非断点续训）。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
                 </div>
               </details>
               <div class="actions">
@@ -1343,6 +1413,35 @@
       $("btn-save").disabled = false;
     }
 
+    function syncParamVisibility() {
+      const isSft = trainMode === "sft";
+      const isMoe = trainArch === "moe";
+      const gSft = $("group-sft-only");
+      const gPt = $("group-pretrain-only");
+      const gMoe = $("group-moe-only");
+      if (gSft) gSft.hidden = !isSft;
+      if (gPt) gPt.hidden = isSft;
+      if (gMoe) gMoe.hidden = !isMoe;
+      const modeHint = $("mode-hint");
+      if (modeHint) {
+        modeHint.textContent = isSft
+          ? "SFT：对话监督微调；数据为 conversations/messages jsonl。下方只显示 SFT 需要的字段（含 Init Ckpt）。"
+          : "Pretrain：语言模型预训练；数据为每行 text 的 jsonl。下方只显示 Pretrain 需要的字段（含 Batch Mode）。";
+      }
+      const dataHint = $("data-path-hint");
+      if (dataHint) {
+        dataHint.textContent = isSft
+          ? 'SFT：每行 {"conversations":[{"role","content"},...]}（或 messages）。'
+          : 'Pretrain：每行 {"text": "..."}；可含尾部 <|im_end|>。';
+      }
+      const dataDesc = $("data-group-desc");
+      if (dataDesc) {
+        dataDesc.textContent = isSft
+          ? "SFT 训练/验证路径自己填。Init Ckpt 在「SFT 专属」区；Resume 在「断点 / 速度」。"
+          : "Pretrain 训练/验证路径自己填。Batch Mode 在「Pretrain 专属」；Resume 在「断点 / 速度」。";
+      }
+    }
+
     function applyArchUI(arch) {
       trainArch = arch;
       $("arch-dense").classList.toggle("active", arch === "dense");
@@ -1350,8 +1449,9 @@
       $("arch-tiny").classList.toggle("active", arch === "tiny");
       $("arch-hint").textContent =
         arch === "tiny" ? "Tiny：DenseLM d=64 L=2，CPU 冒烟。"
-        : arch === "moe" ? "MoE：MiniSeek-M0.1（1 shared + 32 routed，top-2，可训）。"
+        : arch === "moe" ? "MoE：MiniSeek-M0.1（1 shared + 32 routed，top-2；Pretrain/SFT 均可）。"
         : "Dense：MiniSeek-D DenseLM。";
+      syncParamVisibility();
     }
 
     function applyModeUI(mode) {
@@ -1362,6 +1462,67 @@
       if (currentTask && currentTask.status !== "draft") {
         $("arch-moe").disabled = true;
       }
+      syncParamVisibility();
+    }
+
+    /** Arch presets may overwrite numeric/speed knobs; never clobber mode paths. */
+    const ARCH_PRESET_KEYS = [
+      "batch_size", "max_seq_len", "lr", "min_lr", "warmup_steps", "epochs",
+      "max_steps", "grad_clip", "log_every", "plot_every", "stable_steps",
+      "save_every", "save_loss_thresholds", "batch_mode", "compile",
+      "fused_adamw", "valid_every", "valid_max_samples", "aux_coef",
+    ];
+
+    function modeDefaults(mode, arch) {
+      const archBase = Object.assign({}, defaultsMap[arch] || defaultsMap.dense || {});
+      if (mode === "sft") {
+        const sft = defaultsMap.sft || {};
+        return Object.assign({}, archBase, sft, {
+          mode: "sft",
+          arch: arch,
+          // SFT-friendly overlays when API sft block omits them
+          batch_size: sft.batch_size != null ? sft.batch_size : (arch === "tiny" ? 4 : 4),
+          warmup_steps: sft.warmup_steps != null ? sft.warmup_steps : 100,
+          stable_steps: sft.stable_steps != null ? sft.stable_steps : 200,
+          data_path: sft.data_path || archBase.data_path,
+          init_ckpt: sft.init_ckpt || "",
+        });
+      }
+      const pt = defaultsMap.pretrain || {};
+      return Object.assign({}, archBase, {
+        mode: "pretrain",
+        arch: arch,
+        data_path: archBase.data_path || pt.data_path,
+        init_ckpt: "",
+        warmup_steps: archBase.warmup_steps != null ? archBase.warmup_steps : (pt.warmup_steps || 200),
+        stable_steps: archBase.stable_steps != null ? archBase.stable_steps : (pt.stable_steps || 50),
+      });
+    }
+
+    function applyArchPresetsKeepingPaths(arch) {
+      const base = defaultsMap[arch] || {};
+      const cur = collectHparams();
+      const next = Object.assign({}, cur);
+      for (const k of ARCH_PRESET_KEYS) {
+        if (base[k] !== undefined && base[k] !== null) next[k] = base[k];
+      }
+      // Keep user/mode paths: data / valid / resume / init_ckpt
+      next.data_path = cur.data_path;
+      next.valid_path = cur.valid_path;
+      next.resume = cur.resume;
+      next.init_ckpt = cur.init_ckpt;
+      // If SFT and paths empty, fall back to SFT defaults (not pretrain mix)
+      if (trainMode === "sft") {
+        const sft = defaultsMap.sft || {};
+        if (!next.data_path) next.data_path = sft.data_path || "";
+        if (!next.init_ckpt && sft.init_ckpt) next.init_ckpt = sft.init_ckpt;
+        // Don't inherit pretrain-sized batch from arch if still on default pretrain batch
+        if (arch !== "tiny" && (cur.batch_size === 32 || cur.batch_size == null)) {
+          next.batch_size = 4;
+        }
+      }
+      next.aux_coef = base.aux_coef != null ? base.aux_coef : (cur.aux_coef || 0.01);
+      fillHparams(next);
     }
 
     function fillHparams(hp) {
@@ -1865,15 +2026,14 @@
 
     function renderFrozenConfig(t) {
       const hp = t.hparams || {};
+      const mode = t.mode || "pretrain";
+      const arch = t.arch || "-";
       const rows = [
         ["状态", t.status || "-"],
-        ["架构", t.arch || "-"],
-        ["模式", t.mode || "-"],
+        ["架构", arch],
+        ["模式", mode],
         ["数据", hp.data_path || "-"],
         ["batch", hp.batch_size],
-        ["batch_mode", hp.batch_mode],
-        ["compile", hp.compile],
-        ["fused_adamw", hp.fused_adamw],
         ["max_seq_len", hp.max_seq_len],
         ["lr", hp.lr],
         ["min_lr", hp.min_lr],
@@ -1883,8 +2043,19 @@
         ["plot_every", hp.plot_every],
         ["valid_path", hp.valid_path],
         ["valid_every", hp.valid_every],
+        ["compile", hp.compile],
+        ["fused_adamw", hp.fused_adamw],
+        ["resume", hp.resume || ""],
         ["out_dir", t.out_dir || "-"],
       ];
+      if (mode === "pretrain") {
+        rows.splice(5, 0, ["batch_mode", hp.batch_mode || "pack"]);
+      } else {
+        rows.splice(4, 0, ["init_ckpt", hp.init_ckpt || ""]);
+      }
+      if (arch === "moe") {
+        rows.push(["aux_coef", hp.aux_coef]);
+      }
       const dl = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v == null || v === "" ? "-" : v}</dd>`).join("");
       $("frozen-config").innerHTML = `<dl>${dl}</dl>`;
     }
@@ -1913,7 +2084,7 @@
     function openNewTaskForm(opts = {}) {
       const arch = opts.arch || trainArch || "tiny";
       const mode = opts.mode || "pretrain";
-      const base = (defaultsMap[arch] || defaultsMap.tiny || {});
+      const base = modeDefaults(mode, arch);
       selectedId = null;
       currentTask = null;
       unsavedNew = true;
@@ -2054,21 +2225,20 @@
         if (currentTask && currentTask.status !== "draft") return;
         const arch = $(id).dataset.arch;
         applyArchUI(arch);
-        const base = defaultsMap[arch] || {};
-        fillHparams({ ...(currentTask && currentTask.hparams) || {}, ...base, ...collectHparams(), ...base });
+        applyArchPresetsKeepingPaths(arch);
         formDirty = true;
       });
     });
     $("mode-pretrain").addEventListener("click", () => {
       if (currentTask && currentTask.status !== "draft") return;
       applyModeUI("pretrain");
+      fillHparams(modeDefaults("pretrain", trainArch));
       formDirty = true;
     });
     $("mode-sft").addEventListener("click", () => {
       if (currentTask && currentTask.status !== "draft") return;
       applyModeUI("sft");
-      const base = defaultsMap.sft || {};
-      fillHparams({ ...collectHparams(), ...base });
+      fillHparams(modeDefaults("sft", trainArch));
       formDirty = true;
     });
 
