@@ -41,6 +41,7 @@ from web.bench_runner import (
     read_log as bench_read_log,
 )
 from web.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
+from web import worker_client as wc
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 WEB_DIR = PROJECT_ROOT / "web"
@@ -638,6 +639,11 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+
+def _worker_request(method: str, path: str, **kwargs):
+    return wc.forward(method, path, **kwargs)
+
+
 def _get_task_or_404(task_id: str) -> dict:
     try:
         return ts.load_task(task_id)
@@ -1036,18 +1042,22 @@ def api_delete_task(task_id: str) -> dict:
 @app.post("/api/tasks/{task_id}/start")
 def api_start_task(task_id: str) -> dict:
     _get_task_or_404(task_id)
-    try:
-        return start_task(task_id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (ValueError, FileNotFoundError, NotImplementedError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if wc.use_monolith():
+        try:
+            return start_task(task_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ValueError, FileNotFoundError, NotImplementedError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _worker_request("POST", f"/v1/tasks/{task_id}/start")
 
 
 @app.post("/api/tasks/{task_id}/stop")
 def api_stop_task(task_id: str) -> dict:
     _get_task_or_404(task_id)
-    return stop_task(task_id)
+    if wc.use_monolith():
+        return stop_task(task_id)
+    return _worker_request("POST", f"/v1/tasks/{task_id}/stop")
 
 
 @app.get("/api/tasks/{task_id}/metrics")
@@ -1297,21 +1307,27 @@ def api_bench_delete_task(run_id: str) -> dict:
 @app.post("/api/bench/tasks/{run_id}/start")
 def api_bench_start_task(run_id: str) -> dict:
     _get_bench_or_404(run_id)
-    try:
-        run = bench_start_run(run_id, training_busy=_any_training_running())
+    body = {"training_busy": _any_training_running()}
+    if wc.use_monolith():
+        try:
+            run = bench_start_run(run_id, training_busy=body["training_busy"])
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, NotImplementedError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _bench_with_progress(run)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    run = _worker_request("POST", f"/v1/bench/{run_id}/start", json=body)
+    return _bench_with_progress(run)
 
 
 @app.post("/api/bench/tasks/{run_id}/stop")
 def api_bench_stop_task(run_id: str) -> dict:
     _get_bench_or_404(run_id)
-    return _bench_with_progress(bench_stop_run(run_id))
+    if wc.use_monolith():
+        return _bench_with_progress(bench_stop_run(run_id))
+    return _bench_with_progress(_worker_request("POST", f"/v1/bench/{run_id}/stop"))
 
 
 @app.get("/api/bench/tasks/{run_id}/logs")

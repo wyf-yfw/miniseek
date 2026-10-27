@@ -10,6 +10,7 @@ from web import tasks_store as ts
 def client(tmp_path, monkeypatch):
     root = tmp_path / "tasks"
     monkeypatch.setattr(ts, "TASKS_ROOT", root)
+    monkeypatch.setenv("MINISEEK_MONOLITH", "1")
     from web_ui import app
     return TestClient(app)
 
