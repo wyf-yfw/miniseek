@@ -7,9 +7,12 @@
 
 把仓库按 **frontend / api / algo** 分门别类，便于浏览与部署对齐；不引入 monorepo 多包，不留旧入口兼容壳。
 
+## 范围补充（对话追加）
+
+- **删除**根目录 `checkpoints/`（Web Task 权重只在 `tasks/<id>/`；旧实验目录不再保留）
+
 ## 非目标
 
-- 不删 `checkpoints/` 旧权重（仍在根，训练继续写 best/last）
 - 不搬 `data/`、`tasks/`、`tokenizer/`、`deploy/`
 - 不做完整 `packages/*` monorepo
 - 不单独给 Windows 留 monolith 结构（同一仓库布局）
@@ -40,7 +43,6 @@ miniseek/
     eval/             # 现 eval/
     __init__.py
   data/
-  checkpoints/
   tasks/
   tokenizer/
   deploy/
@@ -62,7 +64,8 @@ miniseek/
 | `frontend/` | `web/index.html`、`web/frontend_server.py` |
 | `api/` | `web_ui.py`→`api/app.py`；`web/` 其余（除前端两文件） |
 | `algo/` | `model/`、`train_pretrain.py`、`train_sft.py`、`generate.py`、`eval/` |
-| 根不动 | `data/`、`checkpoints/`、`tasks/`、`tokenizer/`、`deploy/`、`tests/`、`docs/`、`scripts/`、`release/` |
+| 根不动 | `data/`、`tasks/`、`tokenizer/`、`deploy/`、`tests/`、`docs/`、`scripts/`、`release/` |
+| 删除 | 根目录 `checkpoints/`（整目录） |
 
 ## 入口与 systemd
 
@@ -74,7 +77,7 @@ WorkingDirectory 仍为仓库根 `/home/wyf/miniseek`。
 | api :8000 | `python3 -m uvicorn api.app:app --host 127.0.0.1 --port 8000` |
 | worker :8001 | `python3 -m uvicorn api.worker_app:app --host 127.0.0.1 --port 8001` |
 
-训练 CLI：`python -m algo.train_pretrain` / `python -m algo.train_sft`（相对根路径的 `data/`、`checkpoints/` 不变）。
+训练 CLI：`python -m algo.train_pretrain` / `python -m algo.train_sft`（相对根路径的 `data/` 不变；Web Task 输出在 `tasks/<id>/`）。
 
 不保留 `web_ui:app`、`web.*` 兼容壳；文档与 `deploy/*.service` 同步改。
 
