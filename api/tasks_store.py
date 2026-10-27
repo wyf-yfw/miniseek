@@ -84,7 +84,7 @@ def create_task(*, name: str, arch: str, mode: str, hparams: Dict[str, Any], uni
         "error": None,
     }
     _write_json(d / "task.json", data)
-    _write_json(d / "metrics.json", {"loss": [], "expert_load": None})
+    _write_json(d / "metrics.json", {"loss": [], "valid_loss": [], "expert_load": None})
     (d / "train.log").write_text("", encoding="utf-8")
     return data
 
@@ -137,7 +137,7 @@ def write_metrics(task_id: str, metrics: Dict[str, Any]) -> None:
 def read_metrics(task_id: str) -> Dict[str, Any]:
     path = task_dir(task_id) / "metrics.json"
     if not path.exists():
-        return {"loss": [], "expert_load": None}
+        return {"loss": [], "valid_loss": [], "expert_load": None}
     return _read_json(path)
 
 

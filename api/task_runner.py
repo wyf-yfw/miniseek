@@ -23,6 +23,10 @@ STEP_RE = re.compile(
     r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
 )
 RESUME_RE = re.compile(r"resumed from .* step=(\d+)")
+VALID_RE = re.compile(
+    r"valid\s+step=(\d+)\s+loss=([0-9.eE+-]+)\s+ppl=([0-9.eE+-]+)"
+    r"(?:\s+tokens=(\d+))?"
+)
 
 # In-memory tail tokens so a new start cancels an old tailer for same process manager.
 _tail_lock = threading.Lock()
@@ -179,6 +183,21 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     else:
         if resume and Path(resume).exists():
             cmd.extend(["--resume", resume])
+
+    valid_path = str(_hp(hp, "valid_path", PROJECT_ROOT / "data" / "valid_mix.jsonl") or "").strip()
+    valid_every = int(_hp(hp, "valid_every", 20 if arch == "tiny" else 500))
+    valid_max_samples = int(_hp(hp, "valid_max_samples", 512))
+    if valid_path and valid_every > 0:
+        cmd.extend(
+            [
+                "--valid",
+                valid_path,
+                "--valid-every",
+                str(valid_every),
+                "--valid-max-samples",
+                str(valid_max_samples),
+            ]
+        )
     return cmd
 
 
@@ -267,6 +286,24 @@ def _parse_and_append_metrics(task_id: str, line: str, plot_every: int, state: D
     resumed = RESUME_RE.search(line)
     if resumed:
         state["loss_bucket"] = int(resumed.group(1)) // max(1, plot_every)
+    vm = VALID_RE.search(line)
+    if vm:
+        step = int(vm.group(1))
+        metrics = ts.read_metrics(task_id)
+        points = list(metrics.get("valid_loss") or [])
+        point = {
+            "step": step,
+            "loss": float(vm.group(2)),
+            "ppl": float(vm.group(3)),
+        }
+        if vm.group(4) is not None:
+            point["tokens"] = int(vm.group(4))
+        points.append(point)
+        if len(points) > 5000:
+            points = points[-5000:]
+        metrics["valid_loss"] = points
+        ts.write_metrics(task_id, metrics)
+        return
     matched = STEP_RE.search(line)
     if not matched:
         return
@@ -365,7 +402,7 @@ def start_task(task_id: str) -> Dict[str, Any]:
     cmd = build_train_cmd(task)
     log_path = ts.task_dir(task_id) / "train.log"
     # Reset metrics for a fresh run
-    ts.write_metrics(task_id, {"loss": [], "expert_load": None})
+    ts.write_metrics(task_id, {"loss": [], "valid_loss": [], "expert_load": None})
 
     proc = _spawn_training(cmd, log_path)
     now = datetime.now().isoformat(timespec="seconds")
