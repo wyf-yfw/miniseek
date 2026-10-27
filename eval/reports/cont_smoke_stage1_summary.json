@@ -1,0 +1,19 @@
+{
+  "moe": {
+    "ckpt": "checkpoints/stage1/last.pt",
+    "avg_cjk_ratio": 0.873,
+    "avg_rep3": 0.118,
+    "eos_count": 1,
+    "n": 12
+  },
+  "dense_spot": {
+    "ckpt": "checkpoints/stage0/last.pt",
+    "avg_cjk_ratio": 0.883,
+    "avg_rep3": 0.091,
+    "eos_count": 2,
+    "n": 12
+  },
+  "recommendation": "c_resume_with_better_zh_data",
+  "report_md": "eval/reports/cont_smoke_stage1_last.md",
+  "moe_jsonl": "eval/reports/cont_smoke_stage1_last.jsonl"
+}

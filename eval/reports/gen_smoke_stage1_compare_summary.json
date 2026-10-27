@@ -1,0 +1,32 @@
+{
+  "best": {
+    "meta": {
+      "step": 16157,
+      "loss": 2.0568292140960693,
+      "arch": "moe",
+      "use_moe": true,
+      "mtime": 1792911503.0650675,
+      "seconds": 13.22,
+      "out": "eval/reports/gen_smoke_stage1_best.jsonl"
+    },
+    "eos_count": 3,
+    "avg_new_tokens": 46.1,
+    "avg_rep3": 0.04,
+    "high_rep_ids": []
+  },
+  "last": {
+    "meta": {
+      "step": 79390,
+      "loss": 2.0733752250671387,
+      "arch": "moe",
+      "use_moe": true,
+      "mtime": 1792923241.7223127,
+      "seconds": 13.14,
+      "out": "eval/reports/gen_smoke_stage1_last.jsonl"
+    },
+    "eos_count": 3,
+    "avg_new_tokens": 46.5,
+    "avg_rep3": 0.036,
+    "high_rep_ids": []
+  }
+}

@@ -57,3 +57,13 @@ web_ui.err.log
 _fix_*.py
 _api_smoke_*.py
 123.py
+
+# --- local data / junk (mix pipeline) ---
+.venv_data/
+logs/
+*.bak
+data/hf_upload_MiniSeek-dataset/
+data/hf_upload_MiniSeek-dataset_real/
+data/raw/
+eval/reports/cont_smoke_*.jsonl
+eval/reports/*.log
