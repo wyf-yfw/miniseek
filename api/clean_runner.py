@@ -133,7 +133,7 @@ def start_job(job_id: str) -> Dict[str, Any]:
     except mod.DiskSpaceError as exc:
         raise ValueError(str(exc)) from exc
 
-    for name in ("clean.jsonl", "dropped.jsonl", "report.json"):
+    for name in ("clean.jsonl", "dropped.jsonl", "report.json", "progress.json"):
         p = out_dir / name
         if p.is_file():
             try:
@@ -229,6 +229,109 @@ def stop_job(job_id: str) -> Dict[str, Any]:
         job["status"] = "stopped"
     cs.save_job(job)
     return job
+
+
+
+def _parse_progress_from_log(job_id: str) -> Optional[Dict[str, Any]]:
+    """Best-effort: last `progress rows=N kept=K dropped=D` line from clean.log."""
+    import re
+
+    text = read_log(job_id, tail=80)
+    if not text:
+        return None
+    pat = re.compile(r"progress rows=(\d+)\s+kept=(\d+)\s+dropped=(\d+)")
+    last = None
+    for line in text.splitlines():
+        m = pat.search(line)
+        if m:
+            last = {
+                "input_rows": int(m.group(1)),
+                "kept": int(m.group(2)),
+                "dropped": int(m.group(3)),
+            }
+    return last
+
+
+def job_progress(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return progress dict for UI. Prefer progress.json; else log + file-size estimate."""
+    jid = job["id"]
+    prog = cs.read_progress(jid)
+    if prog and isinstance(prog, dict):
+        out = dict(prog)
+        out.setdefault("source", "progress.json")
+        return out
+
+    # Best-effort for jobs started before progress.json existed
+    parsed = _parse_progress_from_log(jid)
+    if not parsed and job.get("status") != "running":
+        return None
+
+    input_path = (job.get("input_path") or "").strip()
+    total_bytes = 0
+    disk = job.get("disk_preflight") or {}
+    if disk.get("input_bytes"):
+        total_bytes = int(disk["input_bytes"])
+    elif input_path:
+        try:
+            total_bytes = int(Path(input_path).stat().st_size)
+        except OSError:
+            total_bytes = 0
+
+    clean_path = cs.job_dir(jid) / "clean.jsonl"
+    clean_bytes = 0
+    if clean_path.is_file():
+        try:
+            clean_bytes = int(clean_path.stat().st_size)
+        except OSError:
+            clean_bytes = 0
+
+    kept = (parsed or {}).get("kept")
+    dropped = (parsed or {}).get("dropped")
+    input_rows = (parsed or {}).get("input_rows")
+    pct = None
+    eta_sec = None
+    # Estimate pct from output size vs expected kept fraction of input
+    if total_bytes > 0 and kept is not None and dropped is not None:
+        ratio = kept / max(1, kept + dropped)
+        expected = max(1.0, total_bytes * max(0.05, min(1.0, ratio)))
+        pct = round(min(99.5, 100.0 * clean_bytes / expected), 2) if clean_bytes else 0.0
+    elif total_bytes > 0 and clean_bytes > 0:
+        pct = round(min(99.5, 100.0 * clean_bytes / total_bytes), 2)
+
+    started = job.get("started_at")
+    elapsed_sec = None
+    if started:
+        try:
+            from datetime import datetime as _dt
+            t0 = _dt.fromisoformat(started)
+            elapsed_sec = round((_dt.now() - t0).total_seconds(), 1)
+            if pct is not None and 0 < pct < 100 and elapsed_sec and elapsed_sec > 0:
+                eta_sec = round(elapsed_sec * (100.0 - pct) / pct, 1)
+        except Exception:  # noqa: BLE001
+            pass
+
+    rate_rows_s = None
+    if input_rows and elapsed_sec and elapsed_sec > 0:
+        rate_rows_s = round(input_rows / elapsed_sec, 1)
+
+    if parsed is None and clean_bytes <= 0 and job.get("status") != "running":
+        return None
+
+    return {
+        "engine": job.get("engine") or "builtin",
+        "phase": "streaming" if job.get("status") == "running" else (job.get("status") or "unknown"),
+        "bytes_read": None,
+        "total_bytes": total_bytes or None,
+        "clean_bytes": clean_bytes,
+        "input_rows": input_rows,
+        "kept": kept,
+        "dropped": dropped,
+        "pct": pct,
+        "elapsed_sec": elapsed_sec,
+        "rate_rows_s": rate_rows_s,
+        "eta_sec": eta_sec,
+        "source": "log+filesize",
+    }
 
 
 def read_log(job_id: str, *, tail: Optional[int] = None) -> str:

@@ -1351,6 +1351,20 @@
                 <div class="live"><span class="dot" id="clean-dot"></span><span id="clean-status-text">未开始</span></div>
               </div>
               <p id="clean-run-meta" class="field-hint"></p>
+              <div class="train-progress" id="clean-progress" hidden>
+                <div class="tp-head">
+                  <span>进度 <b id="cp-percent">—</b></span>
+                  <span>预计剩余 <b id="cp-eta">—</b></span>
+                </div>
+                <div class="tp-track"><div class="tp-fill" id="cp-fill"></div></div>
+                <div class="tp-foot">
+                  <span>行数 <b id="cp-rows">—</b></span>
+                  <span>保留 <b id="cp-kept">—</b></span>
+                  <span>丢弃 <b id="cp-dropped">—</b></span>
+                  <span>速度 <b id="cp-rate">—</b></span>
+                  <span>已用 <b id="cp-elapsed">—</b></span>
+                </div>
+              </div>
               <div id="clean-stats" class="caption" style="white-space:pre-wrap;margin:8px 0"></div>
               <div class="run-actions" style="margin:10px 0">
                 <button type="button" id="btn-clean-stop" class="danger" disabled>Stop</button>
@@ -4133,12 +4147,80 @@ $("btn-bench-edit").addEventListener("click", async () => {
       $("btn-clean-preview").disabled = !on;
     }
 
+    function fmtCleanBytes(n) {
+      n = Number(n);
+      if (!Number.isFinite(n) || n < 0) return "—";
+      const units = [["GiB", 1 << 30], ["MiB", 1 << 20], ["KiB", 1 << 10]];
+      for (const [u, d] of units) {
+        if (n >= d) return (n / d).toFixed(1) + u;
+      }
+      return Math.round(n) + "B";
+    }
+
+    function updateCleanProgress(job) {
+      const box = $("clean-progress");
+      if (!box) return;
+      const p = (job && job.progress) || null;
+      const st = (job && job.stats) || (job && job.report) || null;
+      const status = (job && job.status) || "";
+      const active = status === "running";
+      // Prefer live progress; fall back to final stats when finished
+      const src = p || (st ? {
+        pct: status === "finished" ? 100 : null,
+        input_rows: st.input_rows,
+        kept: st.kept,
+        dropped: st.dropped,
+        elapsed_sec: st.seconds,
+        eta_sec: status === "finished" ? 0 : null,
+        rate_rows_s: (st.input_rows && st.seconds) ? (st.input_rows / Math.max(0.001, st.seconds)) : null,
+      } : null);
+      if (!src || (src.input_rows == null && src.pct == null && src.kept == null && !active)) {
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      const fill = $("cp-fill");
+      const pct = src.pct != null && Number.isFinite(Number(src.pct)) ? Number(src.pct) : null;
+      if (pct == null) {
+        fill.classList.add("indeterminate");
+        fill.style.width = "";
+        $("cp-percent").textContent = "—";
+      } else {
+        fill.classList.remove("indeterminate");
+        fill.style.width = Math.max(0, Math.min(100, pct)).toFixed(2) + "%";
+        $("cp-percent").textContent = pct.toFixed(1) + "%";
+      }
+      let eta = "—";
+      if (!active && status === "finished") eta = "已结束";
+      else if (!active) eta = "—";
+      else if (pct != null && pct >= 99.5) eta = "即将结束";
+      else if (src.eta_sec != null && Number(src.eta_sec) >= 0) eta = formatElapsed(src.eta_sec);
+      $("cp-eta").textContent = eta;
+      const rows = src.input_rows;
+      $("cp-rows").textContent = rows != null ? Number(rows).toLocaleString() : "—";
+      $("cp-kept").textContent = src.kept != null ? Number(src.kept).toLocaleString() : "—";
+      $("cp-dropped").textContent = src.dropped != null ? Number(src.dropped).toLocaleString() : "—";
+      const rate = src.rate_rows_s != null ? Number(src.rate_rows_s) : null;
+      $("cp-rate").textContent = rate && rate > 0 ? rate.toFixed(0) + " 行/s" : "—";
+      $("cp-elapsed").textContent = src.elapsed_sec != null ? formatElapsed(src.elapsed_sec) : "—";
+    }
+
     function renderCleanStats(job) {
       const el = $("clean-stats");
+      updateCleanProgress(job);
       const st = (job && job.stats) || (job && job.report) || null;
-      const engine = (job && job.engine) || (st && st.engine) || "";
+      const engine = (job && job.engine) || (st && st.engine) || (job && job.progress && job.progress.engine) || "";
+      const p = job && job.progress;
       if (!st) {
-        el.textContent = engine ? `引擎 ${engine}` : "尚无统计";
+        const bits = [];
+        if (engine) bits.push(`引擎 ${engine}`);
+        if (p && p.source) bits.push(`进度来源 ${p.source}`);
+        if (p && p.bytes_read != null && p.total_bytes != null) {
+          bits.push(`已读 ${fmtCleanBytes(p.bytes_read)} / ${fmtCleanBytes(p.total_bytes)}`);
+        } else if (p && p.clean_bytes != null) {
+          bits.push(`已写出 ${fmtCleanBytes(p.clean_bytes)}`);
+        }
+        el.textContent = bits.length ? bits.join(" · ") : (job && job.status === "running" ? "清洗进行中…" : "尚无统计");
         return;
       }
       const lines = [
@@ -4168,7 +4250,9 @@ $("btn-bench-edit").addEventListener("click", async () => {
         const li = document.createElement("li");
         li.dataset.id = j.id;
         if (j.id === cleanSelectedId) li.classList.add("active");
-        li.innerHTML = `<div class="name">${j.name || j.id}</div><div class="sub"><span class="dot ${statusDotClass(j.status)}"></span> ${j.status} · ${(j.input_path || "").split("/").pop() || "—"}</div>`;
+        const pctTxt = (j.status === "running" && j.progress && j.progress.pct != null)
+          ? ` · ${Number(j.progress.pct).toFixed(0)}%` : "";
+        li.innerHTML = `<div class="name">${j.name || j.id}</div><div class="sub"><span class="dot ${statusDotClass(j.status)}"></span> ${j.status}${pctTxt} · ${(j.input_path || "").split("/").pop() || "—"}</div>`;
         li.addEventListener("click", () => selectCleanJob(j.id));
         ul.appendChild(li);
       }

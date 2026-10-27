@@ -47,6 +47,7 @@ from api.clean_runner import (
     stop_job as clean_stop_job,
     read_log as clean_read_log,
     run_preview as clean_run_preview,
+    job_progress as clean_job_progress,
 )
 from api.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
 from api import worker_client as wc
@@ -1719,7 +1720,7 @@ def api_clean_list_jobs() -> dict:
     for row in cs.list_jobs():
         if row.get("status") == "running":
             row = reconcile_clean(cs.load_job(row["id"]))
-        rows.append({
+        item = {
             "id": row["id"],
             "name": row.get("name") or row["id"],
             "status": row.get("status"),
@@ -1730,7 +1731,13 @@ def api_clean_list_jobs() -> dict:
             "pid": row.get("pid"),
             "stats": row.get("stats"),
             "engine": row.get("engine"),
-        })
+        }
+        if row.get("status") == "running":
+            try:
+                item["progress"] = clean_job_progress(row)
+            except Exception:  # noqa: BLE001
+                item["progress"] = None
+        rows.append(item)
     return {"jobs": rows, "defaults": {
         "operators": cs.DEFAULT_OPERATORS,
         "input_path": str(PROJECT_ROOT / "data" / "pretrain_mix_12g.jsonl"),
@@ -1757,7 +1764,20 @@ def api_clean_get_job(job_id: str) -> dict:
     job = _get_clean_or_404(job_id)
     out = dict(job)
     out["report"] = cs.read_report(job_id)
+    try:
+        out["progress"] = clean_job_progress(job)
+    except Exception:  # noqa: BLE001
+        out["progress"] = None
     return out
+
+
+@app.get("/api/clean/jobs/{job_id}/progress")
+def api_clean_job_progress(job_id: str) -> dict:
+    job = _get_clean_or_404(job_id)
+    prog = clean_job_progress(job)
+    if prog is None:
+        return {"id": job_id, "status": job.get("status"), "progress": None}
+    return {"id": job_id, "status": job.get("status"), "progress": prog}
 
 
 @app.patch("/api/clean/jobs/{job_id}")

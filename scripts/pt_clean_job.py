@@ -39,6 +39,7 @@ KEEP_AFTER_CLEAN = {
     "clean.log",
     "recipe.yaml",
     "dropped.jsonl",
+    "progress.json",
 }
 
 
@@ -56,6 +57,24 @@ def _load_job(job_dir: Path) -> Dict[str, Any]:
 
 def _save_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _save_json_atomic(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def write_progress(job_dir: Path, payload: Dict[str, Any]) -> None:
+    """Periodic progress for UI (atomic). Safe to call often."""
+    data = dict(payload)
+    data.setdefault("updated_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+    try:
+        _save_json_atomic(job_dir / "progress.json", data)
+    except OSError as exc:
+        _log(f"[progress] write failed: {exc}")
+
 
 
 def _text_of(obj: Dict[str, Any]) -> str:
@@ -519,7 +538,65 @@ def run_builtin(job_dir: Path, job: Dict[str, Any]) -> Dict[str, Any]:
     kept = 0
     dropped = 0
     t0 = time.time()
+    total_bytes = int(inp.stat().st_size) if inp.is_file() else 0
+    last_prog_t = t0
+    last_prog_rows = 0
+    PROGRESS_EVERY_ROWS = 10000
+    PROGRESS_EVERY_SEC = 2.0
+
+    def _emit_progress(*, force: bool = False) -> None:
+        nonlocal last_prog_t, last_prog_rows
+        now = time.time()
+        if not force:
+            if (input_rows - last_prog_rows) < PROGRESS_EVERY_ROWS and (now - last_prog_t) < PROGRESS_EVERY_SEC:
+                return
+        elapsed = max(0.001, now - t0)
+        rate = input_rows / elapsed
+        # prefer byte position for pct; fall back to rows if tell unavailable
+        bytes_read = int(getattr(_emit_progress, "_bytes_read", 0) or 0)
+        pct = None
+        eta_sec = None
+        if total_bytes > 0 and bytes_read >= 0:
+            pct = round(min(100.0, 100.0 * bytes_read / total_bytes), 2)
+            if bytes_read > 0 and bytes_read < total_bytes:
+                eta_sec = round((total_bytes - bytes_read) * (elapsed / bytes_read), 1)
+        write_progress(
+            job_dir,
+            {
+                "engine": "builtin",
+                "phase": "streaming",
+                "bytes_read": bytes_read,
+                "total_bytes": total_bytes,
+                "input_rows": input_rows,
+                "kept": kept,
+                "dropped": dropped,
+                "pct": pct,
+                "elapsed_sec": round(elapsed, 1),
+                "rate_rows_s": round(rate, 1),
+                "eta_sec": eta_sec,
+                "per_operator": dict(per),
+            },
+        )
+        last_prog_t = now
+        last_prog_rows = input_rows
+
     _log("[engine] builtin streaming operators (no HF cache)")
+    write_progress(
+        job_dir,
+        {
+            "engine": "builtin",
+            "phase": "starting",
+            "bytes_read": 0,
+            "total_bytes": total_bytes,
+            "input_rows": 0,
+            "kept": 0,
+            "dropped": 0,
+            "pct": 0.0,
+            "elapsed_sec": 0.0,
+            "rate_rows_s": 0.0,
+            "eta_sec": None,
+        },
+    )
     if dropped_path.is_file() and not write_dropped:
         try:
             dropped_path.unlink()
@@ -531,8 +608,15 @@ def run_builtin(job_dir: Path, job: Dict[str, Any]) -> Dict[str, Any]:
             "w", encoding="utf-8"
         ) as fkeep:
             for line in fin:
+                try:
+                    _emit_progress._bytes_read = fin.tell()
+                except OSError:
+                    _emit_progress._bytes_read = int(getattr(_emit_progress, "_bytes_read", 0)) + len(
+                        line.encode("utf-8", errors="replace")
+                    )
                 raw = line.strip()
                 if not raw:
+                    _emit_progress()
                     continue
                 input_rows += 1
                 if input_rows % 50000 == 0:
@@ -544,6 +628,7 @@ def run_builtin(job_dir: Path, job: Dict[str, Any]) -> Dict[str, Any]:
                         fdrop.write(raw + "\n")
                     dropped += 1
                     per["json"] += 1
+                    _emit_progress()
                     continue
                 text = _text_of(obj)
                 ok, reason = apply_filters(text, ops, sensitive_words=sensitive_words, seen=seen)
@@ -555,6 +640,12 @@ def run_builtin(job_dir: Path, job: Dict[str, Any]) -> Dict[str, Any]:
                         fdrop.write(json.dumps(obj, ensure_ascii=False) + "\n")
                     dropped += 1
                     per[reason or "other"] += 1
+                _emit_progress()
+            try:
+                _emit_progress._bytes_read = total_bytes
+            except Exception:
+                pass
+            _emit_progress(force=True)
     finally:
         if fdrop is not None:
             fdrop.close()
@@ -573,8 +664,26 @@ def run_builtin(job_dir: Path, job: Dict[str, Any]) -> Dict[str, Any]:
         ),
     }
     _save_json(job_dir / "report.json", report)
+    write_progress(
+        job_dir,
+        {
+            "engine": "builtin",
+            "phase": "done",
+            "bytes_read": total_bytes,
+            "total_bytes": total_bytes,
+            "input_rows": input_rows,
+            "kept": kept,
+            "dropped": dropped,
+            "pct": 100.0,
+            "elapsed_sec": report["seconds"],
+            "rate_rows_s": round(input_rows / max(0.001, report["seconds"]), 1),
+            "eta_sec": 0.0,
+            "per_operator": dict(per),
+        },
+    )
     _log(f"done kept={kept} dropped={dropped} seconds={report['seconds']}")
     return report
+
 
 
 def preview_samples(

@@ -58,6 +58,13 @@ def test_preview_and_builtin(tmp_path):
     assert report["kept"] >= 1
     assert (job_dir / "clean.jsonl").is_file()
     assert not (job_dir / "dropped.jsonl").is_file()
+    prog_path = job_dir / "progress.json"
+    assert prog_path.is_file()
+    prog = json.loads(prog_path.read_text(encoding="utf-8"))
+    assert prog.get("phase") == "done"
+    assert prog.get("pct") == 100.0
+    assert prog.get("kept") == report["kept"]
+    assert prog.get("input_rows") == report["input_rows"]
 
 
 def test_builtin_can_write_dropped(tmp_path):

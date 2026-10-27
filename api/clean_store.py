@@ -207,3 +207,13 @@ def read_report(job_id: str) -> Optional[Dict[str, Any]]:
     if not path.is_file():
         return None
     return _read_json(path)
+
+
+def read_progress(job_id: str) -> Optional[Dict[str, Any]]:
+    path = job_dir(job_id) / "progress.json"
+    if not path.is_file():
+        return None
+    try:
+        return _read_json(path)
+    except Exception:  # noqa: BLE001
+        return None
