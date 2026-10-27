@@ -16,6 +16,7 @@ from pathlib import Path
 
 import torch
 
+from algo.model import build_model
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
@@ -46,7 +47,8 @@ def main() -> None:
     if Path(args.ckpt).exists():
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
         cfg = ModelConfig.from_dict(ckpt["config"])
-        model = DenseLM(cfg)
+        # 按 cfg.arch 建模型：MoE 权重（MiniSeek-M*）也能直接跑，不再只认 Dense
+        model = build_model(cfg)
         model.load_state_dict(ckpt["model"], strict=True)
         print(f"[generate] loaded {args.ckpt}")
     else:
