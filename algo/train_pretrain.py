@@ -11,6 +11,11 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 # 标准输出重定向到文件时，默认是块缓冲，Web 控制台会一次性看到一大段。
 # 改成按行刷出，配合 python -u，日志能跟着训练步实时出现。

@@ -126,14 +126,15 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         hp.setdefault("log_every", 1)
         hp.setdefault("plot_every", 1)
 
-    script = "train_sft.py" if mode == "sft" else "train_pretrain.py"
+    module = "algo.train_sft" if mode == "sft" else "algo.train_pretrain"
     data_path = str(_hp(hp, "data_path", PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl"))
     out_dir = str(task["out_dir"])
 
     cmd = [
         sys.executable,
         "-u",
-        str(PROJECT_ROOT / "algo" / script),
+        "-m",
+        module,
         "--data",
         data_path,
         "--out-dir",
