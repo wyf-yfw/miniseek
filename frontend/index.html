@@ -754,8 +754,8 @@
               <h2 style="margin-top:16px">Loss</h2>
               <div class="loss-tools">
                 <span>平滑</span>
-                <input id="loss-smooth" type="range" min="0" max="0.95" step="0.05" value="0.6" />
-                <b id="loss-smooth-value">0.60</b>
+                <input id="loss-smooth" type="range" min="0" max="0.95" step="0.05" value="0.8" />
+                <b id="loss-smooth-value">0.80</b>
                 <span class="loss-hint">浅色 = 原始值，深色 = 平滑趋势</span>
               </div>
               <canvas id="loss-canvas" width="800" height="210"></canvas>
@@ -1522,7 +1522,7 @@
       return v.toFixed(4);
     }
 
-    let lossSmooth = 0.6; // 0 = 不平滑；越大越平滑（TensorBoard 默认量级）
+    let lossSmooth = 0.8; // 0 = 不平滑；越大越平滑
 
     // 指数移动平均：acc = acc*w + x*(1-w)，用首点做种子，没有冷启动偏差
     function smoothLosses(points, weight) {
