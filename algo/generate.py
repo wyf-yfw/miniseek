@@ -36,6 +36,19 @@ def main() -> None:
     p.add_argument("--max-new-tokens", type=int, default=64)
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--top-k", type=int, default=50)
+    p.add_argument("--top-p", type=float, default=None, help="核采样阈值；不填=关闭")
+    p.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=1.15,
+        help="重复惩罚，>1 抑制复读；1.0=关闭。欠训小模型强烈建议开着",
+    )
+    p.add_argument(
+        "--no-repeat-ngram-size",
+        type=int,
+        default=4,
+        help="禁止重复的 n-gram 长度；0=关闭。设为 4 基本能消灭整段复读",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--tokenizer", type=str, default=None)
     args = p.parse_args()
@@ -66,6 +79,9 @@ def main() -> None:
         temperature=args.temperature,
         top_k=args.top_k,
         eos_token_id=eos,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
+        no_repeat_ngram_size=args.no_repeat_ngram_size,
     )
     text = tok.decode(out[0].tolist(), skip_special_tokens=True)
     print("---")

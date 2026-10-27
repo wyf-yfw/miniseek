@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .config import ModelConfig
+from .sampling import sample_next
 
 
 def count_parameters(model: nn.Module) -> int:
@@ -207,15 +208,22 @@ class DenseLM(nn.Module):
         ids: torch.Tensor,
         temperature: float = 1.0,
         top_k: Optional[int] = 50,
+        top_p: Optional[float] = None,
+        repetition_penalty: float = 1.0,
+        no_repeat_ngram_size: int = 0,
     ) -> torch.Tensor:
         ctx = ids[:, -self.cfg.max_seq_len :]
-        logits, _ = self.forward(ctx)
-        logits = logits[:, -1, :] / max(temperature, 1e-6)
-        if top_k is not None and top_k > 0:
-            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits = logits.masked_fill(logits < v[:, [-1]], float("-inf"))
-        probs = F.softmax(logits, dim=-1)
-        return torch.multinomial(probs, num_samples=1)
+        out = self.forward(ctx)
+        logits = out[0] if isinstance(out, tuple) else out
+        return sample_next(
+            logits[:, -1, :].squeeze(0),
+            ids[0].tolist(),
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+        )
 
     @torch.no_grad()
     def generate(
@@ -225,11 +233,21 @@ class DenseLM(nn.Module):
         temperature: float = 1.0,
         top_k: Optional[int] = 50,
         eos_token_id: Optional[int] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: float = 1.0,
+        no_repeat_ngram_size: int = 0,
     ) -> torch.Tensor:
         self.eval()
         ids = input_ids
         for _ in range(max_new_tokens):
-            next_id = self._sample_next(ids, temperature=temperature, top_k=top_k)
+            next_id = self._sample_next(
+                ids,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
+            )
             ids = torch.cat([ids, next_id], dim=1)
             if eos_token_id is not None and (next_id == eos_token_id).all():
                 break
@@ -243,12 +261,22 @@ class DenseLM(nn.Module):
         temperature: float = 1.0,
         top_k: Optional[int] = 50,
         eos_token_id: Optional[int] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: float = 1.0,
+        no_repeat_ngram_size: int = 0,
     ):
         """逐 token 产出 next_id（CPU int）；遇到 eos 后停止。"""
         self.eval()
         ids = input_ids
         for _ in range(max_new_tokens):
-            next_id = self._sample_next(ids, temperature=temperature, top_k=top_k)
+            next_id = self._sample_next(
+                ids,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
+            )
             ids = torch.cat([ids, next_id], dim=1)
             token = int(next_id.item())
             yield token

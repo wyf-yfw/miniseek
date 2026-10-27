@@ -278,6 +278,9 @@ class InferenceEngine:
         temperature: float = 0.8,
         top_k: int = 50,
         seed: int = 42,
+        top_p: Optional[float] = None,
+        repetition_penalty: float = 1.15,
+        no_repeat_ngram_size: int = 4,
     ) -> str:
         if self.model is None:
             raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
@@ -299,6 +302,9 @@ class InferenceEngine:
                 temperature=float(temperature),
                 top_k=int(top_k),
                 eos_token_id=eos_id,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
             )
         cost = time.time() - t0
         gen_tokens = out.shape[1] - len(ids)
@@ -459,6 +465,9 @@ class InferenceEngine:
         temperature: float = 0.8,
         top_k: int = 50,
         seed: int = 42,
+        top_p: Optional[float] = None,
+        repetition_penalty: float = 1.15,
+        no_repeat_ngram_size: int = 4,
     ):
         if self.model is None:
             raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
@@ -481,6 +490,9 @@ class InferenceEngine:
                 temperature=float(temperature),
                 top_k=int(top_k),
                 eos_token_id=eos_id,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
             ):
                 n += 1
                 if eos_id is not None and token == int(eos_id):
@@ -520,6 +532,9 @@ class InferenceEngine:
         temperature: float = 0.8,
         top_k: int = 50,
         seed: int = 42,
+        top_p: Optional[float] = None,
+        repetition_penalty: float = 1.15,
+        no_repeat_ngram_size: int = 4,
     ):
         """Raw prefix continuation for pretrained LMs (no chat template)."""
         if self.model is None:
@@ -545,6 +560,9 @@ class InferenceEngine:
                 temperature=float(temperature),
                 top_k=int(top_k),
                 eos_token_id=eos_id,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
             ):
                 n += 1
                 if eos_id is not None and token == int(eos_id):
@@ -634,6 +652,10 @@ class GenerateRequest(BaseModel):
     temperature: float = 0.8
     top_k: int = 50
     seed: int = 42
+    # 抗复读：欠训小模型不加这些几乎必然掉进循环
+    top_p: Optional[float] = None
+    repetition_penalty: float = 1.15
+    no_repeat_ngram_size: int = 4
 
 
 class ChatMessage(BaseModel):
@@ -647,6 +669,9 @@ class ChatRequest(BaseModel):
     temperature: float = 0.8
     top_k: int = 50
     seed: int = 42
+    top_p: Optional[float] = None
+    repetition_penalty: float = 1.15
+    no_repeat_ngram_size: int = 4
 
 
 def list_checkpoints_global() -> List[str]:
@@ -1467,6 +1492,9 @@ def infer_generate(req: GenerateRequest) -> dict:
         temperature=req.temperature,
         top_k=req.top_k,
         seed=req.seed,
+        top_p=req.top_p,
+        repetition_penalty=req.repetition_penalty,
+        no_repeat_ngram_size=req.no_repeat_ngram_size,
     )}
 
 
@@ -1484,6 +1512,9 @@ async def infer_chat_stream(req: ChatRequest) -> StreamingResponse:
                 temperature=req.temperature,
                 top_k=req.top_k,
                 seed=req.seed,
+                top_p=req.top_p,
+                repetition_penalty=req.repetition_penalty,
+                no_repeat_ngram_size=req.no_repeat_ngram_size,
             ):
                 yield _sse(item["event"], item["data"])
         except HTTPException as exc:
@@ -1516,6 +1547,9 @@ async def infer_continue_stream(req: GenerateRequest) -> StreamingResponse:
                 temperature=req.temperature,
                 top_k=req.top_k,
                 seed=req.seed,
+                top_p=req.top_p,
+                repetition_penalty=req.repetition_penalty,
+                no_repeat_ngram_size=req.no_repeat_ngram_size,
             ):
                 yield _sse(item["event"], item["data"])
         except HTTPException as exc:
