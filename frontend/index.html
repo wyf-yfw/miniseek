@@ -394,7 +394,10 @@
     .chat-composer { border-top: 1px solid var(--line); padding: 12px; display: flex; gap: 8px; align-items: flex-end; }
     .chat-composer textarea { resize: none; min-height: 40px; max-height: 160px; }
     #btn-send { background: var(--accent); color: white; border-color: var(--accent); }
-    #btn-stop-gen { background: var(--stop); color: white; border-color: var(--stop); display: none; }
+    #btn-stop-gen { background: var(--stop); color: white; border-color: var(--stop); }
+    #btn-send:disabled, #btn-stop-gen:disabled {
+      opacity: 0.45; cursor: not-allowed; filter: grayscale(0.2);
+    }
     @media (max-width: 900px) {
       .train-layout { flex-direction: column; }
       .task-sidebar { width: 100%; max-height: 220px; }
@@ -907,7 +910,7 @@
           <div class="chat-composer">
             <textarea id="chat-input" rows="1" placeholder="发消息给 MiniSeek…"></textarea>
             <button type="button" id="btn-send">发送</button>
-            <button type="button" id="btn-stop-gen">停止</button>
+            <button type="button" id="btn-stop-gen" disabled>停止</button>
           </div>
         </div>
       </div>
@@ -2503,8 +2506,8 @@
       chatState.messages.push(assistant);
       renderChat();
       chatState.streaming = true;
-      $("btn-send").style.display = "none";
-      $("btn-stop-gen").style.display = "";
+      $("btn-send").disabled = true;
+      $("btn-stop-gen").disabled = false;
       const controller = new AbortController();
       chatState.abort = controller;
       // 请求只带 system（若有）+ 最新 user，不带历史多轮
@@ -2565,8 +2568,8 @@
         assistant.streaming = false;
         chatState.streaming = false;
         chatState.abort = null;
-        $("btn-send").style.display = "";
-        $("btn-stop-gen").style.display = "none";
+        $("btn-send").disabled = false;
+        $("btn-stop-gen").disabled = true;
         renderChat();
       }
     }
@@ -2587,7 +2590,9 @@
     });
     $("btn-send").addEventListener("click", sendChat);
     $("btn-stop-gen").addEventListener("click", () => {
-      if (chatState.abort) chatState.abort.abort();
+      if (!chatState.streaming || !chatState.abort) return;
+      $("btn-stop-gen").disabled = true;
+      chatState.abort.abort();
     });
     $("chat-input").addEventListener("input", autosizeInput);
     $("chat-input").addEventListener("keydown", (e) => {
