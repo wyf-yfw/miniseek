@@ -73,15 +73,15 @@ def test_design_moe_has_experts():
     assert "add_attn" in ids and "add_ffn" in ids
     assert out["total_params"] > inspect_design("dense")["total_params"]
     by_id = {p["id"]: p for p in layer["parts"]}
-    # moe: d=512, moe_intermediate=1024, n_routed=8, n_shared=1
-    assert by_id["router"]["weight_shapes"] == [{"name": "gate.weight", "shape": "[8,512]"}]
+    # moe: d=512, moe_intermediate=512, n_routed=32, n_shared=1
+    assert by_id["router"]["weight_shapes"] == [{"name": "gate.weight", "shape": "[32,512]"}]
     assert by_id["shared_experts"]["weight_shapes"] == [
-        {"name": "fc1.weight", "shape": "[1024,512] ×1"},
-        {"name": "fc2.weight", "shape": "[512,1024] ×1"},
+        {"name": "fc1.weight", "shape": "[512,512] ×1"},
+        {"name": "fc2.weight", "shape": "[512,512] ×1"},
     ]
     assert by_id["routed_experts"]["weight_shapes"] == [
-        {"name": "fc1.weight", "shape": "[1024,512] ×8"},
-        {"name": "fc2.weight", "shape": "[512,1024] ×8"},
+        {"name": "fc1.weight", "shape": "[512,512] ×32"},
+        {"name": "fc2.weight", "shape": "[512,512] ×32"},
     ]
 
 

@@ -4,9 +4,9 @@ User systemd units for **frontend / API / worker**. Restarting web or API must n
 
 | Unit | Port | App |
 |------|------|-----|
-| `miniseek-web.service` | `0.0.0.0:7860` | `web.frontend_server:app` (static + `/api` proxy) |
-| `miniseek-api.service` | `127.0.0.1:8000` | `web_ui:app` (`MINISEEK_MONOLITH=0`) |
-| `miniseek-worker.service` | `127.0.0.1:8001` | `web.worker_app:app` |
+| `miniseek-web.service` | `0.0.0.0:7860` | `frontend.frontend_server:app` (static + `/api` proxy) |
+| `miniseek-api.service` | `127.0.0.1:8000` | `api.app:app` (`MINISEEK_MONOLITH=0`) |
+| `miniseek-worker.service` | `127.0.0.1:8001` | `api.worker_app:app` |
 
 Funnel / public reverse proxy still points at **`:7860`**. Do **not** enable both `miniseek-webui` and `miniseek-web` (port clash).
 
@@ -29,5 +29,5 @@ ss -ltnp | grep -E ':7860|:8000|:8001'
 ## Windows (dev monolith)
 
 ```bash
-MINISEEK_MONOLITH=1 uvicorn web_ui:app --host 0.0.0.0 --port 7860
+MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --port 7860
 ```

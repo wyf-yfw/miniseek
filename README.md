@@ -31,8 +31,8 @@
 #### 本项目当前包含
 
 - Dense Decoder-only（`DenseLM`）完整训练与生成代码（RoPE、RMSNorm、GELU FFN，默认 embedding / LM head tying）
-- MoE（`MoELM` / MiniSeek-M0.1）：1 shared + 32 routed、top-2、负载均衡 aux loss；`python train_pretrain.py --arch moe`
-- 预训练脚本 `train_pretrain.py`、生成 `generate.py`、数据下载与 valid 划分
+- MoE（`MoELM` / MiniSeek-M0.1）：1 shared + 32 routed、top-2、负载均衡 aux loss；`python -m algo.train_pretrain --arch moe`
+- 预训练脚本 `algo/train_pretrain.py`、生成 `algo/generate.py`、数据下载与 valid 划分
 - Eval-Core：Valid PPL、Gen-Smoke、以及 Web/CLI 上的 C-Eval / CMMLU / GSM8K（lm-evaluation-harness）
 - FastAPI Web UI（`:7860`）：训练 Task、对话、续写、架构图（简洁 / 标准 / 详细）、评测 Task、MoE 专家负载探针
 - 阶段规格文档 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md) 与冒烟测试
@@ -83,7 +83,7 @@ huggingface-cli download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
 ### 2. CLI 生成（本地 ckpt）
 
 ```bash
-python generate.py --ckpt checkpoints/stage0/best.pt --seed 42 --prompt "你好，请介绍一下人工智能。"
+python -m algo.generate --ckpt tasks/_default_pretrain/best.pt --seed 42 --prompt "你好，请介绍一下人工智能。"
 ```
 
 ### 3. 从 Hub 加载 DenseLM
@@ -94,9 +94,9 @@ from pathlib import Path
 import torch
 from huggingface_hub import snapshot_download
 from safetensors.torch import load_file
-from model.config import ModelConfig
-from model.dense import DenseLM
-from model.tokenizer import load_tokenizer
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.model.tokenizer import load_tokenizer
 
 repo = snapshot_download("wyf-yfw/MiniSeek-D0.1-base")
 cfg = ModelConfig.from_dict(json.loads(Path(repo, "config.json").read_text()))
@@ -119,7 +119,7 @@ print(tok.decode(out[0].tolist(), skip_special_tokens=True))
 ### 4. Web UI（推荐）
 
 ```bash
-python -m uvicorn web_ui:app --host 127.0.0.1 --port 7860
+python -m uvicorn api.app:app --host 127.0.0.1 --port 7860
 ```
 
 浏览器打开后可用：
@@ -216,10 +216,10 @@ RMSNorm → LM Head（基座默认与 Embedding tying）
 
 ```bash
 # 正式预训练
-python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0
+python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain
 
 # 短跑 / 调参（默认不写 loss-*.pt；需要里程碑再显式加 --save-loss-thresholds）
-python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0 \
+python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain \
   --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
@@ -249,8 +249,8 @@ python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoin
 CLI 示例：
 
 ```bash
-python eval/valid_ppl.py --ckpt checkpoints/stage0/last.pt --valid data/valid.jsonl
-python eval/gen_smoke.py --ckpt checkpoints/stage0/last.pt --seed 42
+python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid.jsonl
+python -m algo.eval.gen_smoke --ckpt tasks/_default_pretrain/last.pt --seed 42
 # 或 Web「评测」Tab / eval/run_benchmark.py
 ```
 
@@ -264,9 +264,11 @@ python eval/gen_smoke.py --ckpt checkpoints/stage0/last.pt --seed 42
 
 ```text
 model/              # config · DenseLM · tokenizer
-train_pretrain.py   # 预训练入口
-generate.py         # CLI 生成
-web_ui.py + web/    # FastAPI UI · Task/Bench/架构
+algo/train_pretrain.py  # 预训练入口
+algo/generate.py         # CLI 生成
+frontend/ + api/    # Web 前端 + FastAPI（Task/Bench/架构）
+algo/               # model / train / eval / generate
+# 权重：tasks/<id>/checkpoints/（根目录不再保留 checkpoints/）
 eval/               # PPL · Gen-Smoke · lm-eval · reports
 scripts/            # 数据下载 · smoke
 docs/STAGE_PLAN.md  # 阶段规格（主文档）

@@ -16,7 +16,7 @@ venv/
 data/*.jsonl
 !data/.gitkeep
 
-# Checkpoints & exports
+# Checkpoints & exports (root checkpoints/ deleted; task weights live under tasks/<id>/checkpoints/)
 checkpoints/
 *.pt
 *.pth
@@ -35,8 +35,8 @@ minimind_tokenizer/
 *.swp
 
 # Eval outputs (keep templates)
-eval/reports/gen_smoke_*.jsonl
-eval/reports/lm_eval_*/
+algo/eval/reports/gen_smoke_*.jsonl
+algo/eval/reports/lm_eval_*/
 
 .hf_token
 release/
@@ -47,13 +47,13 @@ tasks/
 hf/
 
 .superpowers/
-eval/runs/
+algo/eval/runs/
 
 # Local smoke / restart junk (do not track)
-eval/reports/_smoke_*/
-web_ui_restart.log*
-web_ui.out.log
-web_ui.err.log
+algo/eval/reports/_smoke_*/
+api_restart.log*
+api.out.log
+api.err.log
 _fix_*.py
 _api_smoke_*.py
 123.py
@@ -65,5 +65,5 @@ logs/
 data/hf_upload_MiniSeek-dataset/
 data/hf_upload_MiniSeek-dataset_real/
 data/raw/
-eval/reports/cont_smoke_*.jsonl
-eval/reports/*.log
+algo/eval/reports/cont_smoke_*.jsonl
+algo/eval/reports/*.log

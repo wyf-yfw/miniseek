@@ -31,7 +31,7 @@ Training large models from scratch is hard on personal GPUs, and high-level fram
 #### What’s in the box today
 
 - Dense decoder-only (`DenseLM`) train + generate (RoPE, RMSNorm, GELU FFN; embedding/LM-head tying by default on the base)
-- `train_pretrain.py`, `generate.py`, data download + fixed valid split
+- `algo/train_pretrain.py`, `algo/generate.py`, data download + fixed valid split
 - Eval-Core: Valid PPL, Gen-Smoke, plus C-Eval / CMMLU / GSM8K via Web/CLI (lm-evaluation-harness)
 - FastAPI Web UI (`:7860`): training Tasks, chat, continuation, architecture diagrams, bench Tasks
 - Stage plan [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md) and smoke tests
@@ -81,7 +81,7 @@ huggingface-cli download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
 ### 2. CLI generate (local ckpt)
 
 ```bash
-python generate.py --ckpt checkpoints/stage0/best.pt --seed 42 --prompt "Hello, introduce AI briefly."
+python -m algo.generate --ckpt tasks/_default_pretrain/best.pt --seed 42 --prompt "Hello, introduce AI briefly."
 ```
 
 ### 3. Load DenseLM from the Hub
@@ -92,9 +92,9 @@ from pathlib import Path
 import torch
 from huggingface_hub import snapshot_download
 from safetensors.torch import load_file
-from model.config import ModelConfig
-from model.dense import DenseLM
-from model.tokenizer import load_tokenizer
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.model.tokenizer import load_tokenizer
 
 repo = snapshot_download("wyf-yfw/MiniSeek-D0.1-base")
 cfg = ModelConfig.from_dict(json.loads(Path(repo, "config.json").read_text()))
@@ -117,7 +117,7 @@ print(tok.decode(out[0].tolist(), skip_special_tokens=True))
 ### 4. Web UI (recommended)
 
 ```bash
-python -m uvicorn web_ui:app --host 127.0.0.1 --port 7860
+python -m uvicorn api.app:app --host 127.0.0.1 --port 7860
 ```
 
 | Tab | What it does |
@@ -209,10 +209,10 @@ Naming (one Hub repo per checkpoint):
 # 📌 Training
 
 ```bash
-python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0
+python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain
 
 # short run (no loss-*.pt by default; pass --save-loss-thresholds only if needed)
-python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --out-dir checkpoints/stage0 \
+python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain \
   --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
@@ -240,8 +240,8 @@ Or drive the same loop from the Web **Train** tab (`tasks/<id>/`).
 | 6 | Efficiency | peak VRAM / tokens/s on fixed HW |
 
 ```bash
-python eval/valid_ppl.py --ckpt checkpoints/stage0/last.pt --valid data/valid.jsonl
-python eval/gen_smoke.py --ckpt checkpoints/stage0/last.pt --seed 42
+python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid.jsonl
+python -m algo.eval.gen_smoke --ckpt tasks/_default_pretrain/last.pt --seed 42
 # or Web Bench tab / eval/run_benchmark.py
 ```
 
@@ -255,9 +255,10 @@ Anchor: MiniMind-3 (~64M) C-Eval≈24.9 / CMMLU≈25.4—Stage 0 is smaller; tra
 
 ```text
 model/              # config · DenseLM · tokenizer
-train_pretrain.py   # pretrain entry
-generate.py         # CLI generate
-web_ui.py + web/    # FastAPI UI · Task/Bench/arch
+algo/train_pretrain.py  # pretrain entry
+algo/generate.py         # CLI generate
+frontend/ + api/    # Web frontend + FastAPI (Task/Bench/arch)
+algo/               # model / train / eval / generate
 eval/               # PPL · Gen-Smoke · lm-eval · reports
 scripts/            # data download · smoke
 docs/STAGE_PLAN.md  # stage spec (source of truth)

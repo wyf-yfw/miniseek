@@ -46,7 +46,7 @@ lm_eval --model hf \
 ```bash
 pip install 'lm-eval>=0.4.5'
 python -m eval.run_benchmark \
-  --ckpt checkpoints/hf/MiniSeek-D0.1-base.pt \
+  --ckpt tasks/<id>/checkpoints/best.pt \
   --tasks ceval-valid,cmmlu,gsm8k \
   --out eval/runs/manual-1 \
   --device cuda \
