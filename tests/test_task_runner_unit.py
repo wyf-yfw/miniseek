@@ -121,3 +121,36 @@ def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
     out = tr.stop_task(t["id"])
     assert out["status"] == "stopped"
     assert calls and calls[0][0] == 77701
+
+
+def test_build_train_cmd_speed_defaults(tasks_root):
+    t = ts.create_task(
+        name="spd",
+        arch="moe",
+        mode="pretrain",
+        hparams={"max_steps": 2, "batch_size": 2},
+    )
+    cmd = tr.build_train_cmd(ts.load_task(t["id"]))
+    assert "--compile" in cmd
+    assert "--no-compile" not in cmd
+    assert "--fused-adamw" in cmd
+    assert "--batch-mode" in cmd
+    assert cmd[cmd.index("--batch-mode") + 1] == "pack"
+
+
+def test_build_train_cmd_speed_opt_out(tasks_root):
+    t = ts.create_task(
+        name="spd2",
+        arch="dense",
+        mode="pretrain",
+        hparams={
+            "max_steps": 2,
+            "compile": False,
+            "fused_adamw": False,
+            "batch_mode": "bucket",
+        },
+    )
+    cmd = tr.build_train_cmd(ts.load_task(t["id"]))
+    assert "--no-compile" in cmd
+    assert "--no-fused-adamw" in cmd
+    assert cmd[cmd.index("--batch-mode") + 1] == "bucket"

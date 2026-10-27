@@ -708,6 +708,25 @@
                 <label><span class="field-title">Log Every</span><span class="field-hint">每隔多少步往日志打印一次 loss 等指标。</span><input id="log-every" type="number" min="1" /></label>
                 <label><span class="field-title">Plot Every</span><span class="field-hint">每隔多少步给 Loss 曲线记一个点。</span><input id="plot-every" type="number" min="1" /></label>
                 <label><span class="field-title">Grad Clip</span><span class="field-hint">梯度裁剪阈值，抑制爆炸；常见 1.0。</span><input id="grad-clip" type="number" step="any" /></label>
+                <label><span class="field-title">Batch Mode</span><span class="field-hint">组批：pack=拼接文档（默认最快）；bucket=长度分桶；random=随机 pad。仅 Pretrain。</span>
+                  <select id="batch-mode">
+                    <option value="pack">pack（默认）</option>
+                    <option value="bucket">bucket</option>
+                    <option value="random">random</option>
+                  </select>
+                </label>
+                <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；MoE 可能 graph-break，bench 约 +4%。</span>
+                  <select id="compile">
+                    <option value="true">开（默认）</option>
+                    <option value="false">关</option>
+                  </select>
+                </label>
+                <label><span class="field-title">Fused AdamW</span><span class="field-hint">CUDA 融合 AdamW；小模型收益约 +4%。</span>
+                  <select id="fused-adamw">
+                    <option value="true">开（默认）</option>
+                    <option value="false">关</option>
+                  </select>
+                </label>
               </div>
               <label><span class="field-title">Valid 路径</span><span class="field-hint">验证集 jsonl（每行 text）；空或 Valid Every=0 则只画 train。</span><div class="path-row"><input id="valid-path" type="text" /><button type="button" class="btn-browse" data-for="valid-path">浏览</button></div></label>
               <div class="grid">
@@ -1304,7 +1323,8 @@
 
         function setFormEnabled(editable) {
       ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",
-       "max-steps","log-every","plot-every","grad-clip","valid-path","valid-every","valid-max-samples",
+       "max-steps","log-every","plot-every","grad-clip","batch-mode","compile","fused-adamw",
+       "valid-path","valid-every","valid-max-samples",
        "save-loss-thresholds","stable-steps",
        "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
         $(id).disabled = !editable && id !== "task-name";
@@ -1355,6 +1375,9 @@
       set("log-every", hp.log_every);
       set("plot-every", hp.plot_every);
       set("grad-clip", hp.grad_clip);
+      if (hp.batch_mode) set("batch-mode", hp.batch_mode);
+      if (hp.compile !== undefined && hp.compile !== null) set("compile", String(!!hp.compile));
+      if (hp.fused_adamw !== undefined && hp.fused_adamw !== null) set("fused-adamw", String(!!hp.fused_adamw));
       set("valid-path", hp.valid_path);
       set("valid-every", hp.valid_every);
       set("valid-max-samples", hp.valid_max_samples);
@@ -1379,6 +1402,9 @@
         log_every: num("log-every"),
         plot_every: num("plot-every"),
         grad_clip: num("grad-clip"),
+        batch_mode: ($("batch-mode") && $("batch-mode").value) || "pack",
+        compile: (($("compile") && $("compile").value) || "true") === "true",
+        fused_adamw: (($("fused-adamw") && $("fused-adamw").value) || "true") === "true",
         valid_path: $("valid-path").value.trim(),
         valid_every: num("valid-every"),
         valid_max_samples: num("valid-max-samples"),
@@ -1843,6 +1869,9 @@
         ["模式", t.mode || "-"],
         ["数据", hp.data_path || "-"],
         ["batch", hp.batch_size],
+        ["batch_mode", hp.batch_mode],
+        ["compile", hp.compile],
+        ["fused_adamw", hp.fused_adamw],
         ["max_seq_len", hp.max_seq_len],
         ["lr", hp.lr],
         ["min_lr", hp.min_lr],

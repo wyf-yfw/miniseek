@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional, Set
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from algo.batching import LengthBucketBatchSampler, PackedTextBatchIter
 from algo.model import build_model
 from algo.model.config import ModelConfig
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
@@ -355,8 +356,23 @@ def main() -> None:
     )
     p.add_argument(
         "--compile",
-        action="store_true",
-        help="对模型 torch.compile（仅 CUDA；失败则告警并继续）",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="CUDA 上默认 torch.compile（MoE 可能 graph-break，bench 仍约 +4%%）；"
+        "--no-compile 关闭",
+    )
+    p.add_argument(
+        "--batch-mode",
+        choices=["random", "bucket", "pack"],
+        default="pack",
+        help="组批方式：pack=文档拼接（默认，吞吐最高）；"
+        "bucket=长度分桶；random=随机 pad。pack 不做跨文档 attention mask",
+    )
+    p.add_argument(
+        "--fused-adamw",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="CUDA 上默认 AdamW(fused=True)；--no-fused-adamw 关闭",
     )
     p.add_argument(
         "--resume",
@@ -448,16 +464,67 @@ def main() -> None:
     )
     # 打乱顺序按任务派生，避免每次续训都重放同一批开头样本
     salt = run_salt(args)
+    shuffle_seed = (int(args.seed) + salt) % (2**31 - 1)
     shuffle_gen = torch.Generator()
-    shuffle_gen.manual_seed((int(args.seed) + salt) % (2**31 - 1))
-    loader = DataLoader(
-        ds,
-        batch_size=args.batch_size,
-        shuffle=True,
-        generator=shuffle_gen,
-        collate_fn=partial(collate_pad, pad_id=pad_id),
-        num_workers=max(0, int(args.num_workers)),
-        pin_memory=(device.type == "cuda"),
+    shuffle_gen.manual_seed(shuffle_seed)
+    batch_mode = str(args.batch_mode).lower()
+    nw = max(0, int(args.num_workers))
+    pin = device.type == "cuda"
+    packed_iter_factory = None
+    if batch_mode == "pack":
+        # Online packer; DataLoader not used for train batches
+        eos_id = int(getattr(tok, "eos_token_id", 2) or 2)
+
+        def packed_iter_factory(epoch: int):
+            return PackedTextBatchIter(
+                ds.samples,
+                tok,
+                max_seq_len=args.max_seq_len,
+                batch_size=args.batch_size,
+                pad_id=pad_id,
+                eos_id=eos_id,
+                seed=(shuffle_seed + epoch) % (2**31 - 1),
+            )
+
+        loader = None
+        steps_per_epoch_est = PackedTextBatchIter(
+            ds.samples,
+            tok,
+            max_seq_len=args.max_seq_len,
+            batch_size=args.batch_size,
+            pad_id=pad_id,
+            eos_id=eos_id,
+            seed=shuffle_seed,
+        ).estimate_len()
+    elif batch_mode == "bucket":
+        # Char length ≈ token length for this Chinese BPE; cheap proxy for bucketing
+        lengths = [min(args.max_seq_len, max(2, len(t))) for t in ds.samples]
+        batch_sampler = LengthBucketBatchSampler(
+            lengths, args.batch_size, seed=shuffle_seed, drop_last=False
+        )
+        loader = DataLoader(
+            ds,
+            batch_sampler=batch_sampler,
+            collate_fn=partial(collate_pad, pad_id=pad_id),
+            num_workers=nw,
+            pin_memory=pin,
+        )
+        steps_per_epoch_est = len(batch_sampler)
+    else:
+        loader = DataLoader(
+            ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            generator=shuffle_gen,
+            collate_fn=partial(collate_pad, pad_id=pad_id),
+            num_workers=nw,
+            pin_memory=pin,
+        )
+        steps_per_epoch_est = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
+    print(
+        f"[train] batch_mode={batch_mode} compile={bool(args.compile)} "
+        f"fused_adamw={bool(args.fused_adamw)}",
+        flush=True,
     )
 
     valid_loader = None
@@ -486,11 +553,20 @@ def main() -> None:
         else:
             print(f"[train] WARN: valid 文件不存在，跳过: {valid_path}", flush=True)
 
-    steps_per_epoch = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
+    steps_per_epoch = max(1, int(steps_per_epoch_est))
     plan_steps = steps_per_epoch * max(1, args.epochs)
     total_steps = int(args.max_steps) if args.max_steps is not None else plan_steps
 
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
+    if bool(args.fused_adamw) and device.type == "cuda":
+        try:
+            opt = torch.optim.AdamW(model.parameters(), fused=True, **opt_kwargs)
+            print("[train] AdamW fused=True", flush=True)
+        except (TypeError, RuntimeError) as e:
+            opt = torch.optim.AdamW(model.parameters(), **opt_kwargs)
+            print(f"[train] WARN: fused AdamW 不可用，回退: {e}", flush=True)
+    else:
+        opt = torch.optim.AdamW(model.parameters(), **opt_kwargs)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     # skip thresholds that already have a milestone file on disk
@@ -605,7 +681,12 @@ def main() -> None:
         print(f"[train] step save @ step={step} loss={loss_val:.4f} -> {step_path}", flush=True)
 
     for epoch in range(args.epochs):
-        for input_ids, labels in loader:
+        if batch_mode == "pack":
+            assert packed_iter_factory is not None
+            epoch_iter = packed_iter_factory(epoch)
+        else:
+            epoch_iter = loader
+        for input_ids, labels in epoch_iter:
             input_ids = input_ids.to(device)
             labels = labels.to(device)
 

@@ -198,6 +198,24 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
                 str(valid_max_samples),
             ]
         )
+
+    # Speed opts (bench-positive): defaults match train_pretrain / train_sft
+    compile_on = _hp(hp, "compile", True)
+    if isinstance(compile_on, str):
+        compile_on = compile_on.strip().lower() not in {"0", "false", "no", "off"}
+    cmd.append("--compile" if bool(compile_on) else "--no-compile")
+
+    fused_on = _hp(hp, "fused_adamw", True)
+    if isinstance(fused_on, str):
+        fused_on = fused_on.strip().lower() not in {"0", "false", "no", "off"}
+    cmd.append("--fused-adamw" if bool(fused_on) else "--no-fused-adamw")
+
+    if mode == "pretrain":
+        batch_mode = str(_hp(hp, "batch_mode", "pack")).strip().lower()
+        if batch_mode not in {"random", "bucket", "pack"}:
+            batch_mode = "pack"
+        cmd.extend(["--batch-mode", batch_mode])
+
     return cmd
 
 

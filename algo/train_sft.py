@@ -266,6 +266,18 @@ def main() -> None:
         default=512,
         help="valid 最多用多少条样本",
     )
+    p.add_argument(
+        "--compile",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="CUDA 上默认 torch.compile；--no-compile 关闭",
+    )
+    p.add_argument(
+        "--fused-adamw",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="CUDA 上默认 AdamW(fused=True)；--no-fused-adamw 关闭",
+    )
     args = p.parse_args()
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
@@ -282,6 +294,15 @@ def main() -> None:
 
     cfg = ModelConfig(max_seq_len=args.max_seq_len).with_vocab_size(vocab)
     model = DenseLM(cfg).to(device)
+    if args.compile:
+        if device.type != "cuda":
+            print("[sft] WARN: --compile ignored (需要 CUDA)")
+        else:
+            try:
+                model = torch.compile(model)
+                print("[sft] torch.compile enabled")
+            except Exception as e:  # noqa: BLE001
+                print(f"[sft] WARN: torch.compile 失败，继续未编译: {e}")
 
     if not Path(args.data).exists():
         raise SystemExit(f"[sft] 缺少数据文件: {args.data}")
@@ -332,7 +353,16 @@ def main() -> None:
         f"stable_steps={args.stable_steps}"
     )
 
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
+    if bool(args.fused_adamw) and device.type == "cuda":
+        try:
+            opt = torch.optim.AdamW(model.parameters(), fused=True, **opt_kwargs)
+            print("[sft] AdamW fused=True", flush=True)
+        except (TypeError, RuntimeError) as e:
+            opt = torch.optim.AdamW(model.parameters(), **opt_kwargs)
+            print(f"[sft] WARN: fused AdamW 不可用，回退: {e}", flush=True)
+    else:
+        opt = torch.optim.AdamW(model.parameters(), **opt_kwargs)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for th in thresholds:
