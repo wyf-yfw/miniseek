@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from eval.run_benchmark import run_bench
+from algo.eval.run_benchmark import run_bench
 
 
 def test_run_bench_writes_results(tmp_path):

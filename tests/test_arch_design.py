@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from model.config import ModelConfig
-from model.dense import DenseLM, count_parameters
-from web.arch_inspect import inspect_design, preset_config
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM, count_parameters
+from api.arch_inspect import inspect_design, preset_config
 
 
 def test_design_tiny_matches_denselm():

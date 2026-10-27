@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from web import tasks_store as ts
+from api import tasks_store as ts
 
 
 @pytest.fixture()

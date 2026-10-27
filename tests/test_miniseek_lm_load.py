@@ -4,9 +4,9 @@ from pathlib import Path
 
 import torch
 
-from model.config import ModelConfig
-from model.dense import DenseLM
-from eval.miniseek_lm import MiniSeekLM, load_miniseek_blob
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.eval.miniseek_lm import MiniSeekLM, load_miniseek_blob
 
 
 def test_load_training_blob(tmp_path):

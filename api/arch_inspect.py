@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
-from model.config import ModelConfig
+from algo.model.config import ModelConfig
 
 _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
 

@@ -5,9 +5,9 @@ from pathlib import Path
 import torch
 from fastapi.testclient import TestClient
 
-from model.config import ModelConfig
-from model.dense import DenseLM
-from web_ui import app
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from api.app import app
 
 
 def test_arch_design_dense():

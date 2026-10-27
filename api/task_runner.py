@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from web import tasks_store as ts
+from api import tasks_store as ts
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STEP_RE = re.compile(
@@ -133,7 +133,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     cmd = [
         sys.executable,
         "-u",
-        str(PROJECT_ROOT / script),
+        str(PROJECT_ROOT / "algo" / script),
         "--data",
         data_path,
         "--out-dir",

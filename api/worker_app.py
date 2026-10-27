@@ -7,13 +7,13 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from web.task_runner import (
+from api.task_runner import (
     reattach_running_tails,
     start_task,
     stop_all_owned as stop_all_train,
     stop_task,
 )
-from web.bench_runner import (
+from api.bench_runner import (
     reattach_running as reattach_bench,
     start_run as bench_start_run,
     stop_all_owned as stop_all_bench,

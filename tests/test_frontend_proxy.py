@@ -13,7 +13,7 @@ def client(monkeypatch, tmp_path):
     (web_dir / "index.html").write_text("<html>ok</html>", encoding="utf-8")
     monkeypatch.setenv("MINISEEK_API_URL", "http://127.0.0.1:8000")
     import importlib
-    import web.frontend_server as fs
+    import frontend.frontend_server as fs
 
     monkeypatch.setattr(fs, "WEB_DIR", web_dir)
     importlib.reload(fs)
@@ -28,7 +28,7 @@ def test_serves_index(client):
 
 
 def test_api_proxy_forwards(client, monkeypatch):
-    import web.frontend_server as fs
+    import frontend.frontend_server as fs
 
     class FakeResp:
         status_code = 200

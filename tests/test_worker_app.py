@@ -6,15 +6,15 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from web import tasks_store as ts
-from web import bench_store as bs
+from api import tasks_store as ts
+from api import bench_store as bs
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(ts, "TASKS_ROOT", tmp_path / "tasks")
     monkeypatch.setattr(bs, "RUNS_ROOT", tmp_path / "runs")
-    from web.worker_app import app
+    from api.worker_app import app
     return TestClient(app)
 
 
@@ -41,8 +41,8 @@ def test_task_start_stop_proxy(client, monkeypatch):
         ts.save_task(task)
         return task
 
-    monkeypatch.setattr("web.worker_app.start_task", fake_start)
-    monkeypatch.setattr("web.worker_app.stop_task", fake_stop)
+    monkeypatch.setattr("api.worker_app.start_task", fake_start)
+    monkeypatch.setattr("api.worker_app.stop_task", fake_stop)
     r = client.post(f"/v1/tasks/{t['id']}/start")
     assert r.status_code == 200
     assert r.json()["status"] == "running"
@@ -54,7 +54,7 @@ def test_task_start_stop_proxy(client, monkeypatch):
 def test_task_start_conflict_409(client, monkeypatch):
     t = ts.create_task(name="c", arch="tiny", mode="pretrain", hparams={})
     monkeypatch.setattr(
-        "web.worker_app.start_task",
+        "api.worker_app.start_task",
         lambda tid: (_ for _ in ()).throw(RuntimeError("another task is already running: x")),
     )
     r = client.post(f"/v1/tasks/{t['id']}/start")
@@ -75,7 +75,7 @@ def test_bench_start_passes_training_busy(client, tmp_path, monkeypatch):
         bs.save_run(run_d)
         return run_d
 
-    monkeypatch.setattr("web.worker_app.bench_start_run", fake_start)
+    monkeypatch.setattr("api.worker_app.bench_start_run", fake_start)
     r = client.post(f"/v1/bench/{run['id']}/start", json={"training_busy": True})
     assert r.status_code == 200
     assert seen["busy"] is True

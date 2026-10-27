@@ -7,10 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from eval.bench_results import ALLOWED_TASKS
+from algo.eval.bench_results import ALLOWED_TASKS
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNS_ROOT = PROJECT_ROOT / "eval" / "runs"
+RUNS_ROOT = PROJECT_ROOT / "algo" / "eval" / "runs"
 
 
 def new_run_id() -> str:

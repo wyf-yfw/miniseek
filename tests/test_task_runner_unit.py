@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from web import tasks_store as ts
-from web import task_runner as tr
+from api import tasks_store as ts
+from api import task_runner as tr
 
 
 @pytest.fixture()

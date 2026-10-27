@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import torch
 
-from model import build_model
-from model.config import ModelConfig
-from model.dense import DenseLM, count_parameters
-from model.tokenizer import MINIMIND_VOCAB_SIZE
+from algo.model import build_model
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM, count_parameters
+from algo.model.tokenizer import MINIMIND_VOCAB_SIZE
 
 
 def test_tiny_preset_dims():

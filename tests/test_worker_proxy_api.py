@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from web import tasks_store as ts
-from web import bench_store as bs
+from api import tasks_store as ts
+from api import bench_store as bs
 
 
 @pytest.fixture()
@@ -17,7 +17,7 @@ def client(tmp_path, monkeypatch):
     # Force non-monolith path
     monkeypatch.setenv("MINISEEK_MONOLITH", "0")
     import importlib
-    import web_ui
+    import api.app as web_ui
     importlib.reload(web_ui)
     return TestClient(web_ui.app)
 
@@ -25,7 +25,7 @@ def client(tmp_path, monkeypatch):
 def test_api_start_forwards_to_worker(client, monkeypatch):
     t = ts.create_task(name="p", arch="tiny", mode="pretrain", hparams={})
     monkeypatch.setattr(
-        "web_ui._worker_request",
+        "api.app._worker_request",
         lambda method, path, **kw: {"id": t["id"], "status": "running", "pid": 42},
     )
     r = client.post(f"/api/tasks/{t['id']}/start")
@@ -40,7 +40,7 @@ def test_api_start_maps_worker_409(client, monkeypatch):
     def boom(method, path, **kw):
         raise HTTPException(status_code=409, detail="another task is already running: x")
 
-    monkeypatch.setattr("web_ui._worker_request", boom)
+    monkeypatch.setattr("api.app._worker_request", boom)
     r = client.post(f"/api/tasks/{t['id']}/start")
     assert r.status_code == 409
 
@@ -48,7 +48,7 @@ def test_api_start_maps_worker_409(client, monkeypatch):
 def test_api_stop_forwards_to_worker(client, monkeypatch):
     t = ts.create_task(name="s", arch="tiny", mode="pretrain", hparams={})
     monkeypatch.setattr(
-        "web_ui._worker_request",
+        "api.app._worker_request",
         lambda method, path, **kw: {"id": t["id"], "status": "stopped", "pid": None},
     )
     r = client.post(f"/api/tasks/{t['id']}/stop")
@@ -68,7 +68,7 @@ def test_api_bench_start_forwards_with_training_busy(client, tmp_path, monkeypat
         seen["json"] = kw.get("json")
         return {"id": run["id"], "status": "running", "pid": 9}
 
-    monkeypatch.setattr("web_ui._worker_request", fake)
+    monkeypatch.setattr("api.app._worker_request", fake)
     r = client.post(f"/api/bench/tasks/{run['id']}/start")
     assert r.status_code == 200
     assert r.json()["status"] == "running"

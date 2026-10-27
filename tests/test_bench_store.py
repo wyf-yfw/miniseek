@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from web import bench_store as bs
+from api import bench_store as bs
 
 
 def test_create_and_list(tmp_path, monkeypatch):

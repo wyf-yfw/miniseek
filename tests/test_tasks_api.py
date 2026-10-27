@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from web import tasks_store as ts
+from api import tasks_store as ts
 
 
 @pytest.fixture()
@@ -11,7 +11,7 @@ def client(tmp_path, monkeypatch):
     root = tmp_path / "tasks"
     monkeypatch.setattr(ts, "TASKS_ROOT", root)
     monkeypatch.setenv("MINISEEK_MONOLITH", "1")
-    from web_ui import app
+    from api.app import app
     return TestClient(app)
 
 

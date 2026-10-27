@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import torch
 
-from model.config import ModelConfig
-from model.dense import count_parameters
+from algo.model.config import ModelConfig
+from algo.model.dense import count_parameters
 
 
 def test_moe_config_defaults():
@@ -26,7 +26,7 @@ def test_dense_config_unchanged():
 
 
 def test_expert_mlp_shape():
-    from model.moe import ExpertMLP
+    from algo.model.moe import ExpertMLP
 
     cfg = ModelConfig(arch="moe", vocab_size=6400)
     m = ExpertMLP(cfg.d_model, cfg.moe_intermediate_size, cfg.dropout)
@@ -36,7 +36,7 @@ def test_expert_mlp_shape():
 
 
 def test_moe_layer_forward_and_aux():
-    from model.moe import MoELayer
+    from algo.model.moe import MoELayer
 
     cfg = ModelConfig(arch="moe", vocab_size=6400)
     layer = MoELayer(cfg)
@@ -49,7 +49,7 @@ def test_moe_layer_forward_and_aux():
 
 
 def test_load_balance_uniform_low():
-    from model.moe import load_balance_loss
+    from algo.model.moe import load_balance_loss
 
     n, t, e = 4, 32, 8
     probs = torch.full((n * t, e), 1.0 / e)
@@ -60,7 +60,7 @@ def test_load_balance_uniform_low():
 
 
 def test_moelm_param_count_and_forward():
-    from model.moe import MoELM
+    from algo.model.moe import MoELM
 
     cfg = ModelConfig(arch="moe", vocab_size=6400, max_seq_len=128)
     model = MoELM(cfg)
@@ -76,7 +76,7 @@ def test_moelm_param_count_and_forward():
 
 
 def test_moelm_generate():
-    from model.moe import MoELM
+    from algo.model.moe import MoELM
 
     cfg = ModelConfig(arch="moe", vocab_size=6400, max_seq_len=64)
     model = MoELM(cfg).eval()
@@ -88,7 +88,7 @@ def _naive_moe_forward(layer, x: torch.Tensor):
     """Reference: nested slot × expert Python loops (pre-sorted dispatch)."""
     import torch.nn.functional as F
 
-    from model.moe import load_balance_loss
+    from algo.model.moe import load_balance_loss
 
     b, t, d = x.shape
     flat = x.reshape(b * t, d)
@@ -113,7 +113,7 @@ def _naive_moe_forward(layer, x: torch.Tensor):
 
 def test_moe_grouped_dispatch_matches_naive():
     """Sorted/grouped GEMM dispatch must match nested-loop reference (atol 1e-4)."""
-    from model.moe import MoELayer
+    from algo.model.moe import MoELayer
 
     cfg = ModelConfig(
         arch="moe",
@@ -144,7 +144,7 @@ def test_moe_grouped_dispatch_matches_naive():
 
 def test_moe_sorted_dispatch_32_experts():
     """Same check at M0.1-ish expert count (1+32 top-2), float32 atol 1e-4."""
-    from model.moe import MoELayer
+    from algo.model.moe import MoELayer
 
     cfg = ModelConfig(
         arch="moe",
@@ -175,7 +175,7 @@ def test_moe_sorted_dispatch_32_experts():
 
 
 def test_probe_expert_load_counts_sum():
-    from model.moe import MoELM
+    from algo.model.moe import MoELM
 
     cfg = ModelConfig(
         arch="moe",
@@ -202,8 +202,8 @@ def test_probe_expert_load_counts_sum():
 def test_train_window_expert_usage_and_log_line(capsys):
     """训练 log 窗口：begin → forward×N → end/emit expert_load= JSON。"""
     import json
-    from model.moe import MoELM
-    from train_pretrain import _emit_expert_load_line
+    from algo.model.moe import MoELM
+    from algo.train_pretrain import _emit_expert_load_line
 
     cfg = ModelConfig(
         arch="moe",

@@ -28,28 +28,28 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from model.config import ModelConfig
-from model.dense import DenseLM
-from model.tokenizer import load_tokenizer
-from web import tasks_store as ts
-from web import bench_store as bs
-from web.task_runner import pid_alive, reconcile_task, start_task, stop_task
-from web.bench_runner import (
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM
+from algo.model.tokenizer import load_tokenizer
+from api import tasks_store as ts
+from api import bench_store as bs
+from api.task_runner import pid_alive, reconcile_task, start_task, stop_task
+from api.bench_runner import (
     reconcile_run,
     start_run as bench_start_run,
     stop_run as bench_stop_run,
     read_log as bench_read_log,
 )
-from web.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
-from web import worker_client as wc
+from api.arch_inspect import inspect_design as arch_inspect_design, inspect_path as arch_inspect_path
+from api import worker_client as wc
 
-PROJECT_ROOT = Path(__file__).parent.resolve()
-WEB_DIR = PROJECT_ROOT / "web"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WEB_DIR = PROJECT_ROOT / "frontend"
 DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl")
 DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "sft_t2t_mini.jsonl")
-DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "checkpoints" / "stage0")
-DEFAULT_SFT_OUT = str(PROJECT_ROOT / "checkpoints" / "sft")
-DEFAULT_MOE_OUT = str(PROJECT_ROOT / "checkpoints" / "stage1")
+DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "tasks" / "_default_pretrain")
+DEFAULT_SFT_OUT = str(PROJECT_ROOT / "tasks" / "_default_sft")
+DEFAULT_MOE_OUT = str(PROJECT_ROOT / "tasks" / "_default_moe")
 
 
 def _gpu_text() -> str:
@@ -195,7 +195,7 @@ class InferenceEngine:
             blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         cfg = ModelConfig.from_dict(blob["config"])
         if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
-            from model.moe import MoELM
+            from algo.model.moe import MoELM
             model = MoELM(cfg)
         else:
             model = DenseLM(cfg)
@@ -608,7 +608,7 @@ class ChatRequest(BaseModel):
 
 
 def list_checkpoints_global() -> List[str]:
-    files = glob.glob(str(PROJECT_ROOT / "checkpoints" / "**" / "*.pt"), recursive=True)
+    files = glob.glob(str(PROJECT_ROOT / "tasks" / "**" / "checkpoints" / "*.pt"), recursive=True)
     files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return files
 
@@ -824,7 +824,7 @@ def index() -> FileResponse:
 
 @app.get("/api/defaults")
 def defaults() -> dict:
-    best = PROJECT_ROOT / "checkpoints" / "stage0" / "best.pt"
+    best = PROJECT_ROOT / "tasks" / "_default_pretrain" / "best.pt"
     return {
         "mode": "pretrain",
         "arch": "dense",

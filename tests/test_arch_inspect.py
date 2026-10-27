@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 import torch
 
-from model.config import ModelConfig
-from model.dense import DenseLM, count_parameters
-from web.arch_inspect import inspect_blob, inspect_path, load_ckpt_blob
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM, count_parameters
+from api.arch_inspect import inspect_blob, inspect_path, load_ckpt_blob
 
 
 def _tiny_blob():

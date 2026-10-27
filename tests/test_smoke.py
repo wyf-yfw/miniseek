@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import torch
 
-from model.config import ModelConfig
-from model.dense import DenseLM, count_parameters
-from model.tokenizer import MINIMIND_VOCAB_SIZE, detect_vocab_size, load_tokenizer
+from algo.model.config import ModelConfig
+from algo.model.dense import DenseLM, count_parameters
+from algo.model.tokenizer import MINIMIND_VOCAB_SIZE, detect_vocab_size, load_tokenizer
 
 
 def test_config_head_dim():

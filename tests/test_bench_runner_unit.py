@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from web import bench_store as bs
-from web import bench_runner as br
+from api import bench_store as bs
+from api import bench_runner as br
 
 
 @pytest.fixture()

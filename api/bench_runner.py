@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
-from web import bench_store as bs
-from web.task_runner import _popen_isolation_kwargs, _terminate_pid, pid_alive
+from api import bench_store as bs
+from api.task_runner import _popen_isolation_kwargs, _terminate_pid, pid_alive
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _owned_procs: Dict[str, subprocess.Popen] = {}
@@ -146,7 +146,7 @@ def start_run(run_id: str, *, training_busy: bool) -> Dict[str, Any]:
         sys.executable,
         "-u",
         "-m",
-        "eval.run_benchmark",
+        "algo.eval.run_benchmark",
         "--ckpt",
         str(ckpt_path),
         "--tasks",

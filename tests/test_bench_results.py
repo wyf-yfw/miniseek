@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from eval.bench_results import normalize_lm_eval_results
+from algo.eval.bench_results import normalize_lm_eval_results
 
 
 def test_normalize_acc_and_gsm8k():
