@@ -127,7 +127,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         hp.setdefault("plot_every", 1)
 
     script = "train_sft.py" if mode == "sft" else "train_pretrain.py"
-    data_path = str(_hp(hp, "data_path", PROJECT_ROOT / "data" / "pretrain_t2t_mini.jsonl"))
+    data_path = str(_hp(hp, "data_path", PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl"))
     out_dir = str(task["out_dir"])
 
     cmd = [

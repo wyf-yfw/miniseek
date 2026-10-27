@@ -3,8 +3,8 @@
 
 示例::
 
-    python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --max-steps 2
-    python train_pretrain.py --data data/pretrain_t2t_mini.jsonl --epochs 1 --batch-size 8
+    python train_pretrain.py --data data/pretrain_mix_5g.jsonl --max-steps 2
+    python train_pretrain.py --data data/pretrain_mix_5g.jsonl --epochs 1 --batch-size 8
     # 默认只写 best.pt + last.pt；可选 --save-loss-thresholds / --save-every（占盘，慎用）
 """
 
@@ -224,7 +224,7 @@ def set_lr(opt: torch.optim.Optimizer, lr: float) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="miniseek Stage-0 pretrain")
-    p.add_argument("--data", type=str, default="data/pretrain_t2t_mini.jsonl")
+    p.add_argument("--data", type=str, default="data/pretrain_mix_5g.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="checkpoints/stage0")
     p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")

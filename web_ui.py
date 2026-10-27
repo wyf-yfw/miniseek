@@ -44,7 +44,7 @@ from web.arch_inspect import inspect_design as arch_inspect_design, inspect_path
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 WEB_DIR = PROJECT_ROOT / "web"
-DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "pretrain_t2t_mini.jsonl")
+DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl")
 DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "sft_t2t_mini.jsonl")
 DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "checkpoints" / "stage0")
 DEFAULT_SFT_OUT = str(PROJECT_ROOT / "checkpoints" / "sft")
