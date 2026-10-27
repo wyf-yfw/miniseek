@@ -39,6 +39,7 @@ from torch.utils.data import DataLoader, Dataset
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
+from algo.train_pretrain import JsonlTextDataset, collate_pad as pretrain_collate_pad, evaluate_valid
 
 
 def format_chat(conversations: List[dict]) -> str:
@@ -247,6 +248,24 @@ def main() -> None:
         default=None,
         help="从 SFT checkpoint 断点续训（含 optimizer）",
     )
+    p.add_argument(
+        "--valid",
+        type=str,
+        default="",
+        help="验证集 jsonl（每行 text 字段）；空=不跑 valid",
+    )
+    p.add_argument(
+        "--valid-every",
+        type=int,
+        default=0,
+        help="每隔多少 step 跑一次 valid；0=关闭",
+    )
+    p.add_argument(
+        "--valid-max-samples",
+        type=int,
+        default=512,
+        help="valid 最多用多少条样本",
+    )
     args = p.parse_args()
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
@@ -275,6 +294,31 @@ def main() -> None:
         collate_fn=lambda b: collate_pad(b, pad_id=pad_id),
         num_workers=0,
     )
+
+    valid_loader = None
+    valid_path = str(args.valid or "").strip()
+    if int(args.valid_every) > 0 and valid_path:
+        if Path(valid_path).exists():
+            valid_ds = JsonlTextDataset(
+                valid_path,
+                tok,
+                max_seq_len=args.max_seq_len,
+                max_samples=int(args.valid_max_samples) if int(args.valid_max_samples) > 0 else None,
+            )
+            valid_loader = DataLoader(
+                valid_ds,
+                batch_size=args.batch_size,
+                shuffle=False,
+                collate_fn=lambda b: pretrain_collate_pad(b, pad_id=pad_id),
+                num_workers=0,
+            )
+            print(
+                f"[sft] valid={valid_path} every={args.valid_every} "
+                f"samples={len(valid_ds)} max_samples={args.valid_max_samples}",
+                flush=True,
+            )
+        else:
+            print(f"[sft] WARN: valid 文件不存在，跳过: {valid_path}", flush=True)
 
     steps_per_epoch = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
     if args.max_steps is not None:
@@ -392,6 +436,19 @@ def main() -> None:
                     f"ppl={math.exp(min(last_loss, 20)):.2f} lr={cur_lr:.2e}",
                     flush=True,
                 )
+
+            if (
+                valid_loader is not None
+                and int(args.valid_every) > 0
+                and global_step % int(args.valid_every) == 0
+            ):
+                stats = evaluate_valid(model, valid_loader, device)
+                print(
+                    f"valid step={global_step} loss={stats['loss']:.4f} "
+                    f"ppl={stats['ppl']:.2f} tokens={int(stats['tokens'])}",
+                    flush=True,
+                )
+                model.train()
 
             for th in thresholds:
                 if th in hit_thresholds:

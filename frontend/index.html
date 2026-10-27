@@ -709,6 +709,11 @@
                 <label><span class="field-title">Plot Every</span><span class="field-hint">每隔多少步给 Loss 曲线记一个点。</span><input id="plot-every" type="number" min="1" /></label>
                 <label><span class="field-title">Grad Clip</span><span class="field-hint">梯度裁剪阈值，抑制爆炸；常见 1.0。</span><input id="grad-clip" type="number" step="any" /></label>
               </div>
+              <label><span class="field-title">Valid 路径</span><span class="field-hint">验证集 jsonl（每行 text）；空或 Valid Every=0 则只画 train。</span><div class="path-row"><input id="valid-path" type="text" /><button type="button" class="btn-browse" data-for="valid-path">浏览</button></div></label>
+              <div class="grid">
+                <label><span class="field-title">Valid Every</span><span class="field-hint">每隔多少 step 跑一次验证；0=关闭。</span><input id="valid-every" type="number" min="0" /></label>
+                <label><span class="field-title">Valid Max Samples</span><span class="field-hint">每次验证最多用多少条样本。</span><input id="valid-max-samples" type="number" min="1" /></label>
+              </div>
               <details>
                 <summary>更多</summary>
                 <div class="grid">
@@ -1046,6 +1051,7 @@
     let trainArch = "tiny";
     let logLines = [];
     let lossPoints = [];
+    let validPoints = [];
     let eventSource = null;
     let formDirty = false;
     // true = 正在编辑一个还没落盘的新 Task；只有点 Start 才会真正创建
@@ -1298,7 +1304,8 @@
 
         function setFormEnabled(editable) {
       ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",
-       "max-steps","log-every","plot-every","grad-clip","save-loss-thresholds","stable-steps",
+       "max-steps","log-every","plot-every","grad-clip","valid-path","valid-every","valid-max-samples",
+       "save-loss-thresholds","stable-steps",
        "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
         $(id).disabled = !editable && id !== "task-name";
       });
@@ -1348,6 +1355,9 @@
       set("log-every", hp.log_every);
       set("plot-every", hp.plot_every);
       set("grad-clip", hp.grad_clip);
+      set("valid-path", hp.valid_path);
+      set("valid-every", hp.valid_every);
+      set("valid-max-samples", hp.valid_max_samples);
       set("save-loss-thresholds", hp.save_loss_thresholds);
       set("stable-steps", hp.stable_steps);
       set("save-every", hp.save_every);
@@ -1369,6 +1379,9 @@
         log_every: num("log-every"),
         plot_every: num("plot-every"),
         grad_clip: num("grad-clip"),
+        valid_path: $("valid-path").value.trim(),
+        valid_every: num("valid-every"),
+        valid_max_samples: num("valid-max-samples"),
         save_loss_thresholds: $("save-loss-thresholds").value.trim(),
         stable_steps: num("stable-steps"),
         save_every: num("save-every"),
@@ -1559,7 +1572,9 @@
       const plotH = Math.max(10, cssH - padT - padB);
       const mono = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
-      if (!lossPoints.length) {
+      const hasTrain = lossPoints.length > 0;
+      const hasValid = validPoints.length > 0;
+      if (!hasTrain && !hasValid) {
         ctx.fillStyle = "#9ca3af";
         ctx.font = "12px system-ui, sans-serif";
         ctx.textAlign = "left";
@@ -1570,10 +1585,17 @@
         return;
       }
 
-      const xs = lossPoints.map((q) => q.step);
+      const xs = [
+        ...lossPoints.map((q) => q.step),
+        ...validPoints.map((q) => q.step),
+      ];
+      const ysAll = [
+        ...lossPoints.map((q) => q.loss),
+        ...validPoints.map((q) => q.loss),
+      ];
       const ys = lossPoints.map((q) => q.loss);
       let minX = Math.min(...xs), maxX = Math.max(...xs);
-      let minY = Math.min(...ys), maxY = Math.max(...ys);
+      let minY = Math.min(...ysAll), maxY = Math.max(...ysAll);
       if (maxX === minX) { minX -= 1; maxX += 1; }
       const padY = (maxY - minY) * 0.12 || Math.abs(maxY) * 0.12 || 1;
       minY = Math.max(0, minY - padY);
@@ -1631,54 +1653,110 @@
       ctx.fillText("step", padL + plotW, cssH - 4);
 
       // --- 曲线：原始值画淡，EMA 平滑画实
-      const smoothed = smoothLosses(lossPoints, lossSmooth);
+      const smoothed = hasTrain ? smoothLosses(lossPoints, lossSmooth) : [];
       const showRaw = lossSmooth > 0.001;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
 
-      const strokeSeries = (values, color, width) => {
+      const strokeSeries = (points, values, color, width) => {
+        if (!points.length) return;
         ctx.strokeStyle = color;
         ctx.lineWidth = width;
         ctx.beginPath();
-        lossPoints.forEach((q, i) => {
+        points.forEach((q, i) => {
           const x = sx(q.step), y = sy(values[i]);
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.stroke();
       };
 
-      if (showRaw) strokeSeries(ys, "rgba(29,78,216,0.20)", 1);
+      let series = [];
+      if (hasTrain) {
+        if (showRaw) strokeSeries(lossPoints, ys, "rgba(29,78,216,0.20)", 1);
+        series = showRaw ? smoothed : ys;
+        strokeSeries(lossPoints, series, "#1d4ed8", 2);
+      }
 
-      const series = showRaw ? smoothed : ys;
-      strokeSeries(series, "#1d4ed8", 2);
+      const validYs = validPoints.map((q) => q.loss);
+      const validSmoothed = hasValid ? smoothLosses(validPoints, lossSmooth) : [];
+      let validSeries = [];
+      if (hasValid) {
+        if (showRaw) strokeSeries(validPoints, validYs, "rgba(234,88,12,0.25)", 1);
+        validSeries = showRaw ? validSmoothed : validYs;
+        strokeSeries(validPoints, validSeries, "#ea580c", 2);
+      }
 
       // --- 最低点（原始）/ 最新点（落在实线上）
-      let best = lossPoints[0];
-      for (const q of lossPoints) if (q.loss < best.loss) best = q;
-      const last = lossPoints[lossPoints.length - 1];
+      let best = null;
+      let last = null;
+      if (hasTrain) {
+        best = lossPoints[0];
+        for (const q of lossPoints) if (q.loss < best.loss) best = q;
+        last = lossPoints[lossPoints.length - 1];
 
-      ctx.fillStyle = "rgba(4,120,87,0.75)";
-      ctx.beginPath();
-      ctx.arc(sx(best.step), sy(best.loss), 2.6, 0, Math.PI * 2);
-      ctx.fill();
+        ctx.fillStyle = "rgba(4,120,87,0.75)";
+        ctx.beginPath();
+        ctx.arc(sx(best.step), sy(best.loss), 2.6, 0, Math.PI * 2);
+        ctx.fill();
 
-      ctx.fillStyle = "#1d4ed8";
-      ctx.beginPath();
-      ctx.arc(sx(last.step), sy(series[series.length - 1]), 3.4, 0, Math.PI * 2);
-      ctx.fill();
+        ctx.fillStyle = "#1d4ed8";
+        ctx.beginPath();
+        ctx.arc(sx(last.step), sy(series[series.length - 1]), 3.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (hasValid) {
+        const vlast = validPoints[validPoints.length - 1];
+        ctx.fillStyle = "#ea580c";
+        ctx.beginPath();
+        ctx.arc(sx(vlast.step), sy(validSeries[validSeries.length - 1]), 3.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // --- 图例
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      let legendX = padL + 8;
+      const legendY = 6;
+      if (hasTrain) {
+        ctx.fillStyle = "#1d4ed8";
+        ctx.fillRect(legendX, legendY + 3, 12, 3);
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.fillText("train", legendX + 16, legendY);
+        legendX += 64;
+      }
+      if (hasValid) {
+        ctx.fillStyle = "#ea580c";
+        ctx.fillRect(legendX, legendY + 3, 12, 3);
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.fillText("valid", legendX + 16, legendY);
+      }
 
       // --- 图下说明
       const cap = $("loss-caption");
       if (cap) {
-        const lrTxt = last.lr != null ? Number(last.lr).toExponential(1) : "—";
-        const pplTxt = last.ppl != null ? Number(last.ppl).toFixed(2) : "—";
-        cap.innerHTML =
-          '<span>最新 <b>loss ' + fmtAxis(last.loss) + '</b> @ step ' + last.step + '</span>' +
-          '<span>趋势 <b>' + fmtAxis(smoothed[smoothed.length - 1]) + '</b></span>' +
-          '<span>最低 <b>loss ' + fmtAxis(best.loss) + '</b> @ step ' + best.step + '</span>' +
-          '<span>ppl <b>' + pplTxt + '</b></span>' +
-          '<span>lr <b>' + lrTxt + '</b></span>' +
-          '<span>采样 <b>' + lossPoints.length + '</b> 点</span>';
+        let html = "";
+        if (hasTrain) {
+          const lrTxt = last.lr != null ? Number(last.lr).toExponential(1) : "—";
+          const pplTxt = last.ppl != null ? Number(last.ppl).toFixed(2) : "—";
+          html +=
+            '<span style="color:#1d4ed8">train <b>loss ' + fmtAxis(last.loss) + '</b> @ ' + last.step + '</span>' +
+            '<span>趋势 <b>' + fmtAxis(smoothed[smoothed.length - 1]) + '</b></span>' +
+            '<span>最低 <b>' + fmtAxis(best.loss) + '</b> @ ' + best.step + '</span>' +
+            '<span>ppl <b>' + pplTxt + '</b></span>' +
+            '<span>lr <b>' + lrTxt + '</b></span>' +
+            '<span>采样 <b>' + lossPoints.length + '</b></span>';
+        }
+        if (hasValid) {
+          const vlast = validPoints[validPoints.length - 1];
+          const vppl = vlast.ppl != null ? Number(vlast.ppl).toFixed(2) : "—";
+          html +=
+            '<span style="color:#ea580c">valid <b>loss ' + fmtAxis(vlast.loss) + '</b> @ ' + vlast.step + '</span>' +
+            '<span>ppl <b>' + vppl + '</b></span>' +
+            '<span>采样 <b>' + validPoints.length + '</b></span>';
+        }
+        cap.innerHTML = html;
       }
     }
 
@@ -1696,6 +1774,7 @@
 
     function applyMetrics(m) {
       lossPoints = (m && m.loss) || [];
+      validPoints = (m && m.valid_loss) || [];
       drawLoss();
       updateProgress(lastLiveStatus);
     }
@@ -1771,6 +1850,8 @@
         ["epochs", hp.epochs],
         ["max_steps", hp.max_steps],
         ["plot_every", hp.plot_every],
+        ["valid_path", hp.valid_path],
+        ["valid_every", hp.valid_every],
         ["out_dir", t.out_dir || "-"],
       ];
       const dl = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v == null || v === "" ? "-" : v}</dd>`).join("");
@@ -1808,6 +1889,7 @@
       disconnectLogs();
       clearLog();
       lossPoints = [];
+      validPoints = [];
       drawLoss();
       lastLiveStatus = null;
       $("task-detail-empty").style.display = "none";
@@ -1860,6 +1942,7 @@
         disconnectLogs();
         $("log").textContent = "";
         lossPoints = [];
+        validPoints = [];
         drawLoss();
       }
       refreshTasks();
