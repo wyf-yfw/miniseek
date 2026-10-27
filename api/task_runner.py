@@ -109,6 +109,30 @@ def _hp(hparams: Dict[str, Any], key: str, default: Any) -> Any:
     return default
 
 
+def validate_sft_init_ckpt(mode: str, hparams: Optional[Dict[str, Any]] = None, *, require_exists: bool = False) -> None:
+    """SFT must fine-tune from a pretrained ckpt unless Resume is set.
+
+    Resume takes priority when non-empty; otherwise Init Ckpt is required.
+    When require_exists=True (start/build), the chosen path must exist on disk.
+    """
+    mode_l = (mode or "").strip().lower()
+    if mode_l != "sft":
+        return
+    hp = dict(hparams or {})
+    resume = str(hp.get("resume") or "").strip()
+    init_ckpt = str(hp.get("init_ckpt") or "").strip()
+    if resume:
+        if require_exists and not Path(resume).exists():
+            raise ValueError(f"SFT Resume 路径不存在: {resume}")
+        return
+    if not init_ckpt:
+        raise ValueError(
+            "SFT 必须填写 Init Ckpt（从预训练 .pt 微调）；若断点续训请改填 Resume"
+        )
+    if require_exists and not Path(init_ckpt).exists():
+        raise ValueError(f"SFT Init Ckpt 路径不存在: {init_ckpt}")
+
+
 def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     hp = dict(task.get("hparams") or {})
     arch = (task.get("arch") or "dense").strip().lower()
@@ -176,9 +200,10 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     resume = str(_hp(hp, "resume", "") or "").strip()
     init_ckpt = str(_hp(hp, "init_ckpt", "") or "").strip()
     if mode == "sft":
-        if resume and Path(resume).exists():
+        validate_sft_init_ckpt(mode, hp, require_exists=True)
+        if resume:
             cmd.extend(["--resume", resume])
-        elif init_ckpt and Path(init_ckpt).exists():
+        else:
             cmd.extend(["--init-ckpt", init_ckpt])
     else:
         if resume and Path(resume).exists():
@@ -417,6 +442,11 @@ def start_task(task_id: str) -> Dict[str, Any]:
     if task.get("status") == "running" and pid_alive(task.get("pid")):
         raise RuntimeError(f"task already running: {task_id}")
 
+    validate_sft_init_ckpt(
+        str(task.get("mode") or ""),
+        task.get("hparams") or {},
+        require_exists=True,
+    )
     cmd = build_train_cmd(task)
     log_path = ts.task_dir(task_id) / "train.log"
     # Reset metrics for a fresh run

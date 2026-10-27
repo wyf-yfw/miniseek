@@ -43,3 +43,51 @@ def test_list_includes_created(client):
 def test_old_train_endpoints_gone(client):
     assert client.post("/api/train/start", json={}).status_code == 410
     assert client.get("/api/train/processes").status_code == 410
+
+
+def test_create_sft_requires_init_ckpt(client):
+    r = client.post(
+        "/api/tasks",
+        json={
+            "name": "sft-bad",
+            "arch": "dense",
+            "mode": "sft",
+            "hparams": {"init_ckpt": "", "resume": ""},
+        },
+    )
+    assert r.status_code == 400, r.text
+    assert "Init Ckpt" in r.json()["detail"]
+
+
+def test_create_sft_ok_with_init_ckpt(client):
+    r = client.post(
+        "/api/tasks",
+        json={
+            "name": "sft-ok",
+            "arch": "dense",
+            "mode": "sft",
+            "hparams": {"init_ckpt": "/tmp/fake_pretrain.pt"},
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["hparams"]["init_ckpt"] == "/tmp/fake_pretrain.pt"
+
+
+def test_patch_sft_clears_init_rejected(client):
+    r = client.post(
+        "/api/tasks",
+        json={
+            "name": "sft-patch",
+            "arch": "dense",
+            "mode": "sft",
+            "hparams": {"init_ckpt": "/tmp/fake_pretrain.pt"},
+        },
+    )
+    tid = r.json()["id"]
+    bad = client.patch(
+        f"/api/tasks/{tid}",
+        json={"hparams": {"init_ckpt": "", "resume": ""}},
+    )
+    assert bad.status_code == 400, bad.text
+    assert "Init Ckpt" in bad.json()["detail"]
+

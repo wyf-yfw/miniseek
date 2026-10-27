@@ -204,6 +204,8 @@
     h2 { margin: 0 0 12px; font-size: 15px; }
     label { display: block; margin: 10px 0; color: var(--muted); font-size: 12px; }
     label .field-title { color: var(--ink); font-weight: 600; }
+    label .field-title .req-mark { color: #dc2626; font-weight: 700; margin-left: 2px; }
+    #init-ckpt.required-empty { border-color: #f87171; background: #fef2f2; }
     label .field-hint { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.35; }
     input, select, textarea {
       width: 100%;
@@ -743,8 +745,8 @@
 
               <div class="param-group mode-sft" id="group-sft-only">
                 <div class="group-title">SFT 专属</div>
-                <p class="group-desc">只对 SFT 生效。Init Ckpt = 从预训练权重初始化（不含优化器）；与 Resume 二选一优先 Resume。</p>
-                <label><span class="field-title">Init Ckpt</span><span class="field-hint">预训练 base 权重 .pt（Dense/MoE 须与上方架构一致）。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
+                <p class="group-desc" id="sft-group-desc">只对 SFT 生效。必须从预训练 .pt 微调（Init Ckpt）；若填了 Resume 则优先断点续训，Init 可空。</p>
+                <label><span class="field-title">Init Ckpt<span class="req-mark" id="init-ckpt-req" title="必填">*</span></span><span class="field-hint" id="init-ckpt-hint">必填：预训练 base 权重 .pt（Dense/MoE 须与上方架构一致）。填了 Resume 时可空。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="必填：预训练 .pt" required /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
               </div>
 
               <div class="param-group mode-pretrain" id="group-pretrain-only">
@@ -1437,9 +1439,49 @@
       const dataDesc = $("data-group-desc");
       if (dataDesc) {
         dataDesc.textContent = isSft
-          ? "SFT 训练/验证路径自己填。Init Ckpt 在「SFT 专属」区；Resume 在「断点 / 速度」。"
+          ? "SFT 训练/验证路径自己填。Init Ckpt 在「SFT 专属」区（无 Resume 时必填）；Resume 在「断点 / 速度」。"
           : "Pretrain 训练/验证路径自己填。Batch Mode 在「Pretrain 专属」；Resume 在「断点 / 速度」。";
       }
+      syncInitCkptRequired();
+    }
+
+    function syncInitCkptRequired() {
+      const isSft = trainMode === "sft";
+      const resume = ($("resume") && $("resume").value.trim()) || "";
+      const needInit = isSft && !resume;
+      const req = $("init-ckpt-req");
+      const hint = $("init-ckpt-hint");
+      const inp = $("init-ckpt");
+      const desc = $("sft-group-desc");
+      if (req) req.hidden = !needInit;
+      if (inp) {
+        if (needInit) inp.setAttribute("required", "required");
+        else inp.removeAttribute("required");
+        inp.placeholder = needInit ? "必填：预训练 .pt" : "有 Resume 时可空（可选 .pt）";
+        const empty = !(inp.value || "").trim();
+        inp.classList.toggle("required-empty", needInit && empty);
+      }
+      if (hint) {
+        hint.textContent = needInit
+          ? "必填：预训练 base 权重 .pt（Dense/MoE 须与上方架构一致）。填了 Resume 时可空。"
+          : "已填 Resume：Init Ckpt 可选；未填 Resume 时必填预训练 .pt。";
+      }
+      if (desc) {
+        desc.textContent = needInit
+          ? "只对 SFT 生效。必须从预训练 .pt 微调（Init Ckpt）；若填了 Resume 则优先断点续训，Init 可空。"
+          : "只对 SFT 生效。当前已填 Resume，优先断点续训；Init Ckpt 可选。";
+      }
+    }
+
+    function validateSftHparams() {
+      if (trainMode !== "sft") return null;
+      const resume = ($("resume") && $("resume").value.trim()) || "";
+      const initCkpt = ($("init-ckpt") && $("init-ckpt").value.trim()) || "";
+      syncInitCkptRequired();
+      if (!resume && !initCkpt) {
+        return "SFT 必须填写 Init Ckpt（从预训练 .pt 微调）；若断点续训请改填 Resume";
+      }
+      return null;
     }
 
     function applyArchUI(arch) {
@@ -1550,6 +1592,7 @@
       set("aux-coef", hp.aux_coef);
       set("resume", hp.resume || "");
       set("init-ckpt", hp.init_ckpt || "");
+      syncInitCkptRequired();
     }
 
     function collectHparams() {
@@ -2242,8 +2285,17 @@
       formDirty = true;
     });
 
+    ["resume", "init-ckpt"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener("input", () => { syncInitCkptRequired(); formDirty = true; });
+      el.addEventListener("change", () => { syncInitCkptRequired(); formDirty = true; });
+    });
+
     $("btn-save").addEventListener("click", async () => {
       if (unsavedNew || !selectedId) return;
+      const err = validateSftHparams();
+      if (err) { $("action-msg").textContent = err; return; }
       const body = { name: $("task-name").value.trim() };
       if (currentTask && currentTask.status === "draft") {
         body.arch = trainArch;
@@ -2265,6 +2317,8 @@
     });
 
     $("btn-start").addEventListener("click", async () => {
+      const sftErr = validateSftHparams();
+      if (sftErr) { $("action-msg").textContent = sftErr; return; }
       if (unsavedNew || !selectedId) {
         const arch = trainArch;
         const mode = trainMode;
@@ -3504,7 +3558,7 @@ $("btn-bench-edit").addEventListener("click", async () => {
       }
     }
 
-    $("moe-data").value = "/home/wyf/miniseek/data/valid.jsonl";
+    $("moe-data").value = "/home/wyf/miniseek/data/valid_mix.jsonl";
     $("btn-moe-refresh-ckpt").addEventListener("click", refreshMoeCheckpoints);
     $("btn-moe-probe").addEventListener("click", runMoeProbe);
     document.querySelectorAll(".page-tabs button").forEach((btn) => {

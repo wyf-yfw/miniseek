@@ -124,13 +124,20 @@ def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
 
 
 
-def test_build_train_cmd_sft_moe_allowed(tasks_root):
+def test_build_train_cmd_sft_moe_allowed(tasks_root, tmp_path):
     """SFT + MoE must build a cmd (no ValueError) and pass --arch moe."""
+    ckpt = tmp_path / "pretrain.pt"
+    ckpt.write_bytes(b"x")
     t = ts.create_task(
         name="sft-moe",
         arch="moe",
         mode="sft",
-        hparams={"max_steps": 2, "batch_size": 2, "aux_coef": 0.02},
+        hparams={
+            "max_steps": 2,
+            "batch_size": 2,
+            "aux_coef": 0.02,
+            "init_ckpt": str(ckpt),
+        },
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
     assert "algo.train_sft" in cmd
@@ -138,6 +145,36 @@ def test_build_train_cmd_sft_moe_allowed(tasks_root):
     assert cmd[cmd.index("--arch") + 1] == "moe"
     assert "--aux-coef" in cmd
     assert cmd[cmd.index("--aux-coef") + 1] == "0.02"
+    assert "--init-ckpt" in cmd
+    assert cmd[cmd.index("--init-ckpt") + 1] == str(ckpt)
+
+
+def test_build_train_cmd_sft_requires_init_ckpt(tasks_root):
+    t = ts.create_task(
+        name="sft-no-init",
+        arch="dense",
+        mode="sft",
+        hparams={"max_steps": 2, "init_ckpt": "", "resume": ""},
+    )
+    try:
+        tr.build_train_cmd(ts.load_task(t["id"]))
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "Init Ckpt" in str(exc)
+
+
+def test_build_train_cmd_sft_resume_skips_init(tasks_root, tmp_path):
+    resume = tmp_path / "sft_last.pt"
+    resume.write_bytes(b"x")
+    t = ts.create_task(
+        name="sft-resume",
+        arch="dense",
+        mode="sft",
+        hparams={"max_steps": 2, "init_ckpt": "", "resume": str(resume)},
+    )
+    cmd = tr.build_train_cmd(ts.load_task(t["id"]))
+    assert "--resume" in cmd
+    assert "--init-ckpt" not in cmd
 
 
 def test_build_train_cmd_speed_defaults(tasks_root):

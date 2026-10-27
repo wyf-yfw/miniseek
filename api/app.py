@@ -33,7 +33,7 @@ from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
 from api import tasks_store as ts
 from api import bench_store as bs
-from api.task_runner import pid_alive, reconcile_task, start_task, stop_task
+from api.task_runner import pid_alive, reconcile_task, start_task, stop_task, validate_sft_init_ckpt
 from api.bench_runner import (
     reconcile_run,
     start_run as bench_start_run,
@@ -71,7 +71,26 @@ def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
 
 _TRAIN_TOTALS_RE = re.compile(r"total_steps=(\d+)")
 _TRAIN_SAMPLES_RE = re.compile(r"samples=(\d+)")
+# train.log uses "step=123"; do not use "step": (expert_load JSON) or start_step=/total_steps=
+_TRAIN_STEP_RE = re.compile(r"(?<![A-Za-z0-9_])step=(\d+)\b")
 _train_totals_cache: Dict[str, Dict[str, Optional[int]]] = {}
+
+
+def _latest_train_step(task_id: str) -> Optional[int]:
+    """Latest step=N from train.log tail — independent of plot_every / metrics.json."""
+    log_path = ts.task_dir(task_id) / "train.log"
+    try:
+        with open(log_path, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - 262144))
+            chunk = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    step: Optional[int] = None
+    for m in _TRAIN_STEP_RE.finditer(chunk):
+        step = int(m.group(1))
+    return step
 
 
 def _train_totals(task_id: str) -> Dict[str, Optional[int]]:
@@ -120,6 +139,9 @@ def _live_train_status(
     metrics = ts.read_metrics(task_id)
     loss = metrics.get("loss") or []
     step: Optional[int] = int(loss[-1]["step"]) if loss else None
+    log_step = _latest_train_step(task_id)
+    if log_step is not None and (step is None or log_step > step):
+        step = log_step
     started = _parse_iso(task.get("started_at"))
     ended = _parse_iso(task.get("ended_at"))
     now = datetime.now()
@@ -340,7 +362,7 @@ class InferenceEngine:
         if not hasattr(self.model, "probe_expert_load"):
             raise HTTPException(status_code=400, detail="该 MoE 权重不支持专家负载探针")
 
-        data_p = Path(data_path.strip() or str(PROJECT_ROOT / "data" / "valid.jsonl"))
+        data_p = Path(data_path.strip() or str(PROJECT_ROOT / "data" / "valid_mix.jsonl"))
         if not data_p.is_absolute():
             data_p = (PROJECT_ROOT / data_p).resolve()
         if not data_p.exists():
@@ -600,7 +622,7 @@ class LoadRequest(BaseModel):
 
 class ExpertLoadRequest(BaseModel):
     ckpt_path: str = ""
-    data_path: str = str(PROJECT_ROOT / "data" / "valid.jsonl")
+    data_path: str = str(PROJECT_ROOT / "data" / "valid_mix.jsonl")
     num_samples: int = Field(default=64, ge=1, le=2048)
     max_seq_len: int = Field(default=512, ge=8, le=4096)
     batch_size: int = Field(default=4, ge=1, le=16)
@@ -667,7 +689,7 @@ def env_text() -> str:
     for label, p in [
         ("预训练数据", Path(DEFAULT_PRETRAIN_DATA)),
         ("SFT 数据", Path(DEFAULT_SFT_DATA)),
-        ("验证集", PROJECT_ROOT / "data" / "valid.jsonl"),
+        ("验证集", PROJECT_ROOT / "data" / "valid_mix.jsonl"),
     ]:
         if p.exists():
             lines.append(f"{label}: {p.name} ({p.stat().st_size / (1024 * 1024):.1f} MB)")
@@ -1057,7 +1079,12 @@ def api_create_task(body: TaskCreate) -> dict:
     base = dict(defaults_map.get(arch) or defaults_map["dense"])
     base.update(body.hparams or {})
     base["arch"] = arch
+    base["mode"] = mode
     base.pop("out_dir", None)  # out_dir forced by store
+    try:
+        validate_sft_init_ckpt(mode, base, require_exists=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     name = (body.name or "").strip() or f"{arch}-{mode}"
     try:
         return ts.create_task(name=name, arch=arch, mode=mode, hparams=base, uniquify=bool(body.uniquify))
@@ -1094,6 +1121,14 @@ def api_patch_task(task_id: str, body: TaskPatch) -> dict:
             hp.update(body.hparams)
             hp.pop("out_dir", None)
             task["hparams"] = hp
+        try:
+            validate_sft_init_ckpt(
+                str(task.get("mode") or ""),
+                task.get("hparams") or {},
+                require_exists=False,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     elif body.hparams is not None or body.arch is not None or body.mode is not None:
         raise HTTPException(status_code=400, detail="只有 draft 可改 arch/mode/hparams")
     ts.save_task(task)
