@@ -420,17 +420,11 @@ def main() -> None:
         else:
             print(f"[sft] WARN: valid 文件不存在，跳过: {valid_path}", flush=True)
 
+    plan_steps = steps_per_epoch * max(1, args.epochs)
     if args.max_steps is not None:
-        total_steps = args.max_steps
+        total_steps = int(args.max_steps)
     else:
-        total_steps = steps_per_epoch * max(1, args.epochs)
-    print(
-        f"[sft] batch_mode={batch_mode} samples={len(ds)} steps/epoch≈{steps_per_epoch} "
-        f"total_steps={total_steps} warmup={args.warmup_steps} "
-        f"lr={args.lr}→{args.min_lr} thresholds={thresholds} "
-        f"stable_steps={args.stable_steps}",
-        flush=True,
-    )
+        total_steps = plan_steps
 
     opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
     if bool(args.fused_adamw) and device.type == "cuda":
@@ -470,12 +464,30 @@ def main() -> None:
         global_step = int(blob.get("step", 0))
         if blob.get("loss") is not None:
             best_loss = float(blob["loss"])
+        if args.max_steps is None:
+            # 续训没给绝对步数时，epochs 表示再扫几遍数据：
+            # 总预算 = 已跑 + 本次，LR 余弦才会覆盖整段而不是卡在 min_lr
+            total_steps = global_step + plan_steps
         print(f"[sft] resumed from {resume_path} step={global_step} best_loss={best_loss}")
     elif args.init_ckpt:
         init_path = Path(args.init_ckpt)
         blob = torch.load(init_path, map_location="cpu", weights_only=False)
         model.load_state_dict(blob["model"], strict=True)
         print(f"[sft] init weights from {init_path} (pretrain step={blob.get('step', '?')})")
+
+    print(
+        f"[sft] batch_mode={batch_mode} samples={len(ds)} steps/epoch≈{steps_per_epoch} "
+        f"start_step={global_step} total_steps={total_steps} warmup={args.warmup_steps} "
+        f"lr={args.lr}→{args.min_lr} thresholds={thresholds} "
+        f"stable_steps={args.stable_steps}",
+        flush=True,
+    )
+    if global_step >= total_steps:
+        print(
+            f"[sft] WARN: 起点 step={global_step} 已不低于 total_steps={total_steps}，"
+            f"本次不会再有有效训练步",
+            flush=True,
+        )
 
     model.train()
     t0 = time.time()

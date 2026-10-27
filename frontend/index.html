@@ -1719,7 +1719,12 @@
 
       const elapsed = s && s.elapsed_sec != null ? Number(s.elapsed_sec) : null;
       let rate = s && s.step_s != null ? Number(s.step_s) : null;
-      if (!rate && elapsed) rate = step / Math.max(1, elapsed);
+      const startStep = s && s.start_step != null ? Number(s.start_step) : null;
+      if (!rate && elapsed) {
+        const done = (Number.isFinite(startStep) && step >= startStep)
+          ? (step - startStep) : step;
+        rate = Math.max(0, done) / Math.max(1, elapsed);
+      }
       const active = status === "running" || status === "stopping";
       const fill = $("tp-fill");
       const pct = total > 0 ? Math.max(0, Math.min(100, (step / total) * 100)) : null;

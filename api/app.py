@@ -71,6 +71,8 @@ def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
 
 _TRAIN_TOTALS_RE = re.compile(r"total_steps=(\d+)")
 _TRAIN_SAMPLES_RE = re.compile(r"samples=(\d+)")
+_TRAIN_START_STEP_RE = re.compile(r"start_step=(\d+)")
+_TRAIN_RESUMED_STEP_RE = re.compile(r"resumed from .* step=(\d+)")
 # train.log uses "step=123"; do not use "step": (expert_load JSON) or start_step=/total_steps=
 _TRAIN_STEP_RE = re.compile(r"(?<![A-Za-z0-9_])step=(\d+)\b")
 _train_totals_cache: Dict[str, Dict[str, Optional[int]]] = {}
@@ -94,37 +96,60 @@ def _latest_train_step(task_id: str) -> Optional[int]:
 
 
 def _train_totals(task_id: str) -> Dict[str, Optional[int]]:
-    """从 train.log 头部取 samples / total_steps（训练脚本启动时打印一次）。
+    """从 train.log 头部取 samples / total_steps / start_step。
 
-    步数是训练脚本按 ceil(samples / batch_size) * epochs（有 max_steps 时取它）
-    算出来的，这里直接复用，省得前端再推一遍出错。
+    新日志会打印绝对 total_steps（含 resume 起点）。旧 SFT 续训会在 resume 前
+    打印「本轮」total_steps，再打印 resumed step=N，此时需要把分母修成
+    start_step + this_run，否则进度条会出现 4205/2538、100%。
     """
     hit = _train_totals_cache.get(task_id)
     if hit is not None:
         return hit
-    info: Dict[str, Optional[int]] = {"total_steps": None, "samples": None}
+    info: Dict[str, Optional[int]] = {
+        "total_steps": None,
+        "samples": None,
+        "start_step": None,
+    }
     try:
         log_path = ts.task_dir(task_id) / "train.log"
         with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
-            for _ in range(400):
+            for _ in range(800):
                 line = fh.readline()
                 if not line:
                     break
-                if info["samples"] is None:
+                # Stop once we leave the startup header (first real train step line).
+                if line.startswith("epoch=") and " step=" in line and "loss=" in line:
+                    break
+                # Prefer train-set samples (last non-valid header hit), not valid=...samples=
+                if "valid=" not in line:
                     m = _TRAIN_SAMPLES_RE.search(line)
                     if m:
                         info["samples"] = int(m.group(1))
-                if info["total_steps"] is None:
-                    m = _TRAIN_TOTALS_RE.search(line)
-                    if m:
-                        info["total_steps"] = int(m.group(1))
-                if info["total_steps"] is not None:
-                    break
+                m = _TRAIN_TOTALS_RE.search(line)
+                if m:
+                    # Last header hit wins (post-resume corrected line).
+                    info["total_steps"] = int(m.group(1))
+                m = _TRAIN_START_STEP_RE.search(line)
+                if m:
+                    info["start_step"] = int(m.group(1))
+                m = _TRAIN_RESUMED_STEP_RE.search(line)
+                if m:
+                    # start_step= (if present) already preferred; else use resume.
+                    if info["start_step"] is None:
+                        info["start_step"] = int(m.group(1))
     except OSError:
         pass
+
+    start = info.get("start_step")
+    total = info.get("total_steps")
+    if start is not None and total is not None and total <= start:
+        # Legacy: total_steps was this-run budget only.
+        info["total_steps"] = start + total
+
     if info["total_steps"] is not None:
         _train_totals_cache[task_id] = info
     return info
+
 
 
 def _live_train_status(
@@ -164,7 +189,10 @@ def _live_train_status(
         if dt >= 0.5:
             step_s = (step - prev_step) / dt
     if step_s is None and step is not None and elapsed_sec > 0:
-        if len(loss) >= 2:
+        start = totals.get("start_step")
+        if start is not None and step >= int(start):
+            step_s = (step - int(start)) / max(elapsed_sec, 1)
+        elif len(loss) >= 2:
             first = int(loss[0]["step"])
             avg = (step - first) / max(elapsed_sec, 1)
             step_s = step / max(elapsed_sec, 1) if avg < 0 else avg
@@ -182,6 +210,7 @@ def _live_train_status(
         "step": step,
         "step_s": None if step_s is None else round(float(step_s), 4),
         "total_steps": totals["total_steps"],
+        "start_step": totals.get("start_step"),
         "samples": totals["samples"],
         "_mono": mono,
         "_step_snap": step,
