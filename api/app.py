@@ -534,6 +534,127 @@ class InferenceEngine:
         }
 
 
+    def _token_str(self, token_id: int) -> str:
+        tok = self.tokenizer
+        try:
+            piece = tok.decode([int(token_id)], skip_special_tokens=False)
+        except Exception:
+            piece = ""
+        if not piece:
+            try:
+                piece = str(tok.convert_ids_to_tokens(int(token_id)))
+            except Exception:
+                piece = f"<id:{token_id}>"
+        return piece
+
+    def _format_topk(self, chosen_id: int, info: dict) -> list:
+        rows = []
+        ids = info.get("ids") or []
+        logits = info.get("logits") or []
+        probs = info.get("probs") or []
+        for i, tid in enumerate(ids):
+            tid = int(tid)
+            rows.append({
+                "id": tid,
+                "token": self._token_str(tid),
+                "logit": round(float(logits[i]) if i < len(logits) else 0.0, 4),
+                "prob": round(float(probs[i]) if i < len(probs) else 0.0, 6),
+                "chosen": tid == int(chosen_id),
+            })
+        if not any(r["chosen"] for r in rows):
+            rows.append({
+                "id": int(chosen_id),
+                "token": self._token_str(int(chosen_id)),
+                "logit": None,
+                "prob": None,
+                "chosen": True,
+            })
+        return rows
+
+    def stream_chat_debug(
+        self,
+        messages: List[dict],
+        max_new_tokens: int = 256,
+        temperature: float = 0.8,
+        top_k: int = 50,
+        seed: int = 42,
+        debug_topk: int = 10,
+    ):
+        if self.model is None:
+            raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
+        if not hasattr(self.model, "generate_stream_debug"):
+            raise HTTPException(status_code=400, detail="当前模型不支持逐步调试")
+        prompt = self.build_chat_prompt(messages)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+        ids = self.tokenizer.encode(prompt, add_special_tokens=False)
+        input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
+        eos_id = getattr(self.tokenizer, "eos_token_id", None)
+        t0 = time.time()
+        token_ids: List[int] = []
+        prev_text = ""
+        n = 0
+        candidates_k = max(1, min(int(debug_topk), 50))
+        with self._gen_lock:
+            for token, info in self.model.generate_stream_debug(
+                input_ids,
+                max_new_tokens=int(max_new_tokens),
+                temperature=float(temperature),
+                top_k=int(top_k),
+                eos_token_id=eos_id,
+                candidates_k=candidates_k,
+            ):
+                n += 1
+                topk_rows = self._format_topk(int(token), info)
+                if eos_id is not None and token == int(eos_id):
+                    yield {
+                        "event": "token",
+                        "data": {
+                            "text": "",
+                            "token_id": int(token),
+                            "token": self._token_str(int(token)),
+                            "topk": topk_rows,
+                            "eos": True,
+                            "step": n,
+                        },
+                    }
+                    break
+                token_ids.append(int(token))
+                full = self.tokenizer.decode(token_ids, skip_special_tokens=False)
+                for special in ("<|im_start|>", "<|im_end|>", "<|endoftext|>"):
+                    full = full.replace(special, "")
+                piece = ""
+                if "\ufffd" not in full:
+                    if full.startswith(prev_text):
+                        piece = full[len(prev_text):]
+                    else:
+                        piece = full
+                    prev_text = full
+                yield {
+                    "event": "token",
+                    "data": {
+                        "text": piece,
+                        "token_id": int(token),
+                        "token": self._token_str(int(token)),
+                        "topk": topk_rows,
+                        "eos": False,
+                        "step": n,
+                    },
+                }
+        cost = time.time() - t0
+        speed = n / max(cost, 1e-6)
+        yield {
+            "event": "done",
+            "data": {
+                "text": prev_text,
+                "tokens": n,
+                "seconds": round(cost, 2),
+                "tokens_per_s": round(speed, 1),
+            },
+        }
+
 
     def stream_continue(
         self,
@@ -669,6 +790,8 @@ class ChatRequest(BaseModel):
     temperature: float = 0.8
     top_k: int = 50
     seed: int = 42
+    debug: bool = False
+    debug_topk: int = 10
 
 
 def list_checkpoints_global() -> List[str]:
@@ -1559,13 +1682,24 @@ async def infer_chat_stream(req: ChatRequest) -> StreamingResponse:
 
     def event_iter():
         try:
-            for item in infer_engine.stream_chat(
-                payload,
-                max_new_tokens=req.max_new_tokens,
-                temperature=req.temperature,
-                top_k=req.top_k,
-                seed=req.seed,
-            ):
+            if req.debug:
+                gen = infer_engine.stream_chat_debug(
+                    payload,
+                    max_new_tokens=req.max_new_tokens,
+                    temperature=req.temperature,
+                    top_k=req.top_k,
+                    seed=req.seed,
+                    debug_topk=req.debug_topk,
+                )
+            else:
+                gen = infer_engine.stream_chat(
+                    payload,
+                    max_new_tokens=req.max_new_tokens,
+                    temperature=req.temperature,
+                    top_k=req.top_k,
+                    seed=req.seed,
+                )
+            for item in gen:
                 yield _sse(item["event"], item["data"])
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)

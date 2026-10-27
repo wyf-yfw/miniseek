@@ -395,9 +395,41 @@
     .chat-composer textarea { resize: none; min-height: 40px; max-height: 160px; }
     #btn-send { background: var(--accent); color: white; border-color: var(--accent); }
     #btn-stop-gen { background: var(--stop); color: white; border-color: var(--stop); }
-    #btn-send:disabled, #btn-stop-gen:disabled {
+    #btn-send:disabled, #btn-stop-gen:disabled, #btn-debug-step:disabled, #btn-debug-auto:disabled {
       opacity: 0.45; cursor: not-allowed; filter: grayscale(0.2);
     }
+    .debug-panel {
+      display: none;
+      border-top: 1px solid var(--line);
+      background: #f8fafc;
+      padding: 10px 12px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .debug-panel.on { display: block; }
+    .debug-bar {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      margin-bottom: 8px; font-size: 12px; color: var(--muted);
+    }
+    .debug-bar strong { color: var(--text); font-weight: 600; }
+    #btn-debug-step, #btn-debug-auto { padding: 4px 10px; font-size: 12px; }
+    #btn-debug-auto.active {
+      background: var(--accent); color: #fff; border-color: var(--accent);
+    }
+    .topk-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .topk-table th, .topk-table td {
+      border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left;
+    }
+    .topk-table th { color: var(--muted); font-weight: 500; }
+    .topk-table tr.chosen td { background: #ecfdf5; font-weight: 600; }
+    .topk-token { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .toggle-row {
+      display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px;
+    }
+    .toggle-row input[type=checkbox] { width: auto; margin: 0; }
     @media (max-width: 900px) {
       .train-layout { flex-direction: column; }
       .task-sidebar { width: 100%; max-height: 220px; }
@@ -897,6 +929,14 @@
             <label>Top-K<input id="top-k" type="number" value="50" /></label>
             <label>Seed<input id="seed" type="number" value="42" /></label>
           </div>
+          <div class="toggle-row">
+            <input type="checkbox" id="chk-debug-step" />
+            <label for="chk-debug-step" style="margin:0">逐步调试</label>
+          </div>
+          <div class="grid" id="debug-opts" style="opacity:0.45;pointer-events:none">
+            <label>展示 Top-K<input id="debug-topk" type="number" value="10" min="1" max="50" /></label>
+            <label>自动间隔 ms<input id="debug-auto-ms" type="number" value="400" min="50" step="50" /></label>
+          </div>
           <button type="button" id="btn-clear-chat">清空对话</button>
         </aside>
         <div class="chat-main">
@@ -906,6 +946,18 @@
           </div>
           <div id="chat-messages" class="chat-messages">
             <div class="chat-empty" id="chat-empty">单轮对话：发新消息会清掉上一轮。先在左侧加载权重。</div>
+          </div>
+          <div id="debug-panel" class="debug-panel">
+            <div class="debug-bar">
+              <strong>逐步调试</strong>
+              <span id="debug-step-label">等待生成…</span>
+              <button type="button" id="btn-debug-step" disabled>下一步</button>
+              <button type="button" id="btn-debug-auto" disabled>自动</button>
+            </div>
+            <table class="topk-table" id="topk-table">
+              <thead><tr><th>#</th><th>token</th><th>id</th><th>prob</th><th>logit</th></tr></thead>
+              <tbody id="topk-body"><tr><td colspan="5" style="color:var(--muted)">发送后逐步展示 top-k</td></tr></tbody>
+            </table>
           </div>
           <div class="chat-composer">
             <textarea id="chat-input" rows="1" placeholder="发消息给 MiniSeek…"></textarea>
@@ -2427,7 +2479,11 @@
     $("btn-refresh-task-ckpt").addEventListener("click", refreshTaskCheckpoints);
 
     // Chat
-    const chatState = { messages: [], streaming: false, abort: null };
+    const chatState = {
+      messages: [], streaming: false, abort: null,
+      debug: false, debugQueue: [], debugPending: null, debugDone: false,
+      debugAutoTimer: null, debugAssistant: null,
+    };
     function setChatStatus(text, on) {
       $("chat-status-text").textContent = text;
       $("chat-dot").classList.toggle("on", !!on);
@@ -2450,6 +2506,122 @@
         box.appendChild(row);
       }
       box.scrollTop = box.scrollHeight;
+    }
+    function isDebugOn() { return !!($("chk-debug-step") && $("chk-debug-step").checked); }
+    function syncDebugOpts() {
+      const on = isDebugOn();
+      const opts = $("debug-opts");
+      if (opts) {
+        opts.style.opacity = on ? "1" : "0.45";
+        opts.style.pointerEvents = on ? "" : "none";
+      }
+      const panel = $("debug-panel");
+      if (panel) panel.classList.toggle("on", on || !!chatState.debug);
+    }
+    function escapeTok(s) {
+      return String(s ?? "").replace(/\n/g, "\\n").replace(/\t/g, "\\t").replace(/ /g, "·");
+    }
+    function renderTopk(pending) {
+      const body = $("topk-body");
+      const label = $("debug-step-label");
+      if (!body) return;
+      if (!pending) {
+        body.innerHTML = `<tr><td colspan="5" style="color:var(--muted)">${chatState.streaming ? "等待下一 token…" : "发送后逐步展示 top-k"}</td></tr>`;
+        if (label) label.textContent = chatState.streaming ? "生成中…" : "空闲";
+        return;
+      }
+      if (label) {
+        label.textContent = `step ${pending.step || "?"} · 选中 「${escapeTok(pending.token)}」${pending.eos ? " · EOS" : ""} · 队列 ${chatState.debugQueue.length}`;
+      }
+      const rows = pending.topk || [];
+      if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="5" style="color:var(--muted)">无 candidates</td></tr>`;
+        return;
+      }
+      body.innerHTML = rows.map((r, i) => {
+        const prob = (r.prob == null) ? "—" : (Number(r.prob) * 100).toFixed(2) + "%";
+        const logit = (r.logit == null) ? "—" : Number(r.logit).toFixed(3);
+        return `<tr class="${r.chosen ? "chosen" : ""}"><td>${i + 1}</td><td class="topk-token" title="${escapeTok(r.token)}">${escapeTok(r.token)}</td><td>${r.id}</td><td>${prob}</td><td>${logit}</td></tr>`;
+      }).join("");
+    }
+    function stopDebugAuto() {
+      if (chatState.debugAutoTimer) {
+        clearInterval(chatState.debugAutoTimer);
+        chatState.debugAutoTimer = null;
+      }
+      const btn = $("btn-debug-auto");
+      if (btn) btn.classList.remove("active");
+    }
+    function setDebugControls(active) {
+      const step = $("btn-debug-step");
+      const auto = $("btn-debug-auto");
+      if (step) step.disabled = !active || !chatState.debugPending;
+      if (auto) auto.disabled = !active;
+    }
+    function resetDebugState() {
+      stopDebugAuto();
+      chatState.debug = false;
+      chatState.debugQueue = [];
+      chatState.debugPending = null;
+      chatState.debugDone = false;
+      chatState.debugAssistant = null;
+      setDebugControls(false);
+      syncDebugOpts();
+      renderTopk(null);
+    }
+    function finishDebugIfIdle() {
+      if (!chatState.debug) return;
+      if (chatState.debugPending || chatState.debugQueue.length) return;
+      if (!chatState.debugDone) {
+        renderTopk(null);
+        setDebugControls(true);
+        const auto = $("btn-debug-auto");
+        if (auto) auto.disabled = false;
+        const step = $("btn-debug-step");
+        if (step) step.disabled = true;
+        return;
+      }
+      const assistant = chatState.debugAssistant;
+      if (assistant) assistant.streaming = false;
+      chatState.streaming = false;
+      chatState.abort = null;
+      stopDebugAuto();
+      chatState.debug = false;
+      chatState.debugAssistant = null;
+      $("btn-send").disabled = false;
+      $("btn-stop-gen").disabled = true;
+      setDebugControls(false);
+      syncDebugOpts();
+      renderTopk(null);
+      renderChat();
+    }
+    function commitDebugStep() {
+      if (!chatState.debugPending) return false;
+      const pending = chatState.debugPending;
+      const assistant = chatState.debugAssistant;
+      if (assistant && pending.text) {
+        assistant.content += pending.text;
+        renderChat();
+      }
+      chatState.debugPending = chatState.debugQueue.shift() || null;
+      if (chatState.debugPending) {
+        renderTopk(chatState.debugPending);
+        setDebugControls(true);
+      } else {
+        renderTopk(null);
+        finishDebugIfIdle();
+      }
+      return true;
+    }
+    function enqueueDebugToken(data) {
+      if (!chatState.debugPending) {
+        chatState.debugPending = data;
+        renderTopk(data);
+        setDebugControls(true);
+      } else {
+        chatState.debugQueue.push(data);
+        if (chatState.debugPending) renderTopk(chatState.debugPending);
+      }
     }
     function autosizeInput() {
       const el = $("chat-input");
@@ -2497,7 +2669,6 @@
       if (!text) return;
       $("chat-input").value = "";
       autosizeInput();
-      // 单轮：发新消息前清掉上一轮历史（展示与请求均只保留本轮）
       const priorSystem = chatState.messages
         .filter((m) => m.role === "system" && (m.content || "").trim())
         .map((m) => ({ role: "system", content: m.content }));
@@ -2510,8 +2681,20 @@
       $("btn-stop-gen").disabled = false;
       const controller = new AbortController();
       chatState.abort = controller;
-      // 请求只带 system（若有）+ 最新 user，不带历史多轮
       const history = priorSystem.concat([{ role: "user", content: text }]);
+      const debug = isDebugOn();
+      stopDebugAuto();
+      chatState.debug = debug;
+      chatState.debugQueue = [];
+      chatState.debugPending = null;
+      chatState.debugDone = false;
+      chatState.debugAssistant = debug ? assistant : null;
+      syncDebugOpts();
+      if (debug) {
+        setDebugControls(true);
+        renderTopk(null);
+        setChatStatus("逐步调试中…", true);
+      }
       try {
         const res = await fetch("/api/infer/chat/stream", {
           method: "POST",
@@ -2523,6 +2706,8 @@
             temperature: num("temperature"),
             top_k: num("top-k"),
             seed: num("seed"),
+            debug: debug,
+            debug_topk: Math.max(1, Math.min(50, num("debug-topk") || 10)),
           }),
         });
         if (!res.ok) {
@@ -2541,36 +2726,80 @@
           const parsed = parseSseChunk(buf);
           buf = parsed.rest;
           for (const ev of parsed.events) {
-            if (ev.event === "token" && ev.data.text) {
-              assistant.content += ev.data.text;
-              renderChat();
+            if (ev.event === "token") {
+              if (debug) {
+                enqueueDebugToken(ev.data || {});
+              } else if (ev.data && ev.data.text) {
+                assistant.content += ev.data.text;
+                renderChat();
+              }
             } else if (ev.event === "error") {
               assistant.content += (assistant.content ? "\n" : "") + ("错误: " + (ev.data.message || "unknown"));
               renderChat();
             } else if (ev.event === "done") {
-              if (ev.data && typeof ev.data.text === "string" && !assistant.content) {
+              if (ev.data && typeof ev.data.text === "string" && !assistant.content && !debug) {
                 assistant.content = ev.data.text;
               }
               setChatStatus(
                 `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s`,
                 true
               );
+              if (debug) {
+                chatState.debugDone = true;
+                finishDebugIfIdle();
+              }
             }
           }
+        }
+        if (debug) {
+          chatState.debugDone = true;
+          finishDebugIfIdle();
         }
       } catch (err) {
         if (err && err.name === "AbortError") {
           if (!assistant.content) assistant.content = "（已停止）";
+          if (debug) {
+            chatState.debugQueue = [];
+            chatState.debugPending = null;
+            chatState.debugDone = true;
+            stopDebugAuto();
+          }
         } else {
           assistant.content += (assistant.content ? "\n" : "") + String(err);
+          if (debug) {
+            chatState.debugDone = true;
+            stopDebugAuto();
+          }
         }
       } finally {
-        assistant.streaming = false;
-        chatState.streaming = false;
-        chatState.abort = null;
-        $("btn-send").disabled = false;
-        $("btn-stop-gen").disabled = true;
-        renderChat();
+        const keepStepping = (
+          debug
+          && chatState.debugDone
+          && (chatState.debugPending || chatState.debugQueue.length)
+          && assistant.content !== "（已停止）"
+        );
+        if (!keepStepping) {
+          assistant.streaming = false;
+          chatState.streaming = false;
+          chatState.abort = null;
+          $("btn-send").disabled = false;
+          $("btn-stop-gen").disabled = true;
+          if (debug) {
+            chatState.debug = false;
+            chatState.debugAssistant = null;
+            chatState.debugQueue = [];
+            chatState.debugPending = null;
+            setDebugControls(false);
+            syncDebugOpts();
+            renderTopk(null);
+          }
+          renderChat();
+        } else {
+          chatState.abort = null;
+          $("btn-stop-gen").disabled = true;
+          setDebugControls(true);
+          renderChat();
+        }
       }
     }
 
@@ -2585,6 +2814,7 @@
     $("btn-load").addEventListener("click", loadCheckpoint);
     $("btn-clear-chat").addEventListener("click", () => {
       if (chatState.streaming && chatState.abort) chatState.abort.abort();
+      resetDebugState();
       chatState.messages = [];
       renderChat();
     });
@@ -2592,8 +2822,35 @@
     $("btn-stop-gen").addEventListener("click", () => {
       if (!chatState.streaming || !chatState.abort) return;
       $("btn-stop-gen").disabled = true;
+      stopDebugAuto();
       chatState.abort.abort();
     });
+    if ($("chk-debug-step")) {
+      $("chk-debug-step").addEventListener("change", syncDebugOpts);
+      syncDebugOpts();
+    }
+    if ($("btn-debug-step")) {
+      $("btn-debug-step").addEventListener("click", () => { commitDebugStep(); });
+    }
+    if ($("btn-debug-auto")) {
+      $("btn-debug-auto").addEventListener("click", () => {
+        if (!chatState.debug) return;
+        if (chatState.debugAutoTimer) {
+          stopDebugAuto();
+          return;
+        }
+        const ms = Math.max(50, num("debug-auto-ms") || 400);
+        $("btn-debug-auto").classList.add("active");
+        chatState.debugAutoTimer = setInterval(() => {
+          if (!commitDebugStep()) {
+            // waiting for next token from server
+            if (chatState.debugDone && !chatState.debugPending && !chatState.debugQueue.length) {
+              stopDebugAuto();
+            }
+          }
+        }, ms);
+      });
+    }
     $("chat-input").addEventListener("input", autosizeInput);
     $("chat-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {

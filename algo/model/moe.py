@@ -320,6 +320,36 @@ class MoELM(nn.Module):
         return ids
 
     @torch.no_grad()
+    def _sample_next_debug(
+        self,
+        ids: torch.Tensor,
+        temperature: float = 1.0,
+        top_k: Optional[int] = 50,
+        candidates_k: int = 10,
+    ):
+        """采样下一 token，并返回温度缩放后的 top candidates（id/logit/prob）。"""
+        ctx = ids[:, -self.cfg.max_seq_len :]
+        logits, _, _ = self.forward(ctx)
+        logits = logits[:, -1, :] / max(temperature, 1e-6)
+        cand_k = max(1, min(int(candidates_k), logits.size(-1)))
+        cand_logits, cand_ids = torch.topk(logits, cand_k, dim=-1)
+        probs_full = F.softmax(logits, dim=-1)
+        cand_probs = probs_full.gather(-1, cand_ids)
+
+        sample_logits = logits
+        if top_k is not None and top_k > 0:
+            v, _ = torch.topk(sample_logits, min(top_k, sample_logits.size(-1)))
+            sample_logits = sample_logits.masked_fill(sample_logits < v[:, [-1]], float("-inf"))
+        probs = F.softmax(sample_logits, dim=-1)
+        next_id = torch.multinomial(probs, num_samples=1)
+        info = {
+            "ids": [int(x) for x in cand_ids[0].tolist()],
+            "logits": [float(x) for x in cand_logits[0].tolist()],
+            "probs": [float(x) for x in cand_probs[0].tolist()],
+        }
+        return next_id, info
+
+    @torch.no_grad()
     def generate_stream(
         self,
         input_ids: torch.Tensor,
@@ -335,6 +365,29 @@ class MoELM(nn.Module):
             ids = torch.cat([ids, next_id], dim=1)
             token = int(next_id.item())
             yield token
+            if eos_token_id is not None and token == int(eos_token_id):
+                break
+
+    @torch.no_grad()
+    def generate_stream_debug(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 64,
+        temperature: float = 1.0,
+        top_k: Optional[int] = 50,
+        eos_token_id: Optional[int] = None,
+        candidates_k: int = 10,
+    ):
+        """逐 token 产出 (token_id, candidates_info)；用于逐步调试。"""
+        self.eval()
+        ids = input_ids
+        for _ in range(max_new_tokens):
+            next_id, info = self._sample_next_debug(
+                ids, temperature=temperature, top_k=top_k, candidates_k=candidates_k
+            )
+            ids = torch.cat([ids, next_id], dim=1)
+            token = int(next_id.item())
+            yield token, info
             if eos_token_id is not None and token == int(eos_token_id):
                 break
 
