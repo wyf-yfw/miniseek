@@ -1298,7 +1298,7 @@
               </div>
               <div class="clean-ops-head">
                 <span class="field-title">清洗算子</span>
-                <span class="field-hint">勾选启用；右侧调阈值</span>
+                <span class="field-hint">预训练默认配方已填好（语言关 / 去重 lowercase 开）；一般不用改</span>
               </div>
               <div class="clean-ops" id="clean-ops">
                 <div class="clean-op-row" data-op="length">
@@ -1309,10 +1309,11 @@
                   </div>
                 </div>
                 <div class="clean-op-row" data-op="language">
-                  <label class="clean-op-enable" for="clean-op-language"><input type="checkbox" id="clean-op-language" checked />语言</label>
+                  <label class="clean-op-enable" for="clean-op-language"><input type="checkbox" id="clean-op-language" />语言</label>
                   <div class="clean-op-controls">
                     <label class="ctl"><span>lang</span><input id="clean-lang" class="w-sm" type="text" value="zh" /></label>
                     <label class="ctl"><span>min_score</span><input id="clean-lang-score" class="w-md" type="number" min="0" max="1" step="0.05" value="0.5" /></label>
+                    <span class="field-hint">默认关：mix 含大量 EN Cosmopedia，开 zh 会误杀英文</span>
                   </div>
                 </div>
                 <div class="clean-op-row" data-op="repetition">
@@ -1325,7 +1326,7 @@
                 <div class="clean-op-row" data-op="dedup">
                   <label class="clean-op-enable" for="clean-op-dedup"><input type="checkbox" id="clean-op-dedup" checked />精确去重</label>
                   <div class="clean-op-controls">
-                    <label class="mini-check" for="clean-dedup-lower"><input type="checkbox" id="clean-dedup-lower" />lowercase</label>
+                    <label class="mini-check" for="clean-dedup-lower"><input type="checkbox" id="clean-dedup-lower" checked />lowercase</label>
                   </div>
                 </div>
                 <div class="clean-op-row" data-op="sensitive">
@@ -4085,7 +4086,8 @@ $("btn-bench-edit").addEventListener("click", async () => {
       $("clean-min-len").value = L.min_len != null ? L.min_len : 50;
       $("clean-max-len").value = L.max_len != null ? L.max_len : 100000;
       const G = ops.language || {};
-      $("clean-op-language").checked = G.enabled !== false;
+      // default OFF for mix (EN Cosmopedia); only on when explicitly enabled
+      $("clean-op-language").checked = G.enabled === true;
       $("clean-lang").value = G.lang || "zh";
       $("clean-lang-score").value = G.min_score != null ? G.min_score : 0.5;
       const R = ops.repetition || {};
@@ -4094,7 +4096,8 @@ $("btn-bench-edit").addEventListener("click", async () => {
       $("clean-rep-ratio").value = R.max_ratio != null ? R.max_ratio : 0.5;
       const D = ops.exact_dedup || {};
       $("clean-op-dedup").checked = D.enabled !== false;
-      $("clean-dedup-lower").checked = !!D.lowercase;
+      // default ON for wash headroom
+      $("clean-dedup-lower").checked = D.lowercase !== false;
       const S = ops.sensitive || {};
       $("clean-op-sensitive").checked = S.enabled !== false;
       $("clean-wordlist").value = S.wordlist_path || "";

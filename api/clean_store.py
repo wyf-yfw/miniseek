@@ -11,11 +11,13 @@ from typing import Any, Dict, List, Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEAN_ROOT = PROJECT_ROOT / "data" / "clean"
 
+# Pretrain wash defaults for data/pretrain_mix_12g.jsonl (CN Edu + EN Cosmopedia mix).
+# language OFF: zh-only filter would wipe substantial English Cosmopedia.
 DEFAULT_OPERATORS: Dict[str, Any] = {
     "length": {"enabled": True, "min_len": 50, "max_len": 100000},
-    "language": {"enabled": True, "lang": "zh", "min_score": 0.5},
+    "language": {"enabled": False, "lang": "zh", "min_score": 0.5},
     "repetition": {"enabled": True, "rep_len": 10, "max_ratio": 0.5},
-    "exact_dedup": {"enabled": True, "lowercase": False},
+    "exact_dedup": {"enabled": True, "lowercase": True},
     "sensitive": {"enabled": True, "wordlist_path": ""},
 }
 
