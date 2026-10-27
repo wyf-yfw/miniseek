@@ -36,10 +36,16 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from algo.model import build_model
 from algo.model.config import ModelConfig
-from algo.model.dense import DenseLM
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
-from algo.train_pretrain import JsonlTextDataset, collate_pad as pretrain_collate_pad, evaluate_valid
+from algo.train_pretrain import (
+    JsonlTextDataset,
+    _emit_expert_load_line,
+    _unwrap_model,
+    collate_pad as pretrain_collate_pad,
+    evaluate_valid,
+)
 
 
 def format_chat(conversations: List[dict]) -> str:
@@ -220,6 +226,8 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/sft_t2t_mini.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
+    p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")
+    p.add_argument("--aux-coef", type=float, default=0.01, help="MoE load-balance aux weight")
     p.add_argument("--max-seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--lr", type=float, default=5e-5, help="peak LR after warmup (SFT 通常低于预训练)")
@@ -292,8 +300,13 @@ def main() -> None:
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    cfg = ModelConfig(max_seq_len=args.max_seq_len).with_vocab_size(vocab)
-    model = DenseLM(cfg).to(device)
+    if args.arch == "tiny":
+        cfg = ModelConfig.tiny()
+        cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
+    else:
+        cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
+    cfg = cfg.with_vocab_size(vocab)
+    model = build_model(cfg).to(device)
     if args.compile:
         if device.type != "cuda":
             print("[sft] WARN: --compile ignored (需要 CUDA)")
@@ -303,6 +316,13 @@ def main() -> None:
                 print("[sft] torch.compile enabled")
             except Exception as e:  # noqa: BLE001
                 print(f"[sft] WARN: torch.compile 失败，继续未编译: {e}")
+    print(
+        f"[sft] arch={args.arch} release={cfg.release_name} "
+        f"aux_coef={args.aux_coef if args.arch == 'moe' else 'n/a'}"
+    )
+    expert_window_steps = 0
+    if args.arch == "moe":
+        _unwrap_model(model).begin_expert_usage()
 
     if not Path(args.data).exists():
         raise SystemExit(f"[sft] 缺少数据文件: {args.data}")
@@ -448,24 +468,52 @@ def main() -> None:
             set_lr(opt, cur_lr)
 
             opt.zero_grad(set_to_none=True)
+
+            def _step_forward():
+                out = model(input_ids, labels=labels)
+                if isinstance(out, tuple) and len(out) == 3:
+                    _logits, ce, aux = out
+                    total = ce + args.aux_coef * aux
+                    return total, ce, aux
+                _logits, ce = out
+                return ce, ce, None
+
             if device.type == "cuda":
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    _, loss = model(input_ids, labels=labels)
+                    loss, ce_loss, aux_loss = _step_forward()
             else:
-                _, loss = model(input_ids, labels=labels)
+                loss, ce_loss, aux_loss = _step_forward()
             loss.backward()
             if args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             opt.step()
             global_step += 1
             last_loss = float(loss.item())
+            if args.arch == "moe":
+                expert_window_steps += 1
 
             if global_step % args.log_every == 0 or global_step == 1:
-                print(
-                    f"epoch={epoch} step={global_step} loss={last_loss:.4f} "
-                    f"ppl={math.exp(min(last_loss, 20)):.2f} lr={cur_lr:.2e}",
-                    flush=True,
-                )
+                if aux_loss is not None:
+                    print(
+                        f"epoch={epoch} step={global_step} loss={last_loss:.4f} "
+                        f"ce={float(ce_loss.item()):.4f} aux={float(aux_loss.item()):.4f} "
+                        f"ppl={math.exp(min(float(ce_loss.item()), 20)):.2f} lr={cur_lr:.2e}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"epoch={epoch} step={global_step} loss={last_loss:.4f} "
+                        f"ppl={math.exp(min(last_loss, 20)):.2f} lr={cur_lr:.2e}",
+                        flush=True,
+                    )
+                if args.arch == "moe":
+                    _emit_expert_load_line(
+                        model=model,
+                        step=global_step,
+                        window_steps=expert_window_steps,
+                        cfg=cfg,
+                    )
+                    expert_window_steps = 0
 
             if (
                 valid_loader is not None

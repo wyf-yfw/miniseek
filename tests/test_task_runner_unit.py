@@ -123,6 +123,23 @@ def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
     assert calls and calls[0][0] == 77701
 
 
+
+def test_build_train_cmd_sft_moe_allowed(tasks_root):
+    """SFT + MoE must build a cmd (no ValueError) and pass --arch moe."""
+    t = ts.create_task(
+        name="sft-moe",
+        arch="moe",
+        mode="sft",
+        hparams={"max_steps": 2, "batch_size": 2, "aux_coef": 0.02},
+    )
+    cmd = tr.build_train_cmd(ts.load_task(t["id"]))
+    assert "algo.train_sft" in cmd
+    assert "--arch" in cmd
+    assert cmd[cmd.index("--arch") + 1] == "moe"
+    assert "--aux-coef" in cmd
+    assert cmd[cmd.index("--aux-coef") + 1] == "0.02"
+
+
 def test_build_train_cmd_speed_defaults(tasks_root):
     t = ts.create_task(
         name="spd",

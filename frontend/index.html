@@ -694,7 +694,7 @@
                 <button type="button" id="arch-moe" data-arch="moe">MoE</button>
                 <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
               </div>
-              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：MiniSeek-M0.1（1+32 top-2，可训）；Tiny：d=64 L=2 冒烟档。</p>
+              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：MiniSeek-M0.1（1+32 top-2，pretrain/SFT 均可）；Tiny：d=64 L=2 冒烟档。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
               <label><span class="field-title">数据路径</span><span class="field-hint">训练用 jsonl 文件路径（每行一条文本样本）。</span><div class="path-row"><input id="data-path" type="text" /><button type="button" class="btn-browse" data-for="data-path">浏览</button></div></label>
               <div class="grid">
@@ -1336,7 +1336,7 @@
       $("mode-pretrain").disabled = !editable;
       $("mode-sft").disabled = !editable;
       $("arch-dense").disabled = !editable;
-      $("arch-moe").disabled = !editable || trainMode === "sft";
+      $("arch-moe").disabled = !editable;
       $("arch-tiny").disabled = !editable;
       $("btn-save").disabled = !editable && currentTask && currentTask.status !== "draft";
       // name always patchable
@@ -1358,8 +1358,10 @@
       trainMode = mode;
       $("mode-pretrain").classList.toggle("active", mode === "pretrain");
       $("mode-sft").classList.toggle("active", mode === "sft");
-      $("arch-moe").disabled = mode === "sft" || (currentTask && currentTask.status !== "draft");
-      if (mode === "sft" && trainArch === "moe") applyArchUI("dense");
+      // MoE SFT is supported; keep arch selection when switching mode
+      if (currentTask && currentTask.status !== "draft") {
+        $("arch-moe").disabled = true;
+      }
     }
 
     function fillHparams(hp) {

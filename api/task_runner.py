@@ -117,9 +117,6 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         raise ValueError(f"未知训练模式: {mode}")
     if arch not in {"dense", "moe", "tiny"}:
         raise ValueError(f"未知架构: {arch}")
-    if mode == "sft" and arch == "moe":
-        raise ValueError("SFT 暂不支持 MoE")
-
     # Tiny defaults for smoke-friendly CPU runs
     if arch == "tiny":
         hp.setdefault("batch_size", 4)
@@ -170,8 +167,8 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     if max_steps is not None and int(max_steps) > 0:
         cmd.extend(["--max-steps", str(int(max_steps))])
 
-    if mode == "pretrain":
-        cmd.extend(["--arch", arch, "--aux-coef", str(float(_hp(hp, "aux_coef", 0.01)))])
+    # arch / aux_coef apply to both pretrain and SFT (MoE SFT supported)
+    cmd.extend(["--arch", arch, "--aux-coef", str(float(_hp(hp, "aux_coef", 0.01)))])
 
     resume = str(_hp(hp, "resume", "") or "").strip()
     init_ckpt = str(_hp(hp, "init_ckpt", "") or "").strip()
