@@ -3,7 +3,8 @@
 # Requires: hf auth login (as wyf-yfw) OR HF_TOKEN in env
 set -euo pipefail
 cd /home/wyf/miniseek
-export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
+unset HF_HUB_ENABLE_HF_TRANSFER
+export HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
 # Prefer official hub unless HF_ENDPOINT already set (prior attempt used hf-mirror.com)
 STAGING=/home/wyf/miniseek/data/hf_upload_MiniSeek-dataset_real
 LOG=/home/wyf/miniseek/logs/hf_upload_MiniSeek-dataset.log
