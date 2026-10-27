@@ -684,7 +684,7 @@
             <p id="action-msg"></p>
 
             <div id="phase-config">
-              <p class="config-note">配置阶段：调好参数后点 Start。开始后参数锁定，改配置请新建 Task。</p>
+              <p class="config-note">配置阶段：「新建 Task」只打开表单、不落盘；点「创建并启动」才真正创建任务。开始后参数锁定，改配置请新建 Task。</p>
               <div class="mode-row" id="mode-row">
                 <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">Pretrain</button>
                 <button type="button" id="mode-sft" data-mode="sft">SFT</button>
@@ -1048,6 +1048,8 @@
     let lossPoints = [];
     let eventSource = null;
     let formDirty = false;
+    // true = 正在编辑一个还没落盘的新 Task；只有点 Start 才会真正创建
+    let unsavedNew = false;
 
     document.querySelectorAll(".page-tabs button").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1786,8 +1788,49 @@
       if (!config) requestAnimationFrame(() => { drawLoss(); });
     }
 
+    function syncUnsavedButtons() {
+      // 未保存表单没有草稿可删，也不需要单独的"保存"——Start 就是创建
+      const save = $("btn-save");
+      const delDraft = $("btn-delete-draft");
+      const start = $("btn-start");
+      if (save) save.style.display = unsavedNew ? "none" : "";
+      if (delDraft) delDraft.style.display = unsavedNew ? "none" : "";
+      if (start) start.textContent = unsavedNew ? "创建并启动" : "Start";
+    }
+
+    function openNewTaskForm(opts = {}) {
+      const arch = opts.arch || trainArch || "tiny";
+      const mode = opts.mode || "pretrain";
+      const base = (defaultsMap[arch] || defaultsMap.tiny || {});
+      selectedId = null;
+      currentTask = null;
+      unsavedNew = true;
+      disconnectLogs();
+      clearLog();
+      lossPoints = [];
+      drawLoss();
+      lastLiveStatus = null;
+      $("task-detail-empty").style.display = "none";
+      $("task-detail").style.display = "";
+      $("detail-title").textContent = opts.title || "新建 Task（未保存）";
+      $("task-name").value = opts.name || "";
+      applyModeUI(mode);
+      applyArchUI(arch);
+      fillHparams({ ...base, ...(opts.hparams || {}) });
+      formDirty = true;
+      setFormEnabled(true);
+      applyTaskPhase({ status: "draft" });
+      $("frozen-config").innerHTML = "";
+      $("status-box").textContent = "尚未创建：点「创建并启动」才会落盘并开始训练。";
+      $("train-progress").hidden = true;
+      $("action-msg").textContent = "";
+      syncUnsavedButtons();
+    }
+
     async function selectTask(id, opts = {}) {
       selectedId = id;
+      unsavedNew = false;
+      syncUnsavedButtons();
       const res = await fetch(`/api/tasks/${id}`);
       if (!res.ok) {
         $("action-msg").textContent = await readError(res);
@@ -1887,28 +1930,9 @@
       } catch (_) { /* ignore */ }
     }
 
-    $("btn-new-task").addEventListener("click", async () => {
-      const arch = trainArch || "tiny";
-      const base = defaultsMap[arch] || defaultsMap.tiny || {};
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `${arch}-pretrain`,
-          arch,
-          mode: "pretrain",
-          hparams: base,
-          uniquify: true,
-        }),
-      });
-      if (!res.ok) {
-        $("action-msg").textContent = await readError(res);
-        return;
-      }
-      const t = await res.json();
-      await refreshTasks();
-      await selectTask(t.id);
-      $("action-msg").textContent = `已创建 ${t.id}`;
+    $("btn-new-task").addEventListener("click", () => {
+      // 只打开一个空的配置表单，不写任何文件；点 Start 时才真正创建任务
+      openNewTaskForm({ title: "新建 Task（未保存）" });
     });
 
     ["arch-dense", "arch-moe", "arch-tiny"].forEach((id) => {
@@ -1935,7 +1959,7 @@
     });
 
     $("btn-save").addEventListener("click", async () => {
-      if (!selectedId) return;
+      if (unsavedNew || !selectedId) return;
       const body = { name: $("task-name").value.trim() };
       if (currentTask && currentTask.status === "draft") {
         body.arch = trainArch;
@@ -1957,7 +1981,35 @@
     });
 
     $("btn-start").addEventListener("click", async () => {
-      if (!selectedId) return;
+      if (unsavedNew || !selectedId) {
+        const arch = trainArch;
+        const mode = trainMode;
+        const name = $("task-name").value.trim() || `${arch}-${mode}`;
+        const createRes = await fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            arch,
+            mode,
+            hparams: collectHparams(),
+            uniquify: true,
+          }),
+        });
+        if (!createRes.ok) {
+          $("action-msg").textContent = await readError(createRes);
+          return;
+        }
+        const created = await createRes.json();
+        unsavedNew = false;
+        const startRes = await fetch(`/api/tasks/${created.id}/start`, { method: "POST" });
+        $("action-msg").textContent = startRes.ok
+          ? `已创建并启动 ${created.id}`
+          : await readError(startRes);
+        await refreshTasks();
+        await selectTask(created.id);
+        return;
+      }
       if (currentTask && currentTask.status === "draft") {
         const saveRes = await fetch(`/api/tasks/${selectedId}`, {
           method: "PATCH",
@@ -1989,7 +2041,16 @@
     });
 
     async function deleteSelectedTask() {
-      if (!selectedId) return;
+      if (unsavedNew || !selectedId) {
+        unsavedNew = false;
+        currentTask = null;
+        selectedId = null;
+        $("task-detail").style.display = "none";
+        $("task-detail-empty").style.display = "";
+        syncUnsavedButtons();
+        $("action-msg").textContent = "已放弃未保存的配置";
+        return;
+      }
       if (!confirm("确认删除该 Task 目录？不可恢复。")) return;
       const res = await fetch(`/api/tasks/${selectedId}`, { method: "DELETE" });
       if (!res.ok) {
@@ -2007,30 +2068,18 @@
     $("btn-delete").addEventListener("click", deleteSelectedTask);
     $("btn-delete-draft").addEventListener("click", deleteSelectedTask);
 
-    $("btn-new-from-run").addEventListener("click", async () => {
+    $("btn-new-from-run").addEventListener("click", () => {
       if (!currentTask) return;
       const arch = currentTask.arch || "tiny";
       const mode = currentTask.mode || "pretrain";
-      const hp = { ...(currentTask.hparams || {}) };
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: currentTask.name || `${arch}-pretrain`,
-          arch,
-          mode,
-          hparams: hp,
-          uniquify: true,
-        }),
+      openNewTaskForm({
+        arch,
+        mode,
+        hparams: { ...(currentTask.hparams || {}) },
+        name: currentTask.name || "",
+        title: "新建 Task（沿用配置，未保存）",
       });
-      if (!res.ok) {
-        $("action-msg").textContent = await readError(res);
-        return;
-      }
-      const t = await res.json();
-      await refreshTasks();
-      await selectTask(t.id);
-      $("action-msg").textContent = `已用同配置新建 ${t.id}，可改参数后再 Start`;
+      $("action-msg").textContent = "已带入上一轮配置，改完点「创建并启动」";
     });
 
 
