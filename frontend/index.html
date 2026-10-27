@@ -732,6 +732,7 @@
                   <span>步数 <b id="tp-steps">—</b></span>
                   <span>速度 <b id="tp-rate">—</b></span>
                   <span>已用 <b id="tp-elapsed">—</b></span>
+                  <span id="tp-samples-wrap" hidden>样本 <b id="tp-samples">—</b></span>
                 </div>
               </div>
               <div class="run-actions">
@@ -1387,7 +1388,10 @@
       return parts.join(" | ");
     }
 
-    function currentMaxSteps() {
+    function currentMaxSteps(s) {
+      // 后端从 train.log 头部读出的精确总步数优先，其次才是表单里的 max_steps
+      const fromLive = s && s.total_steps != null ? Number(s.total_steps) : null;
+      if (Number.isFinite(fromLive) && fromLive > 0) return fromLive;
       const hp = (currentTask && currentTask.hparams) || {};
       const n = Number(hp.max_steps);
       return Number.isFinite(n) && n > 0 ? n : 0;
@@ -1400,7 +1404,7 @@
       const liveStep = s && s.step != null ? Number(s.step) : null;
       const curveStep = lossPoints.length ? Number(lossPoints[lossPoints.length - 1].step) : null;
       const step = liveStep != null ? liveStep : curveStep;
-      const total = currentMaxSteps();
+      const total = currentMaxSteps(s);
       if (step == null || !Number.isFinite(step) || step <= 0) { box.hidden = true; return; }
       box.hidden = false;
 
@@ -1429,6 +1433,9 @@
       $("tp-steps").textContent = total > 0 ? step + " / " + total : String(step);
       $("tp-rate").textContent = rate && rate > 0 ? rate.toFixed(2) + " step/s" : "—";
       $("tp-elapsed").textContent = elapsed != null ? formatElapsed(elapsed) : "—";
+      const samples = s && s.samples != null ? Number(s.samples) : null;
+      $("tp-samples-wrap").hidden = !(samples > 0);
+      if (samples > 0) $("tp-samples").textContent = samples.toLocaleString();
     }
 
     function applyLiveStatus(s) {

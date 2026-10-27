@@ -69,6 +69,45 @@ def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
         return None
 
 
+_TRAIN_TOTALS_RE = re.compile(r"total_steps=(\d+)")
+_TRAIN_SAMPLES_RE = re.compile(r"samples=(\d+)")
+_train_totals_cache: Dict[str, Dict[str, Optional[int]]] = {}
+
+
+def _train_totals(task_id: str) -> Dict[str, Optional[int]]:
+    """从 train.log 头部取 samples / total_steps（训练脚本启动时打印一次）。
+
+    步数是训练脚本按 ceil(samples / batch_size) * epochs（有 max_steps 时取它）
+    算出来的，这里直接复用，省得前端再推一遍出错。
+    """
+    hit = _train_totals_cache.get(task_id)
+    if hit is not None:
+        return hit
+    info: Dict[str, Optional[int]] = {"total_steps": None, "samples": None}
+    try:
+        log_path = ts.task_dir(task_id) / "train.log"
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+            for _ in range(400):
+                line = fh.readline()
+                if not line:
+                    break
+                if info["samples"] is None:
+                    m = _TRAIN_SAMPLES_RE.search(line)
+                    if m:
+                        info["samples"] = int(m.group(1))
+                if info["total_steps"] is None:
+                    m = _TRAIN_TOTALS_RE.search(line)
+                    if m:
+                        info["total_steps"] = int(m.group(1))
+                if info["total_steps"] is not None:
+                    break
+    except OSError:
+        pass
+    if info["total_steps"] is not None:
+        _train_totals_cache[task_id] = info
+    return info
+
+
 def _live_train_status(
     task_id: str,
     *,
@@ -77,6 +116,7 @@ def _live_train_status(
 ) -> Dict[str, Any]:
     """Enriched SSE status: gpu / elapsed / step / step_s (+ sliding snap fields)."""
     task = reconcile_task(ts.load_task(task_id))
+    totals = _train_totals(task_id)
     metrics = ts.read_metrics(task_id)
     loss = metrics.get("loss") or []
     step: Optional[int] = int(loss[-1]["step"]) if loss else None
@@ -119,6 +159,8 @@ def _live_train_status(
         "elapsed_sec": elapsed_sec,
         "step": step,
         "step_s": None if step_s is None else round(float(step_s), 4),
+        "total_steps": totals["total_steps"],
+        "samples": totals["samples"],
         "_mono": mono,
         "_step_snap": step,
     }
