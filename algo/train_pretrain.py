@@ -26,10 +26,12 @@ except Exception:
     pass
 
 import argparse
+import collections
 import hashlib
 import json
 import math
 import random
+import signal
 import time
 from functools import partial
 from pathlib import Path
@@ -153,6 +155,16 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+_STOP = {"flag": False, "signum": 0}
+
+
+def handle_stop_signal(signum, _frame) -> None:
+    """SIGTERM/SIGINT 不立即退出：打个标记，让训练循环跑完当前步、写完 last.pt 再走。"""
+    _STOP["flag"] = True
+    _STOP["signum"] = int(signum)
+    print(f"[train] 收到信号 {signum}：当前步结束后保存 last.pt 再退出", flush=True)
+
+
 def run_salt(args: argparse.Namespace) -> int:
     """每次任务一个不同的打乱种子。
 
@@ -269,6 +281,24 @@ def main() -> None:
         help="若开了 --save-every，最多保留最近 K 个 step-*.pt",
     )
     p.add_argument(
+        "--save-last-every",
+        type=int,
+        default=500,
+        help="每 N 步原子写一次 last.pt（0=关闭）。保证中途崩溃/停机能从近期状态续训",
+    )
+    p.add_argument(
+        "--best-min-gap",
+        type=int,
+        default=300,
+        help="两次写 best.pt 的最小步间隔，避免抖动导致反复写 1.7G 大文件",
+    )
+    p.add_argument(
+        "--best-min-improve",
+        type=float,
+        default=0.005,
+        help="新最优要比旧的至少好这个比例（0.005=0.5%%）才写 best.pt",
+    )
+    p.add_argument(
         "--save-loss-thresholds",
         type=str,
         default="",
@@ -312,6 +342,11 @@ def main() -> None:
     streak: Dict[float, int] = {th: 0 for th in thresholds}
 
     set_seed(args.seed)
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, handle_stop_signal)
+        except (ValueError, OSError):
+            pass
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 权重保持 fp32；CUDA 上用 autocast，避免整模 .to(bfloat16) 弄坏 RoPE complex buffer
     print(f"[train] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
@@ -395,8 +430,10 @@ def main() -> None:
 
     global_step = 0
     best_loss = float("inf")
-    best_streak = 0
-    pending_best = float("inf")
+    best_step = 0
+    recent_losses: "collections.deque[float]" = collections.deque(
+        maxlen=max(1, int(args.stable_steps))
+    )
     if args.resume:
         resume_path = Path(args.resume)
         blob = torch.load(resume_path, map_location="cpu", weights_only=False)
@@ -409,6 +446,7 @@ def main() -> None:
         global_step = int(blob.get("step", 0))
         if blob.get("loss") is not None:
             best_loss = float(blob["loss"])
+            best_step = global_step
         if args.max_steps is None:
             # 续训没给绝对步数时，"epochs" 表示再扫几遍数据：
             # 总预算 = 已跑 + 本次，LR 余弦才会覆盖整段而不是从头重算
@@ -445,30 +483,43 @@ def main() -> None:
         )
 
     def maybe_save_best(step: int, loss_val: float) -> None:
-        nonlocal best_loss, best_streak, pending_best
+        """最近 stable_steps 步的最小值刷新历史最优时写 best.pt。
+
+        旧逻辑要求“连续 stable_steps 步每一步都低于历史最优”，loss 噪声一大就再也不触发，
+        best.pt 会冻在训练早期。改成窗口最小值 + 最小间隔 + 最小改善幅度：
+        既能抗噪，也不会因为抖动反复写 1.7G 的大文件。
+        """
+        nonlocal best_loss, best_step
         if not args.save_best:
             return
+        recent_losses.append(loss_val)
         need = max(1, int(args.stable_steps))
-        # 连续 stable_steps 步 loss 都 < 已记录 best_loss 才写盘；写后 best_loss=窗口内 min
-        if loss_val < best_loss:
-            best_streak += 1
-            if loss_val < pending_best:
-                pending_best = loss_val
-            if best_streak >= need:
-                best_loss = pending_best
-                ckpt = build_ckpt(model, opt, cfg, step, vocab, pending_best)
-                save_ckpt(out_dir / "best.pt", ckpt)
-                print(
-                    f"[train] best save loss={pending_best:.4f} stable={need} "
-                    f"@ step={step} -> {out_dir / 'best.pt'}",
-                    flush=True,
-                )
-                best_streak = 0
-                pending_best = float("inf")
-        else:
-            if best_streak > 0:
-                best_streak = 0
-                pending_best = float("inf")
+        if len(recent_losses) < need:
+            return
+        window_min = min(recent_losses)
+        if window_min >= best_loss * (1.0 - max(0.0, float(args.best_min_improve))):
+            return
+        if best_step and (step - best_step) < int(args.best_min_gap):
+            return
+        best_loss = window_min
+        best_step = step
+        ckpt = build_ckpt(model, opt, cfg, step, vocab, window_min)
+        save_ckpt(out_dir / "best.pt", ckpt)
+        print(
+            f"[train] best save loss={window_min:.4f} window={need} "
+            f"gap={args.best_min_gap} @ step={step} -> {out_dir / 'best.pt'}",
+            flush=True,
+        )
+
+    def save_last(step: int, loss_val: float) -> None:
+        ckpt = build_ckpt(model, opt, cfg, step, vocab, loss_val)
+        save_ckpt(out_dir / "last.pt", ckpt)  # save_ckpt 内部已做 tmp + replace 原子替换
+
+    def maybe_save_last(step: int, loss_val: float) -> None:
+        if args.save_last_every <= 0 or step % args.save_last_every != 0:
+            return
+        save_last(step, loss_val)
+        print(f"[train] last save @ step={step} loss={loss_val:.4f}", flush=True)
 
     def maybe_save_step(step: int, loss_val: float) -> None:
         if args.save_every <= 0 or step % args.save_every != 0:
@@ -559,17 +610,25 @@ def main() -> None:
 
             maybe_save_best(global_step, last_loss)
             maybe_save_step(global_step, last_loss)
+            maybe_save_last(global_step, last_loss)
 
+            if _STOP["flag"]:
+                break
             if args.max_steps is not None and global_step >= args.max_steps:
                 break
+        if _STOP["flag"]:
+            break
         if args.max_steps is not None and global_step >= args.max_steps:
             break
 
     if last_loss is None:
         last_loss = best_loss if best_loss < float("inf") else 0.0
-    # always write last.pt once at end
-    final_ckpt = build_ckpt(model, opt, cfg, global_step, vocab, last_loss)
-    save_ckpt(out_dir / "last.pt", final_ckpt)
+    save_last(global_step, last_loss)
+    if _STOP["flag"]:
+        print(
+            f"[train] 收到信号 {_STOP['signum']}，已在 step={global_step} 保存 last.pt 后退出",
+            flush=True,
+        )
     print(f"[train] final save last.pt @ step={global_step} loss={last_loss:.4f}")
 
     elapsed = time.time() - t0
