@@ -5201,6 +5201,28 @@ $("btn-bench-edit").addEventListener("click", async () => {
     // boot: if train already boots elsewhere; also refresh bench list quietly
     refreshBenchTasks().catch(() => {});
 
+    // Live-reload: poll index.html mtime; save HTML → ~1s auto refresh (no systemctl)
+    (function liveReload() {
+      var last = null;
+      var reloading = false;
+      function tick() {
+        if (reloading) return;
+        fetch("/__dev/mtime", { cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || typeof d.mtime !== "number") return;
+            if (last === null) { last = d.mtime; return; }
+            if (d.mtime !== last) {
+              reloading = true;
+              location.reload();
+            }
+          })
+          .catch(function () { /* tolerate transient errors */ });
+      }
+      setInterval(tick, 1000);
+      tick();
+    })();
+
   </script>
 </body>
 </html>

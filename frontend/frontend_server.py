@@ -6,12 +6,13 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = Path(__file__).resolve().parent
 API_URL = (os.environ.get("MINISEEK_API_URL") or "http://127.0.0.1:8000").rstrip("/")
+INDEX_HTML = WEB_DIR / "index.html"
 
 HOP_BY_HOP = {
     "connection",
@@ -26,12 +27,31 @@ HOP_BY_HOP = {
     "content-length",
 }
 
+NO_STORE = {
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
 app = FastAPI(title="MiniSeek Web")
 
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    return FileResponse(INDEX_HTML, headers=dict(NO_STORE))
+
+
+@app.get("/__dev/mtime")
+def dev_mtime() -> JSONResponse:
+    """Poll target for frontend live-reload (mtime of index.html)."""
+    try:
+        mtime = INDEX_HTML.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return JSONResponse(
+        {"mtime": float(mtime), "path": "index.html"},
+        headers=dict(NO_STORE),
+    )
 
 
 @app.api_route(
@@ -77,5 +97,5 @@ async def proxy_api(path: str, request: Request):
     )
 
 
-# Static assets after routes so / and /api win
+# Static assets after routes so /, /__dev/mtime and /api win
 app.mount("/", StaticFiles(directory=str(WEB_DIR), html=False), name="static")

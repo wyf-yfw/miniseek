@@ -49,6 +49,8 @@
 | `miniseek-api` | `127.0.0.1:8000` | API |
 | `miniseek-web` | `0.0.0.0:7860` | 静态 + `/api` 反代 |
 
+Web UI：`index.html` 每约 1s 轮询 `/__dev/mtime`，mtime 变则自动刷新；`miniseek-web` 用 uvicorn `--reload --reload-dir frontend`，改 `frontend/` 会热重启 web（勿连带 restart worker）。
+
 单元模板：`deploy/miniseek-*.service` → 安装到 `~/.config/systemd/user/`，再 `daemon-reload` + `enable --now`。公网：`http://60.205.250.186:7860` → 隧道到本机 7860。
 
 反向 SSH 单元只存在于本机 `~/.config/systemd/user/miniseek-tunnel.service`（已在 `.gitignore`）。**永远不要**把 VPS IP/端口映射、密钥、隧道 unit 提交进仓库。
