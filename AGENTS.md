@@ -90,6 +90,12 @@ ss -ltnp | grep -E ':7860|:8000|:8001'
 pgrep -af 'train_pretrain|train_sft' | head
 ```
 
+## 当前状态（滚动更新）
+
+- **PT 训练**：`moe-pretrain-3` 在 wyf 上跑（resume 自 PT `last.pt`，数据 `clean.jsonl` / 12g clean）。
+- **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 已有 `pretrain_mix_12g_clean.jsonl`；训练用 `--valid-ratio`，不再随仓/HF 提供独立 valid。
+- **代码**：公仓已含 PT/SFT 布局、valid-ratio、`.gitignore`；`data/scripts` 旧拼盘脚本已删；`deploy/miniseek-tunnel.service` 不上库。
+
 ## 维护约定（固定动作）
 
 本文件是**唯一**跟着 Git 走的项目级 AI 记忆，不另装记忆插件。
