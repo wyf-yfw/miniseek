@@ -239,6 +239,11 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         fused_on = fused_on.strip().lower() not in {"0", "false", "no", "off"}
     cmd.append("--fused-adamw" if bool(fused_on) else "--no-fused-adamw")
 
+    flash_on = _hp(hp, "flash_attn", True)
+    if isinstance(flash_on, str):
+        flash_on = flash_on.strip().lower() not in {"0", "false", "no", "off"}
+    cmd.append("--flash-attn" if bool(flash_on) else "--no-flash-attn")
+
     batch_mode = str(_hp(hp, "batch_mode", "pack")).strip().lower()
     if batch_mode not in {"random", "bucket", "pack"}:
         batch_mode = "pack"

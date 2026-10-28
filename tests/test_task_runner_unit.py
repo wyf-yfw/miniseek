@@ -188,6 +188,8 @@ def test_build_train_cmd_speed_defaults(tasks_root):
     assert "--compile" in cmd
     assert "--no-compile" not in cmd
     assert "--fused-adamw" in cmd
+    assert "--flash-attn" in cmd
+    assert "--no-flash-attn" not in cmd
     assert "--batch-mode" in cmd
     assert cmd[cmd.index("--batch-mode") + 1] == "pack"
 
@@ -201,12 +203,14 @@ def test_build_train_cmd_speed_opt_out(tasks_root):
             "max_steps": 2,
             "compile": False,
             "fused_adamw": False,
+            "flash_attn": False,
             "batch_mode": "bucket",
         },
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
     assert "--no-compile" in cmd
     assert "--no-fused-adamw" in cmd
+    assert "--no-flash-attn" in cmd
     assert cmd[cmd.index("--batch-mode") + 1] == "bucket"
 
 

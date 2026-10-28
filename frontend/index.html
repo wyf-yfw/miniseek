@@ -1253,7 +1253,7 @@
 
               <div class="param-group" id="group-ckpt">
                 <div class="group-title">断点 / 速度</div>
-                <p class="group-desc">Resume 含优化器；与 SFT 的 Init Ckpt 不同。Compile / Fused 对两种模式都可用。</p>
+                <p class="group-desc">Resume 含优化器；与 SFT 的 Init Ckpt 不同。Compile / Fused / FlashAttention 对 PT 与 SFT 都可用。</p>
                 <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态）。数据会重新打乱；步数预算从起点累加。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
                 <div class="grid">
                   <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；MoE 可能 graph-break。</span>
@@ -1264,6 +1264,12 @@
                   </label>
                   <label><span class="field-title">Fused AdamW</span><span class="field-hint">CUDA 融合 AdamW。</span>
                     <select id="fused-adamw">
+                      <option value="true">开（默认）</option>
+                      <option value="false">关</option>
+                    </select>
+                  </label>
+                  <label><span class="field-title">FlashAttention</span><span class="field-hint">PT/SFT 默认开；优先 flash_attn，否则 torch SDPA flash。</span>
+                    <select id="flash-attn">
                       <option value="true">开（默认）</option>
                       <option value="false">关</option>
                     </select>
@@ -1989,7 +1995,7 @@
 
         function setFormEnabled(editable) {
       ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",
-       "max-steps","log-every","plot-every","grad-clip","batch-mode","compile","fused-adamw",
+       "max-steps","log-every","plot-every","grad-clip","batch-mode","compile","fused-adamw","flash-attn",
        "valid-ratio-pct","valid-seed","valid-every","valid-max-samples",
        "save-loss-thresholds","stable-steps",
        "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
@@ -2106,7 +2112,7 @@
       "batch_size", "max_seq_len", "lr", "min_lr", "warmup_steps", "epochs",
       "max_steps", "grad_clip", "log_every", "plot_every", "stable_steps",
       "save_every", "save_loss_thresholds", "batch_mode", "compile",
-      "fused_adamw", "valid_every", "valid_max_samples", "valid_ratio", "valid_seed", "aux_coef",
+      "fused_adamw", "flash_attn", "valid_every", "valid_max_samples", "valid_ratio", "valid_seed", "aux_coef",
     ];
 
     function modeDefaults(mode, arch) {
@@ -2178,6 +2184,7 @@
       if (hp.batch_mode) set("batch-mode", hp.batch_mode);
       if (hp.compile !== undefined && hp.compile !== null) set("compile", String(!!hp.compile));
       if (hp.fused_adamw !== undefined && hp.fused_adamw !== null) set("fused-adamw", String(!!hp.fused_adamw));
+      if (hp.flash_attn !== undefined && hp.flash_attn !== null) set("flash-attn", String(!!hp.flash_attn));
       {
         const pct = (hp.valid_ratio != null && hp.valid_ratio !== "")
           ? (Number(hp.valid_ratio) <= 1 ? Number(hp.valid_ratio) * 100 : Number(hp.valid_ratio))
@@ -2212,6 +2219,7 @@
         batch_mode: ($("batch-mode") && $("batch-mode").value) || "pack",
         compile: (($("compile") && $("compile").value) || "true") === "true",
         fused_adamw: (($("fused-adamw") && $("fused-adamw").value) || "true") === "true",
+        flash_attn: (($("flash-attn") && $("flash-attn").value) || "true") === "true",
         valid_ratio: (function () {
           const pct = num("valid-ratio-pct");
           if (pct == null || Number.isNaN(pct) || pct <= 0) return 0;
@@ -2757,6 +2765,7 @@
         ["valid_every", hp.valid_every],
         ["compile", hp.compile],
         ["fused_adamw", hp.fused_adamw],
+        ["flash_attn", hp.flash_attn],
         ["resume", hp.resume || ""],
         ["out_dir", t.out_dir || "-"],
       ];

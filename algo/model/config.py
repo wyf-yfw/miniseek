@@ -45,6 +45,9 @@ class ModelConfig:
     num_experts_per_tok: int = 2
     moe_intermediate_size: int = 512
 
+    # --- Attention 实现（训练/推理默认开 Flash；装不上 flash_attn 时走 torch SDPA flash）---
+    use_flash_attn: bool = True
+
     # --- 后续注意力/结构钩子（未实现前勿打开）---
     use_swa: bool = False
     swa_window: int = 128

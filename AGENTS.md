@@ -66,6 +66,7 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 - `--max-samples`：先从全量合格样本按 `--seed` 均匀抽取再截断，不用文件前缀。不传则全量。验证集仍在这批样本上按 `--valid-ratio` 抽。`--valid-max-samples` 只限制已经抽出的验证子集。
 - SFT：新开才需要 Init Ckpt；填了 Resume 则不必再填 Init。
 - 验证集：没有独立 valid 文件，也没有 `--valid` 路径。Pretrain / SFT / `valid_ppl` 都只用 `--valid-ratio` 从训练集内存抽样（Pretrain 默认约 `0.01`），不改源 jsonl。`hparams.valid_path` 忽略。
+- **FlashAttention**：PT / SFT 默认开（`--flash-attn` / UI「FlashAttention」）。优先 `flash_attn` 包；未安装则用 torch SDPA flash（bf16/fp16 + CUDA）。`--no-flash-attn` 可关。日志有 `flash_attn=on backend=...`。
 - Checkpoint：默认滚动 `last.pt`（`--save-last-every=5000`）+ 覆盖 `best.pt`；勿默认按 loss 阈值狂存，除非用户显式开 `--save-loss-thresholds`。
 - 清洗：走 Web「数据清洗」；PT 默认倾向保留中英混合（语言过滤常关），中间产物尽量不落盘。
 
@@ -99,7 +100,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 
 - **PT 训练**：`moe-pretrain-3` 在 wyf 上跑（resume 自 PT `last.pt`，数据 `clean.jsonl` / 12g clean）。
 - **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 主文件 `pretrain_mix_12g_clean.jsonl`；SFT **默认与 HF 已切 v5 10G**（`sft_miniseek_v5_10g.jsonl`；5G 对照包保留；见 `SOURCES_v5.md`）。训练用 `--valid-ratio`，Hub 无独立 valid。v1 与 `_raw_sft_v5` 已清。
-- **代码**：公仓已含 PT/SFT 布局、valid-ratio、`.gitignore`；`data/scripts` 旧拼盘脚本已删；`deploy/miniseek-tunnel.service` 不上库。
+- **代码**：公仓已含 PT/SFT 布局、valid-ratio、FlashAttention 默认开、`.gitignore`；`data/scripts` 旧拼盘脚本已删；`deploy/miniseek-tunnel.service` 不上库。
 - **架构页**：含 DeepSeek-V4.1-Flash 参考预设（arXiv:2609.19969，`source=reference`，`meta.diagram=fig3`，不可训练）。须画出 **Causal Encoder / Decoder** 分区与 **CED / Indexer / Reindex / Engram** 等 KV 流转箭头，嵌套 ×3(Full+Reuse×5) / ×4(Reindex+Reuse×3)，勿退回扁平 layer 卡片。Tiny / Dense / MoE 用同一套自下而上括号图，按 `DenseLM` / `MoELM` 画：注意力在下，FFN 或 MoE（1 shared + 32 routed、top-2）在上，右侧 ×层数，LM Head 与 Embedding 的 tied 用虚线。未实现的 SWA / CSA2 / CED 不要画进这三档。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。

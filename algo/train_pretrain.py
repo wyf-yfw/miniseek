@@ -42,6 +42,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from algo.batching import LengthBucketBatchSampler, PackedTextBatchIter
 from algo.model import build_model
+from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
 
@@ -477,6 +478,13 @@ def main() -> None:
         help="CUDA 上默认 AdamW(fused=True)；--no-fused-adamw 关闭",
     )
     p.add_argument(
+        "--flash-attn",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="默认开 FlashAttention：优先 flash_attn，否则 torch SDPA flash；"
+        "--no-flash-attn 关闭",
+    )
+    p.add_argument(
         "--resume",
         type=str,
         default=None,
@@ -522,6 +530,8 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 权重保持 fp32；CUDA 上用 autocast，避免整模 .to(bfloat16) 弄坏 RoPE complex buffer
     print(f"[train] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
+    attn_name = configure_attn_backend(bool(args.flash_attn))
+    print(f"[train] flash_attn={'on' if args.flash_attn else 'off'} backend={attn_name}")
 
     tok = load_tokenizer(args.tokenizer, allow_fallback=True)
     vocab = detect_vocab_size(tok)
@@ -532,6 +542,7 @@ def main() -> None:
         cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
     else:
         cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
+    cfg = ModelConfig.from_dict({**cfg.to_dict(), "use_flash_attn": bool(args.flash_attn)})
     cfg = cfg.with_vocab_size(vocab)
     model = build_model(cfg).to(device)
     if args.compile:

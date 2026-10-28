@@ -28,6 +28,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
@@ -303,6 +304,7 @@ class InferenceEngine:
         else:
             blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         cfg = ModelConfig.from_dict(blob["config"])
+        configure_attn_backend(bool(getattr(cfg, "use_flash_attn", True)))
         if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
             from algo.model.moe import MoELM
             model = MoELM(cfg)
@@ -1167,6 +1169,7 @@ def defaults() -> dict:
             "batch_mode": "pack",
             "compile": True,
             "fused_adamw": True,
+            "flash_attn": True,
             "plot_every": 500,
             "valid_every": 500,
             "valid_max_samples": 512,
@@ -1195,6 +1198,7 @@ def defaults() -> dict:
             "batch_mode": "pack",
             "compile": True,
             "fused_adamw": True,
+            "flash_attn": True,
             "plot_every": 500,
             "valid_every": 500,
             "valid_max_samples": 512,
@@ -1223,6 +1227,7 @@ def defaults() -> dict:
             "batch_mode": "pack",
             "compile": True,
             "fused_adamw": True,
+            "flash_attn": True,
             "plot_every": 1,
             "valid_every": 20,
             "valid_max_samples": 512,

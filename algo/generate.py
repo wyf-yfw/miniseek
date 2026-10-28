@@ -17,6 +17,7 @@ from pathlib import Path
 import torch
 
 from algo.model import build_model
+from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
@@ -47,6 +48,7 @@ def main() -> None:
     if Path(args.ckpt).exists():
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
         cfg = ModelConfig.from_dict(ckpt["config"])
+        configure_attn_backend(bool(getattr(cfg, "use_flash_attn", True)))
         # 按 cfg.arch 建模型：MoE 权重（MiniSeek-M*）也能直接跑，不再只认 Dense
         model = build_model(cfg)
         model.load_state_dict(ckpt["model"], strict=True)

@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .attn_backend import causal_attention
 from .config import ModelConfig
 
 
@@ -61,6 +62,7 @@ class CausalSelfAttention(nn.Module):
         self.n_heads = cfg.n_heads
         self.head_dim = cfg.head_dim
         self.d_model = cfg.d_model
+        self.use_flash_attn = bool(getattr(cfg, "use_flash_attn", True))
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=False)
         self.o_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
         self.dropout = nn.Dropout(cfg.dropout)
@@ -78,20 +80,16 @@ class CausalSelfAttention(nn.Module):
         q = apply_rope(q, rope_cis)
         k = apply_rope(k, rope_cis)
 
-        # scaled dot-product；CPU smoke 用 math 路径，CUDA 可走 SDPA
-        if hasattr(F, "scaled_dot_product_attention"):
-            y = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, is_causal=attn_mask is None, dropout_p=0.0
-            )
-        else:
-            scale = 1.0 / math.sqrt(self.head_dim)
-            att = (q @ k.transpose(-2, -1)) * scale
-            causal = torch.triu(
-                torch.ones(t, t, device=x.device, dtype=torch.bool), diagonal=1
-            )
-            att = att.masked_fill(causal, float("-inf"))
-            att = F.softmax(att, dim=-1)
-            y = att @ v
+        # FlashAttention (flash_attn / torch SDPA flash) with safe fallback
+        y = causal_attention(
+            q,
+            k,
+            v,
+            head_dim=self.head_dim,
+            attn_mask=attn_mask,
+            use_flash=self.use_flash_attn,
+            dropout_p=0.0,
+        )
 
         y = y.transpose(1, 2).contiguous().view(b, t, self.d_model)
         return self.dropout(self.o_proj(y))
