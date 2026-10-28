@@ -93,3 +93,6 @@ _api_smoke_*.py
 .worktrees/
 release/
 .superpowers/
+
+# Private ops (local only)
+deploy/miniseek-tunnel.service
