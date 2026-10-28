@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
 .eggs/
 dist/
@@ -12,11 +13,33 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# Data (large jsonl)
+# Virtualenvs (project-local)
+.venv_data/
+.venv-dj/
+
+# --- Large training data (never commit jsonl / clean dumps) ---
+data/**/*.jsonl
 data/*.jsonl
 !data/.gitkeep
+data/PT/*.jsonl
+data/SFT/*.jsonl
+data/clean/
+data/raw/
+data/valid_mix.jsonl
+data/pretrain_mix_*.jsonl
+data/hf_upload_*/
+data/hf_upload_*
+hf_upload_*/
+# Keep small card / stats / sources under data/PT and data/SFT
+!data/PT/*.md
+!data/PT/*.json
+!data/SFT/*.md
+!data/SFT/*.json
+!data/*_SOURCES.md
+!data/*_stats.json
+!data/*SOURCES*.md
 
-# Checkpoints & exports (root checkpoints/ deleted; task weights live under tasks/<id>/checkpoints/)
+# Checkpoints & model weights
 checkpoints/
 *.pt
 *.pth
@@ -24,50 +47,49 @@ checkpoints/
 *.safetensors
 export/
 
+# Task / run outputs
+tasks/
+logs/
+*.log
+api_restart.log*
+api.out.log
+api.err.log
+
 # Tokenizer downloads (optional local)
 tokenizer/
 minimind_tokenizer/
+
+# HF / hub caches & work dirs
+.cache/
+data/.cache/
+.hf_token
+hf/
+.dj_work/
+**/huggingface/
+~/.cache/huggingface/
 
 # IDE / OS
 .idea/
 .vscode/
 .DS_Store
 *.swp
+*~
 
 # Eval outputs (keep templates)
 algo/eval/reports/gen_smoke_*.jsonl
+algo/eval/reports/cont_smoke_*.jsonl
 algo/eval/reports/lm_eval_*/
-
-.hf_token
-release/
-*.log
-
-.worktrees/
-tasks/
-hf/
-
-.superpowers/
+algo/eval/reports/*.log
+algo/eval/reports/_smoke_*/
 algo/eval/runs/
 
-# Local smoke / restart junk (do not track)
-algo/eval/reports/_smoke_*/
-api_restart.log*
-api.out.log
-api.err.log
+# Local smoke / restart junk
 _fix_*.py
 _api_smoke_*.py
 123.py
-
-# --- local data / junk (mix pipeline) ---
-.venv_data/
-logs/
 *.bak
-data/hf_upload_MiniSeek-dataset/
-data/hf_upload_MiniSeek-dataset_real/
-data/raw/
-algo/eval/reports/cont_smoke_*.jsonl
-algo/eval/reports/*.log
 
-# Clean job outputs
-data/clean/
-.venv-dj/
+# Worktrees / release / docs tooling
+.worktrees/
+release/
+.superpowers/

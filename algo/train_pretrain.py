@@ -96,23 +96,37 @@ def _emit_expert_load_line(
 
 
 class JsonlTextDataset(Dataset):
-    def __init__(self, path: str, tokenizer, max_seq_len: int, max_samples: Optional[int] = None):
+    def __init__(
+        self,
+        path: Optional[str] = None,
+        tokenizer=None,
+        max_seq_len: int = 512,
+        max_samples: Optional[int] = None,
+        samples: Optional[List[str]] = None,
+    ):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
-        self.samples: List[str] = []
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                obj = json.loads(line)
-                text = obj.get("text") or obj.get("content") or ""
-                if text:
-                    self.samples.append(text)
-                if max_samples is not None and len(self.samples) >= max_samples:
-                    break
+        if samples is not None:
+            self.samples = list(samples)
+            if max_samples is not None:
+                self.samples = self.samples[: max(0, int(max_samples))]
+        else:
+            if not path:
+                raise ValueError("JsonlTextDataset 需要 path 或 samples")
+            self.samples = []
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    obj = json.loads(line)
+                    text = obj.get("text") or obj.get("content") or ""
+                    if text:
+                        self.samples.append(text)
+                    if max_samples is not None and len(self.samples) >= max_samples:
+                        break
         if not self.samples:
-            raise RuntimeError(f"数据为空: {path}")
+            raise RuntimeError(f"数据为空: {path or '(samples)'}")
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -177,6 +191,36 @@ def evaluate_valid(model: torch.nn.Module, loader, device: torch.device) -> Dict
         "ppl": math.exp(min(mean, 20.0)),
         "tokens": total_tokens,
     }
+
+
+
+def split_samples_by_ratio(
+    samples: List[str],
+    ratio: float,
+    seed: int,
+) -> tuple[List[str], List[str]]:
+    """Deterministically split samples into (train, valid) by *ratio*.
+
+    Does not modify *samples* in place beyond reading; returns two new lists that
+    share the same string objects (no rewrite of the source jsonl on disk).
+    Train ∩ valid is empty; |valid| ≈ round(n * ratio), at least 1 when n>0 and ratio>0.
+    """
+    n = len(samples)
+    if n == 0:
+        return [], []
+    if ratio <= 0:
+        return list(samples), []
+    if ratio >= 1:
+        raise ValueError(f"valid_ratio must be in (0, 1), got {ratio}")
+    rng = random.Random(int(seed))
+    order = list(range(n))
+    rng.shuffle(order)
+    n_valid = int(round(n * float(ratio)))
+    n_valid = max(1, min(n - 1, n_valid)) if n >= 2 else n
+    valid_idx = set(order[:n_valid])
+    train_list = [samples[i] for i in range(n) if i not in valid_idx]
+    valid_list = [samples[i] for i in order[:n_valid]]
+    return train_list, valid_list
 
 
 def set_seed(seed: int) -> None:
@@ -283,7 +327,7 @@ def set_lr(opt: torch.optim.Optimizer, lr: float) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="miniseek Stage-0 pretrain")
-    p.add_argument("--data", type=str, default="data/pretrain_mix_5g.jsonl")
+    p.add_argument("--data", type=str, default="data/PT/pretrain_mix_12g_clean.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_pretrain")
     p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")
@@ -314,7 +358,7 @@ def main() -> None:
     p.add_argument(
         "--save-last-every",
         type=int,
-        default=500,
+        default=5000,
         help="每 N 步原子写一次 last.pt（0=关闭）。保证中途崩溃/停机能从近期状态续训",
     )
     p.add_argument(
@@ -397,6 +441,18 @@ def main() -> None:
         type=int,
         default=512,
         help="valid 最多用多少条样本",
+    )
+    p.add_argument(
+        "--valid-ratio",
+        type=float,
+        default=0.0,
+        help="从训练集按比例随机抽 valid（0=关闭；>0 时忽略 --valid 文件，不改写源 jsonl）",
+    )
+    p.add_argument(
+        "--valid-seed",
+        type=int,
+        default=42,
+        help="valid-ratio 划分随机种子（可复现）",
     )
     args = p.parse_args()
 
@@ -528,8 +584,91 @@ def main() -> None:
     )
 
     valid_loader = None
+    valid_ratio = float(args.valid_ratio or 0.0)
     valid_path = str(args.valid or "").strip()
-    if int(args.valid_every) > 0 and valid_path:
+    if int(args.valid_every) > 0 and valid_ratio > 0:
+        if valid_path:
+            print(
+                f"[train] valid-ratio={valid_ratio} > 0：忽略独立 valid 文件 {valid_path}",
+                flush=True,
+            )
+        train_samples, valid_samples = split_samples_by_ratio(
+            ds.samples, valid_ratio, int(args.valid_seed)
+        )
+        ds.samples = train_samples
+        # pack / bucket / random already closed over ds.samples or lengths — rebuild
+        # estimates below use updated ds; recreate pack factory closures.
+        if batch_mode == "pack":
+            eos_id = int(getattr(tok, "eos_token_id", 2) or 2)
+
+            def packed_iter_factory(epoch: int):
+                return PackedTextBatchIter(
+                    ds.samples,
+                    tok,
+                    max_seq_len=args.max_seq_len,
+                    batch_size=args.batch_size,
+                    pad_id=pad_id,
+                    eos_id=eos_id,
+                    seed=(shuffle_seed + epoch) % (2**31 - 1),
+                )
+
+            steps_per_epoch_est = PackedTextBatchIter(
+                ds.samples,
+                tok,
+                max_seq_len=args.max_seq_len,
+                batch_size=args.batch_size,
+                pad_id=pad_id,
+                eos_id=eos_id,
+                seed=shuffle_seed,
+            ).estimate_len()
+        elif batch_mode == "bucket":
+            lengths = [min(args.max_seq_len, max(2, len(t))) for t in ds.samples]
+            batch_sampler = LengthBucketBatchSampler(
+                lengths, args.batch_size, seed=shuffle_seed, drop_last=False
+            )
+            loader = DataLoader(
+                ds,
+                batch_sampler=batch_sampler,
+                collate_fn=partial(collate_pad, pad_id=pad_id),
+                num_workers=nw,
+                pin_memory=pin,
+            )
+            steps_per_epoch_est = len(batch_sampler)
+        else:
+            loader = DataLoader(
+                ds,
+                batch_size=args.batch_size,
+                shuffle=True,
+                generator=shuffle_gen,
+                collate_fn=partial(collate_pad, pad_id=pad_id),
+                num_workers=nw,
+                pin_memory=pin,
+            )
+            steps_per_epoch_est = max(1, math.ceil(len(ds) / max(1, args.batch_size)))
+
+        vmax = int(args.valid_max_samples) if int(args.valid_max_samples) > 0 else None
+        if vmax is not None:
+            valid_samples = valid_samples[:vmax]
+        valid_ds = JsonlTextDataset(
+            samples=valid_samples,
+            tokenizer=tok,
+            max_seq_len=args.max_seq_len,
+        )
+        valid_loader = DataLoader(
+            valid_ds,
+            batch_size=args.batch_size,
+            shuffle=False,
+            collate_fn=partial(collate_pad, pad_id=pad_id),
+            num_workers=0,
+            pin_memory=(device.type == "cuda"),
+        )
+        print(
+            f"[train] valid-ratio={valid_ratio} seed={args.valid_seed} "
+            f"train={len(ds)} valid={len(valid_ds)} every={args.valid_every} "
+            f"max_samples={args.valid_max_samples} (源文件未改写)",
+            flush=True,
+        )
+    elif int(args.valid_every) > 0 and valid_path:
         if Path(valid_path).exists():
             valid_ds = JsonlTextDataset(
                 valid_path,

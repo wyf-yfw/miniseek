@@ -24,7 +24,7 @@ def main() -> int:
         arch="tiny",
         mode="pretrain",
         hparams={
-            "data_path": str(ROOT / "data" / "pretrain_t2t_mini.jsonl"),
+            "data_path": str(ROOT / "data" / "pretrain_mix_5g.jsonl"),
             "batch_size": 2,
             "max_steps": 2,
             "max_seq_len": 64,

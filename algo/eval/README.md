@@ -4,7 +4,7 @@
 
 | # | 指标 | 脚本 / 工具 | 备注 |
 |---|------|-------------|------|
-| 1 | Valid PPL | `python eval/valid_ppl.py --ckpt ...` | 固定 `data/valid.jsonl` |
+| 1 | Valid PPL | `python eval/valid_ppl.py --ckpt ...` | 固定 `data/valid_mix.jsonl` |
 | 2 | Gen-Smoke | `python eval/gen_smoke.py --seed 42` | 20 条中文 prompt |
 | 3 | C-Eval valid | lm-evaluation-harness | 见下方 |
 | 4 | CMMLU | lm-evaluation-harness | 见下方 |

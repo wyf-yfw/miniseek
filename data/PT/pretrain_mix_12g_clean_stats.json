@@ -1,0 +1,20 @@
+{
+  "name": "pretrain_mix_12g_clean",
+  "source_unclean": "pretrain_mix_12g.jsonl",
+  "clean_job_id": "20261027-223828-3641",
+  "engine": "builtin",
+  "input_rows": 3834735,
+  "kept": 3669988,
+  "dropped": 164747,
+  "per_operator": {
+    "sensitive": 37411,
+    "repetition": 4456,
+    "exact_dedup": 122509,
+    "length": 371
+  },
+  "seconds": 1447.048,
+  "operators": {},
+  "bytes_approx": 12672865041,
+  "lines": 3669988,
+  "note": "builtin clean of pretrain_mix_12g; primary train split for MiniSeek-Pretrain"
+}

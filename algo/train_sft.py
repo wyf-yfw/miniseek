@@ -5,7 +5,7 @@
 
 示例::
 
-    python -m algo.train_sft --data data/sft_miniseek_v1.jsonl \\
+    python -m algo.train_sft --data data/SFT/sft_miniseek_v1.jsonl \\
         --init-ckpt tasks/_default_pretrain/best.pt --out-dir tasks/_default_sft \\
         --max-steps 100
 """
@@ -238,7 +238,7 @@ def set_lr(opt: torch.optim.Optimizer, lr: float) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="miniseek SFT")
-    p.add_argument("--data", type=str, default="data/sft_miniseek_v1.jsonl")
+    p.add_argument("--data", type=str, default="data/SFT/sft_miniseek_v1.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
     p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")

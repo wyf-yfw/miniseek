@@ -16,7 +16,7 @@
 
 - Start from a **Dense** backbone, then add MoE / SWA / CSA2 / CED stage by stage ([`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)), with **locked data + Eval-Core** for fair A/B.
 - Stage 0: `d_model=512`, 8-layer dense decoder-only, MiniMind tokenizer **vocab=6400**, ~**28.45M** tied params—trainable on a single RTX 3090.
-- Data/tokenizer aligned with the [MiniMind](https://github.com/jingyaogong/minimind) stack (`jingyaogong/minimind_dataset`); core model in **native PyTorch**.
+- Tokenizer aligned with [MiniMind](https://github.com/jingyaogong/minimind) (vocab=6400); **training data is MiniSeek's own** (`pretrain_mix_5g` / `sft_miniseek_v1`); core model in **native PyTorch**.
 - Built-in **Web UI**: training Tasks, chat, continuation, architecture viz, and C-Eval / CMMLU / GSM8K (lm-eval).
 - Open weights: [`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) (pretrain), [`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) (SFT).
 
@@ -146,21 +146,20 @@ huggingface-cli download jingyaogong/MiniMind2 --include "tokenizer*" --local-di
 
 Without local files the code falls back to a byte-level `FallbackTokenizer` (smoke only—not for real training).
 
-## Ⅱ Pretrain / valid
+## Ⅱ Pretrain / valid / SFT
 
 ```bash
-python scripts/download_data.py            # docs / split valid
-python scripts/download_data.py --download # fetch pretrain_t2t_mini.jsonl
+python scripts/download_data.py   # check local MiniSeek datasets
+# mix builders: data/scripts/ (build_pretrain_mix_5g.py / split_mix_5pct.py)
 ```
 
-| Locked item | Value |
-|-------------|--------|
-| Source | [`jingyaogong/minimind_dataset`](https://huggingface.co/datasets/jingyaogong/minimind_dataset) |
-| Train | `pretrain_t2t_mini.jsonl` |
-| Valid | `valid.jsonl` = **0.5%** of train, **seed=42** (frozen for stages 0–5) |
-| SFT | `sft_t2t_mini.jsonl` (chat line after architecture freeze; not for structure A/B) |
+| Use | Path |
+|-----|------|
+| Pretrain | `data/pretrain_mix_5g.jsonl` |
+| Valid | `data/valid_mix.jsonl` |
+| SFT | `data/sft_miniseek_v1.jsonl` |
 
-Rule: **change architecture, not data**. Full 10GB/14GB dumps are for post-freeze scaling, not the stage table.
+> Legacy MiniMind dumps (`pretrain_t2t_mini` / `sft_t2t_mini` / `valid.jsonl`) were removed and are no longer downloaded.
 
 ---
 
@@ -209,10 +208,10 @@ Naming (one Hub repo per checkpoint):
 # 📌 Training
 
 ```bash
-python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain
+python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/_default_pretrain
 
 # short run (no loss-*.pt by default; pass --save-loss-thresholds only if needed)
-python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain \
+python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/_default_pretrain \
   --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
@@ -232,7 +231,7 @@ Or drive the same loop from the Web **Train** tab (`tasks/<id>/`).
 
 | # | Item | Notes |
 |---|------|--------|
-| 1 | Valid PPL | shared `valid.jsonl` |
+| 1 | Valid PPL | shared `valid_mix.jsonl` |
 | 2 | Gen-Smoke | 20 fixed prompts, seed=42 |
 | 3 | C-Eval valid | lm-eval |
 | 4 | CMMLU | lm-eval (`trust_remote_code`; pin `datasets>=2.14,<4.0`) |
@@ -240,7 +239,7 @@ Or drive the same loop from the Web **Train** tab (`tasks/<id>/`).
 | 6 | Efficiency | peak VRAM / tokens/s on fixed HW |
 
 ```bash
-python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid.jsonl
+python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid_mix.jsonl
 python -m algo.eval.gen_smoke --ckpt tasks/_default_pretrain/last.pt --seed 42
 # or Web Bench tab / eval/run_benchmark.py
 ```
@@ -269,7 +268,7 @@ tests/              # smoke / unit tests
 
 # 📌 Acknowledgements
 
-- Data & tokenizer: [jingyaogong/minimind](https://github.com/jingyaogong/minimind), [`minimind_dataset`](https://huggingface.co/datasets/jingyaogong/minimind_dataset)
+- Tokenizer: [jingyaogong/minimind](https://github.com/jingyaogong/minimind); training data: MiniSeek `pretrain_mix_5g` / `sft_miniseek_v1`
 - Structure reference: [DeepSeek-V4.1 paper HTML](https://arxiv.org/html/2609.19969)
 - Benchmarks: [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness), C-Eval, CMMLU
 

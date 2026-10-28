@@ -28,7 +28,7 @@ from algo.train_pretrain import JsonlTextDataset, collate_pad
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", type=str, default="tasks/_default_pretrain/last.pt")
-    ap.add_argument("--valid", type=str, default="data/valid.jsonl")
+    ap.add_argument("--valid", type=str, default="data/valid_mix.jsonl")
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--max-seq-len", type=int, default=512)
     ap.add_argument("--max-samples", type=int, default=None)

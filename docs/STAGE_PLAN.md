@@ -50,6 +50,8 @@
 | 锁定项 | 固定内容 | 不许改 |
 |--------|----------|--------|
 | Tokenizer | MiniMind 自带 tokenizer | 各阶段同一词表 |
+> **2026-10-27**：MiniMind 旧集已删除。现行默认改为 `pretrain_mix_5g.jsonl` / `valid_mix.jsonl` / `sft_miniseek_v1.jsonl`。下表保留为阶段 0–5 历史对照记录。
+
 | 预训练集 | `pretrain_t2t_mini.jsonl` 全量 | 阶段 0–5 都用它训 |
 | Valid 集 | 从该文件固定 seed 切 0.5%（一次切好存成 `valid.jsonl`） | 以后不许重切 |
 | 步数/超参 | 同 batch、同 lr 日程、同 `max_seq_len=512`、同训练步数 | 只改模型结构代码 |

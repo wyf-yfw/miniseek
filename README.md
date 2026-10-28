@@ -16,7 +16,7 @@
 
 - 从 **Dense 骨架**出发，按阶段逐步接入 MoE / SWA / CSA2 / CED 等结构（见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)），用**同一套数据与评测**做公平 A/B；**MoE（M0.1：1 shared + 32 routed，top-2）已可训**。
 - Stage 0 主线：`d_model=512`、8 层 Dense Decoder-only，MiniMind 词表 **vocab=6400**，tied 权重约 **28.45M**，单卡 3090 可训。
-- 训练数据与分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 生态（`jingyaogong/minimind_dataset`），核心模型用 **PyTorch 原生**实现。
+- 分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 词表（vocab=6400）；**训练数据用自建 MiniSeek 集**（`pretrain_mix_5g` / `sft_miniseek_v1`），核心模型用 **PyTorch 原生**实现。
 - 自带 **Web UI**：训练 Task、对话、续写、架构可视化、C-Eval / CMMLU / GSM8K 评测（lm-eval）。
 - 权重已开源到 Hugging Face：[`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base)（预训练）、[`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1)（SFT）。
 
@@ -152,21 +152,20 @@ huggingface-cli download jingyaogong/MiniMind2 --include "tokenizer*" --local-di
 
 无本地文件时，代码会回退到 byte-level `FallbackTokenizer`（仅 smoke，不可正式训练）。
 
-## Ⅱ 预训练 / Valid
+## Ⅱ 预训练 / Valid / SFT
 
 ```bash
-python scripts/download_data.py            # 说明 / 划分 valid
-python scripts/download_data.py --download # 拉取 pretrain_t2t_mini.jsonl
+python scripts/download_data.py   # 检查本地 MiniSeek 数据是否齐
+# mix 构建见 data/scripts/（build_pretrain_mix_5g.py / split_mix_5pct.py）
 ```
 
-| 锁定项 | 内容 |
-|--------|------|
-| 源 | [`jingyaogong/minimind_dataset`](https://huggingface.co/datasets/jingyaogong/minimind_dataset) |
-| Train | `pretrain_t2t_mini.jsonl` |
-| Valid | `valid.jsonl` = train 的 **0.5%**，**seed=42**（阶段 0–5 锁死） |
-| SFT | `sft_t2t_mini.jsonl`（架构冻结后的对话线；不参与结构对比） |
+| 用途 | 路径 |
+|------|------|
+| 预训练 | `data/pretrain_mix_5g.jsonl` |
+| 验证集 | `data/valid_mix.jsonl` |
+| SFT | `data/sft_miniseek_v1.jsonl` |
 
-对比原则：**换结构，不换数据**。完整 10GB/14GB 版留作冻结后加强，不进阶段表。
+> MiniMind 旧集（`pretrain_t2t_mini` / `sft_t2t_mini` / `valid.jsonl`）已删除，不再下载。
 
 ---
 
@@ -216,10 +215,10 @@ RMSNorm → LM Head（基座默认与 Embedding tying）
 
 ```bash
 # 正式预训练
-python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain
+python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/_default_pretrain
 
 # 短跑 / 调参（默认不写 loss-*.pt；需要里程碑再显式加 --save-loss-thresholds）
-python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir tasks/_default_pretrain \
+python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/_default_pretrain \
   --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
@@ -239,7 +238,7 @@ python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir task
 
 | # | 项目 | 说明 |
 |---|------|------|
-| 1 | Valid PPL | 同一 `valid.jsonl` |
+| 1 | Valid PPL | 同一 `valid_mix.jsonl` |
 | 2 | Gen-Smoke | 20 条固定 prompt，seed=42 |
 | 3 | C-Eval valid | lm-eval |
 | 4 | CMMLU | lm-eval（需 `trust_remote_code`；`datasets>=2.14,<4.0`） |
@@ -249,7 +248,7 @@ python -m algo.train_pretrain --data data/pretrain_t2t_mini.jsonl --out-dir task
 CLI 示例：
 
 ```bash
-python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid.jsonl
+python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid_mix.jsonl
 python -m algo.eval.gen_smoke --ckpt tasks/_default_pretrain/last.pt --seed 42
 # 或 Web「评测」Tab / eval/run_benchmark.py
 ```
@@ -279,7 +278,7 @@ tests/              # 冒烟与单测
 
 # 📌 致谢
 
-- 数据与词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)、[`minimind_dataset`](https://huggingface.co/datasets/jingyaogong/minimind_dataset)
+- 词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)；训练数据：自建 `pretrain_mix_5g` / `sft_miniseek_v1`
 - 结构对齐参考：[DeepSeek-V4.1 相关论文](https://arxiv.org/html/2609.19969)
 - 客观评测：[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)、C-Eval、CMMLU
 

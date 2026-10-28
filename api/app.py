@@ -54,8 +54,8 @@ from api import worker_client as wc
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = PROJECT_ROOT / "frontend"
-DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "pretrain_mix_5g.jsonl")
-DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "sft_miniseek_v1.jsonl")
+DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "PT" / "pretrain_mix_12g_clean.jsonl")
+DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "SFT" / "sft_miniseek_v1.jsonl")
 DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "tasks" / "_default_pretrain")
 DEFAULT_SFT_OUT = str(PROJECT_ROOT / "tasks" / "_default_sft")
 DEFAULT_MOE_OUT = str(PROJECT_ROOT / "tasks" / "_default_moe")
@@ -920,12 +920,12 @@ def env_text() -> str:
     for label, p in [
         ("预训练数据", Path(DEFAULT_PRETRAIN_DATA)),
         ("SFT 数据", Path(DEFAULT_SFT_DATA)),
-        ("验证集", PROJECT_ROOT / "data" / "valid_mix.jsonl"),
     ]:
         if p.exists():
             lines.append(f"{label}: {p.name} ({p.stat().st_size / (1024 * 1024):.1f} MB)")
         else:
             lines.append(f"{label}: 缺少 {p.name}")
+    lines.append("验证: 默认 valid_ratio=1% 从训练集划分（无需 valid_mix.jsonl）")
     lines.append(_gpu_text())
     return "\n".join(lines)
 
@@ -1143,9 +1143,11 @@ def defaults() -> dict:
             "compile": True,
             "fused_adamw": True,
             "plot_every": 500,
-            "valid_path": str(PROJECT_ROOT / "data" / "valid_mix.jsonl"),
+            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
+            "valid_ratio": 0.01,
+            "valid_seed": 42,
             "init_ckpt": "",
             "resume": "",
             "aux_coef": 0.01,
@@ -1170,9 +1172,11 @@ def defaults() -> dict:
             "compile": True,
             "fused_adamw": True,
             "plot_every": 500,
-            "valid_path": str(PROJECT_ROOT / "data" / "valid_mix.jsonl"),
+            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
+            "valid_ratio": 0.01,
+            "valid_seed": 42,
             "init_ckpt": "",
             "resume": "",
             "aux_coef": 0.01,
@@ -1197,9 +1201,11 @@ def defaults() -> dict:
             "compile": True,
             "fused_adamw": True,
             "plot_every": 1,
-            "valid_path": str(PROJECT_ROOT / "data" / "valid_mix.jsonl"),
+            "valid_path": "",
             "valid_every": 20,
             "valid_max_samples": 512,
+            "valid_ratio": 0.01,
+            "valid_seed": 42,
             "init_ckpt": "",
             "resume": "",
             "aux_coef": 0.01,
@@ -1214,9 +1220,11 @@ def defaults() -> dict:
             "warmup_steps": 200,
             "stable_steps": 50,
             "plot_every": 500,
-            "valid_path": str(PROJECT_ROOT / "data" / "valid_mix.jsonl"),
+            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
+            "valid_ratio": 0.01,
+            "valid_seed": 42,
             "save_loss_thresholds": "",
             "init_ckpt": "",
             "resume": "",
@@ -1232,9 +1240,11 @@ def defaults() -> dict:
             "warmup_steps": 200,
             "stable_steps": 50,
             "plot_every": 500,
-            "valid_path": str(PROJECT_ROOT / "data" / "valid_mix.jsonl"),
+            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
+            "valid_ratio": 0.01,
+            "valid_seed": 42,
             "save_loss_thresholds": "",
             "init_ckpt": "",
             "resume": "",
@@ -1249,9 +1259,11 @@ def defaults() -> dict:
             "min_lr": 1e-5,
             "warmup_steps": 100,
             "plot_every": 500,
-            "valid_path": str(PROJECT_ROOT / "data" / "valid_mix.jsonl"),
+            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
+            "valid_ratio": 0.0,
+            "valid_seed": 42,
             "save_loss_thresholds": "",
             "init_ckpt": str(best) if best.exists() else "",
             "resume": "",

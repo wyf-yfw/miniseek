@@ -153,7 +153,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
 
     module = "algo.train_sft" if mode == "sft" else "algo.train_pretrain"
     _default_data = PROJECT_ROOT / "data" / (
-        "sft_miniseek_v1.jsonl" if mode == "sft" else "pretrain_mix_5g.jsonl"
+        "SFT/sft_miniseek_v1.jsonl" if mode == "sft" else "PT/pretrain_mix_12g_clean.jsonl"
     )
     data_path = str(_hp(hp, "data_path", _default_data))
     out_dir = str(task["out_dir"])
@@ -209,10 +209,25 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         if resume and Path(resume).exists():
             cmd.extend(["--resume", resume])
 
-    valid_path = str(_hp(hp, "valid_path", PROJECT_ROOT / "data" / "valid_mix.jsonl") or "").strip()
+    valid_path = str(_hp(hp, "valid_path", "") or "").strip()
     valid_every = int(_hp(hp, "valid_every", 20 if arch == "tiny" else 500))
     valid_max_samples = int(_hp(hp, "valid_max_samples", 512))
-    if valid_path and valid_every > 0:
+    valid_ratio = float(_hp(hp, "valid_ratio", 0) or 0)
+    valid_seed = int(_hp(hp, "valid_seed", 42))
+    if mode == "pretrain" and valid_every > 0 and valid_ratio > 0:
+        cmd.extend(
+            [
+                "--valid-ratio",
+                str(valid_ratio),
+                "--valid-seed",
+                str(valid_seed),
+                "--valid-every",
+                str(valid_every),
+                "--valid-max-samples",
+                str(valid_max_samples),
+            ]
+        )
+    elif valid_path and valid_every > 0:
         cmd.extend(
             [
                 "--valid",
