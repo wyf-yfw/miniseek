@@ -160,12 +160,12 @@ def deepctrl_to_convo(obj: dict) -> Optional[List[dict]]:
         for pair in history:
             if not isinstance(pair, (list, tuple)) or len(pair) < 2:
                 continue
-            u, a = str(pair[0] or "").strip(), str(pair[1] or "").strip()
+            u, a = as_text(pair[0]), as_text(pair[1])
             if u and a:
                 turns.append({"role": "user", "content": u})
                 turns.append({"role": "assistant", "content": a})
-    u = user_content(obj.get("instruction") or "", obj.get("input") or "")
-    a = (obj.get("output") or "").strip()
+    u = user_content(as_text(obj.get("instruction") or ""), as_text(obj.get("input") or ""))
+    a = as_text(obj.get("output") or "")
     if not u or not a:
         return None
     turns.append({"role": "user", "content": u})
@@ -391,18 +391,71 @@ class DiskReservoir:
         self._fh.close()
 
 
-def stream_deepctrl(target_bytes_10g: int) -> None:
+DEEPCTRL_EXPECTED = {
+    "zh": 17_193_006_547,
+    "en": 12_221_139_899,
+}
+DEEPCTRL_URLS = {
+    "zh": "https://www.modelscope.cn/datasets/deepctrl/deepctrl-sft-data/resolve/master/sft_data_zh.jsonl",
+    "en": "https://www.modelscope.cn/datasets/deepctrl/deepctrl-sft-data/resolve/master/sft_data_en.jsonl",
+}
+
+
+def deepctrl_raw_path(lang: str) -> Path:
+    return RAW / "deepctrl" / f"sft_data_{lang}.jsonl"
+
+
+def deepctrl_complete(lang: str) -> bool:
+    p = deepctrl_raw_path(lang)
+    if not p.exists():
+        return False
+    sz = p.stat().st_size
+    exp = DEEPCTRL_EXPECTED[lang]
+    # allow tiny under-read (CDN) but require >= 99%
+    return sz >= int(exp * 0.99)
+
+
+def download_deepctrl(force: bool = False) -> None:
+    """Download full deepctrl zh+en jsonl onto disk (~27GiB)."""
+    dest_dir = RAW / "deepctrl"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for lang, url in DEEPCTRL_URLS.items():
+        dest = deepctrl_raw_path(lang)
+        if deepctrl_complete(lang) and not force:
+            print(f"[skip] deepctrl raw {lang} {dest.stat().st_size/GiB:.2f}G")
+            continue
+        print(f"[deepctrl] download {lang} → {dest}")
+        cmd = [
+            "curl", "-L", "--fail", "--retry", "20", "--retry-delay", "5",
+            "--retry-all-errors", "-C", "-", "-o", str(dest), url,
+        ]
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            raise RuntimeError(f"curl deepctrl-{lang} failed rc={rc}")
+        if not deepctrl_complete(lang):
+            raise RuntimeError(
+                f"deepctrl-{lang} incomplete size={dest.stat().st_size} expected≈{DEEPCTRL_EXPECTED[lang]}"
+            )
+        print(f"[deepctrl] {lang} done {dest.stat().st_size/GiB:.2f}G")
+
+
+def convert_deepctrl(pool_budget_gib: float = 14.0) -> None:
+    """Convert on-disk deepctrl into pool via large stratified reservoir (full raw kept)."""
     out = POOL_FILES[3]
     idx = POOL / "deepctrl.idx"
-    if out.exists() and out.stat().st_size > 100_000_000 and idx.exists():
-        print(f"[skip] deepctrl {out.stat().st_size/GiB:.2f}G")
+    # require a substantial pool; partials redo
+    if out.exists() and out.stat().st_size > int(8 * GiB) and idx.exists() and idx.stat().st_size > 10_000_000:
+        print(f"[skip] deepctrl pool {out.stat().st_size/GiB:.2f}G")
         return
+    for lang in ("zh", "en"):
+        if not deepctrl_complete(lang):
+            raise FileNotFoundError(f"deepctrl raw missing/incomplete: {deepctrl_raw_path(lang)}")
 
     rng = random.Random(SEED)
-    keep_budget = int(target_bytes_10g * 0.70 * 1.4)
-    avg = 2200
-    total_slots = max(20000, min(2_200_000, keep_budget // avg))
-    print(f"[deepctrl] reservoir slots≈{total_slots} (~{total_slots*avg/GiB:.1f}G)")
+    keep_budget = int(pool_budget_gib * GiB)
+    avg = 2000
+    total_slots = max(500_000, min(8_000_000, keep_budget // avg))
+    print(f"[deepctrl] local reservoir slots≈{total_slots} (~{total_slots*avg/GiB:.1f}G budget)")
 
     shard_dir = POOL / "deepctrl_shards"
     if shard_dir.exists():
@@ -417,70 +470,57 @@ def stream_deepctrl(target_bytes_10g: int) -> None:
         if key not in reservoirs:
             br = BUCKET_RATIO[bucket]
             lr = 0.80 if lang == "zh" else 0.20
-            tr = 0.40 if (bucket == "dialogue" and multi) else (0.25 if multi else 0.75)
+            # oversample multi in dialogue; still allow multi elsewhere
+            if bucket == "dialogue":
+                tr = 0.45 if multi else 0.55
+            else:
+                tr = 0.20 if multi else 0.80
             share = br * lr * tr
-            slots = max(300, int(total_slots * share * 1.25))
+            # boost scarce creative/code slots
+            boost = 1.6 if bucket in ("creative", "code") else 1.15
+            slots = max(800, int(total_slots * share * boost))
             path = shard_dir / f"{bucket}_{lang}_{'m' if multi else 's'}.jsonl"
             reservoirs[key] = DiskReservoir(path, slots, rng, (bucket, lang, multi, source))
         return reservoirs[key]
 
-    urls = {
-        "zh": "https://www.modelscope.cn/datasets/deepctrl/deepctrl-sft-data/resolve/master/sft_data_zh.jsonl",
-        "en": "https://www.modelscope.cn/datasets/deepctrl/deepctrl-sft-data/resolve/master/sft_data_en.jsonl",
-    }
-
-    for lang_key, url in urls.items():
-        print(f"[deepctrl] stream {lang_key}")
-        proc = subprocess.Popen(
-            ["curl", "-L", "--fail", "--retry", "8", "--retry-delay", "3", url],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            bufsize=1 << 20,
-        )
-        assert proc.stdout is not None
-        n_lines = bad = kept_ops = 0
-        for line in tqdm(proc.stdout, desc=f"deepctrl-{lang_key}"):
-            n_lines += 1
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                bad += 1
-                continue
-            turns = deepctrl_to_convo(obj)
-            if not turns:
-                continue
-            try:
-                typ_i = int(obj.get("type"))
-            except Exception:
-                typ_i = -1
-            bucket = TYPE_TO_BUCKET.get(typ_i, "dialogue")
-            lang = "en" if lang_key == "en" else detect_lang(turns[0]["content"], obj.get("language"))
-            multi = is_multi(turns)
-            source = f"deepctrl-{lang_key}"
-            out_line, nbytes, h = pack_out(turns)
-            if nbytes < 40:
-                continue
-            # store conversations line ONLY; meta applied at compact time from reservoir.meta
-            # But meta depends on bucket/lang — encoded in shard key. Include tiny meta prefix? 
-            # Write plain conversations line; meta from DiskReservoir.meta
-            res_for(bucket, lang, multi, source).consider_line(out_line)
-            kept_ops += 1
-            if n_lines % 1_000_000 == 0:
-                kept = sum(len(r.offsets) for r in reservoirs.values())
-                print(f"  … {lang_key} lines={n_lines} live={kept} bad={bad}")
-        rc = proc.wait()
-        if rc != 0:
-            raise RuntimeError(f"curl deepctrl-{lang_key} failed rc={rc}")
+    for lang_key in ("zh", "en"):
+        src = deepctrl_raw_path(lang_key)
+        print(f"[deepctrl] reservoir-scan {lang_key} from {src}")
+        n_lines = bad = 0
+        with src.open("r", encoding="utf-8", errors="ignore") as inf:
+            for line in tqdm(inf, desc=f"deepctrl-{lang_key}"):
+                n_lines += 1
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    bad += 1
+                    continue
+                turns = deepctrl_to_convo(obj)
+                if not turns:
+                    continue
+                try:
+                    typ_i = int(obj.get("type"))
+                except Exception:
+                    typ_i = -1
+                bucket = TYPE_TO_BUCKET.get(typ_i, "dialogue")
+                lang = "en" if lang_key == "en" else detect_lang(turns[0]["content"], obj.get("language"))
+                multi = is_multi(turns)
+                source = f"deepctrl-{lang_key}"
+                out_line, nbytes, _h = pack_out(turns)
+                if nbytes < 40:
+                    continue
+                res_for(bucket, lang, multi, source).consider_line(out_line)
+                if n_lines % 1_000_000 == 0:
+                    kept = sum(len(r.offsets) for r in reservoirs.values())
+                    print(f"  … {lang_key} lines={n_lines} live={kept} bad={bad}")
         print(f"[deepctrl] {lang_key} lines={n_lines} bad={bad}")
 
     for r in reservoirs.values():
         r.close()
 
-    # Compact live offsets → final deepctrl.jsonl + idx
     n = 0
     with out.open("w", encoding="utf-8") as f, idx.open("wb") as ix:
         for res in reservoirs.values():
@@ -492,21 +532,24 @@ def stream_deepctrl(target_bytes_10g: int) -> None:
                     if not line:
                         continue
                     try:
-                        obj = json.loads(line)
-                        convos = obj["conversations"]
+                        convos = json.loads(line)["conversations"]
                     except Exception:
                         continue
                     append_tagged(f, ix, 3, convos, bucket, lang, multi, source)
                     n += 1
     stats = {
-        f"{b}/{l}/{'m' if m else 's'}": {"seen": r.seen, "kept": len(r.offsets)}
-        for (b, l, m), r in reservoirs.items()
+        "converted_live": n,
+        "shards": {
+            f"{b}/{l}/{'m' if m else 's'}": {"seen": r.seen, "kept": len(r.offsets)}
+            for (b, l, m), r in reservoirs.items()
+        },
+        "out_bytes": out.stat().st_size,
     }
     (POOL / "deepctrl_stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
-    # cleanup shards to free disk
     import shutil
     shutil.rmtree(shard_dir, ignore_errors=True)
-    print(f"[deepctrl] wrote {n}")
+    print(f"[deepctrl] wrote {n} rows ({out.stat().st_size/GiB:.2f}G)")
+
 
 
 def merge_indexes() -> List[Path]:
@@ -654,7 +697,7 @@ def write_sources(path: Path, rep5: dict, rep10: dict, extras: dict) -> None:
 - Format: Conversations JSONL `{{"conversations":[{{"role","content"}},...]}}`
 - Capability targets: dialogue43 / knowledge22 / reasoning15 / creative12 / code8
 - Turns: single75 / multi25; Language: zh80 / en20
-- Route A: deepctrl stream-sample (ModelScope) + Fineweb Pure QA (`sft/cleaned`) + Magpie-Qwen2-Pro-200K-Chinese + Congliu R1 **final only** (`content`, not `reasoning_content`)
+- Route A: deepctrl **full on-disk** (ModelScope zh+en) + Fineweb Pure QA (`sft/cleaned`) + Magpie-Qwen2-Pro-200K-Chinese + Congliu R1 **final only** (`content`, not `reasoning_content`)
 - 10G is a superset of 5G (same seed family); v1 not deleted; no HF upload in this step
 
 ## 10G pack (`sft_miniseek_v5_10g.jsonl`)
@@ -679,7 +722,7 @@ def write_sources(path: Path, rep5: dict, rep10: dict, extras: dict) -> None:
 
 - free_gb_before: {extras.get('free_gb_before')}
 - free_gb_after: {extras.get('free_gb_after')}
-- deepctrl full 27G not retained (stream + reservoir)
+- deepctrl full zh+en retained under `data/_raw_sft_v5/deepctrl/`; pool built via large stratified reservoir from local files
 - Fineweb Pure QA path: `opencsg/Fineweb-Edu-Chinese-V2.2` `sft/cleaned/*.jsonl`
 """
     path.write_text(text, encoding="utf-8")
@@ -690,6 +733,7 @@ def main() -> int:
     ap.add_argument("--target-10g", type=float, default=10.0)
     ap.add_argument("--target-5g", type=float, default=5.0)
     ap.add_argument("--skip-deepctrl", action="store_true")
+    ap.add_argument("--force-download", action="store_true")
     ap.add_argument("--skip-download-check", action="store_true")
     args = ap.parse_args()
 
@@ -713,7 +757,8 @@ def main() -> int:
     target10 = int(args.target_10g * GiB)
     target5 = int(args.target_5g * GiB)
     if not args.skip_deepctrl:
-        stream_deepctrl(target10)
+        download_deepctrl(force=args.force_download)
+        convert_deepctrl()
 
     merge_indexes()
     index_rows = load_index()
