@@ -16,7 +16,7 @@
 
 - Start from a **Dense** backbone, then add MoE / SWA / CSA2 / CED stage by stage ([`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)), with **locked data + Eval-Core** for fair A/B.
 - Stage 0: `d_model=512`, 8-layer dense decoder-only, MiniMind tokenizer **vocab=6400**, ~**28.45M** tied params—trainable on a single RTX 3090.
-- Tokenizer aligned with [MiniMind](https://github.com/jingyaogong/minimind) (vocab=6400); **training data is MiniSeek's own** (`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`); core model in **native PyTorch**.
+- Tokenizer aligned with [MiniMind](https://github.com/jingyaogong/minimind) (vocab=6400); **training data is MiniSeek's own** (`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`; **feasibility SFT preferred**: `sft_miniseek_v5_short256` + `max_seq_len=256`); core model in **native PyTorch**.
 - Built-in **Web UI**: training Tasks, chat, continuation, architecture viz, and C-Eval / CMMLU / GSM8K (lm-eval).
 - Open weights: [`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) (pretrain), [`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) (SFT).
 
@@ -157,7 +157,10 @@ python scripts/download_data.py   # check local MiniSeek datasets
 |-----|------|
 | Pretrain | `data/PT/pretrain_mix_12g_clean.jsonl` |
 | Valid | No separate file. Training and `valid_ppl` split the train jsonl in memory with `--valid-ratio` |
-| SFT | `data/SFT/sft_miniseek_v5_10g.jsonl` (also `sft_miniseek_v5_5g.jsonl` for small runs) |
+| SFT (full / default) | `data/SFT/sft_miniseek_v5_10g.jsonl` (also `sft_miniseek_v5_5g.jsonl` for small runs; 5G ⊂ 10G) |
+| SFT (**feasibility — recommended**) | `data/SFT/sft_miniseek_v5_short256.jsonl` (short filter of 10G; ≈0.84 GiB / ~2.02M rows) |
+
+Hub: [`MiniSeek-Pretrain`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-Pretrain), [`MiniSeek-SFT`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-SFT) (config `sft_short256`).
 
 > Legacy MiniMind dumps (`pretrain_t2t_mini` / `sft_t2t_mini` / `valid.jsonl`) were removed and are no longer downloaded.
 
@@ -215,6 +218,31 @@ python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/
   --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
+### ✅ Recommended: MoE feasibility SFT (short-context fast path)
+
+To validate that MoE can chat at all, prefer **short256 + `max_seq_len=256`** instead of jumping straight to 10G / 512:
+
+| Item | Recommendation |
+|------|----------------|
+| Data | `data/SFT/sft_miniseek_v5_short256.jsonl` (Hub config `sft_short256`) |
+| Length rule | Prefer total conversation content chars **≤256**; soft max **≤280** (~7% of kept rows); longer rows dropped at pack time |
+| `max_seq_len` | **256** (up to 512 if needed; 256 is fastest for feasibility) |
+| Init | Latest **MoE pretrain** `last.pt` / `best.pt` (`--arch moe` + init ckpt) |
+| FlashAttention | On by default: `flash_attn` package if present, else **torch SDPA flash** (see `flash_attn=on backend=...` in `train.log`) |
+| Overflow | SFT tokenization **truncates from the end (keep-head)** so the question/prompt is kept and the answer tail is dropped |
+
+```bash
+python -m algo.train_sft \
+  --arch moe \
+  --data data/SFT/sft_miniseek_v5_short256.jsonl \
+  --init-ckpt tasks/<moe-pretrain-id>/last.pt \
+  --max-seq-len 256 \
+  --out-dir tasks/moe-sft-short256 \
+  --flash-attn
+```
+
+Same knobs work in the Web **Train** tab. Full long-context SFT still uses default `sft_miniseek_v5_10g.jsonl`. See `data/SFT/SOURCES_v5_short256.md` and `docs/superpowers/specs/2026-10-28-sft-v5-short256-design.md`.
+
 ### Checkpoint policy
 
 - **Default**: only `best.pt` (overwrite when improved) and `last.pt` (once at end) — avoids filling the disk
@@ -268,7 +296,7 @@ tests/              # smoke / unit tests
 
 # 📌 Acknowledgements
 
-- Tokenizer: [jingyaogong/minimind](https://github.com/jingyaogong/minimind); training data: MiniSeek `pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`
+- Tokenizer: [jingyaogong/minimind](https://github.com/jingyaogong/minimind); training data: MiniSeek `pretrain_mix_12g_clean` / `sft_miniseek_v5_10g` (feasibility SFT also `sft_miniseek_v5_short256`)
 - Structure reference: [DeepSeek-V4.1 paper HTML](https://arxiv.org/html/2609.19969)
 - Benchmarks: [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness), C-Eval, CMMLU
 

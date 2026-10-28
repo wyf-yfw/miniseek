@@ -16,7 +16,7 @@
 
 - 从 **Dense 骨架**出发，按阶段逐步接入 MoE / SWA / CSA2 / CED 等结构（见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)），用**同一套数据与评测**做公平 A/B；**MoE（M0.1：1 shared + 32 routed，top-2）已可训**。
 - Stage 0 主线：`d_model=512`、8 层 Dense Decoder-only，MiniMind 词表 **vocab=6400**，tied 权重约 **28.45M**，单卡 3090 可训。
-- 分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 词表（vocab=6400）；**训练数据用自建 MiniSeek 集**（`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`），核心模型用 **PyTorch 原生**实现。
+- 分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 词表（vocab=6400）；**训练数据用自建 MiniSeek 集**（`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`；**可行性 SFT 推荐** `sft_miniseek_v5_short256` + `max_seq_len=256`），核心模型用 **PyTorch 原生**实现。
 - 自带 **Web UI**：训练 Task、对话、续写、架构可视化、C-Eval / CMMLU / GSM8K 评测（lm-eval）。
 - 权重已开源到 Hugging Face：[`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base)（预训练）、[`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1)（SFT）。
 
@@ -163,7 +163,10 @@ python scripts/download_data.py   # 检查本地 MiniSeek 数据是否齐
 |------|------|
 | 预训练 | `data/PT/pretrain_mix_12g_clean.jsonl` |
 | 验证集 | 不单独提供。训练和 `valid_ppl` 用 `--valid-ratio` 从训练集内存划分 |
-| SFT | `data/SFT/sft_miniseek_v5_10g.jsonl`（另有 `sft_miniseek_v5_5g.jsonl` 小跑） |
+| SFT（正式 / 默认） | `data/SFT/sft_miniseek_v5_10g.jsonl`（另有 `sft_miniseek_v5_5g.jsonl` 小跑；5G ⊂ 10G） |
+| SFT（**可行性验证推荐**） | `data/SFT/sft_miniseek_v5_short256.jsonl`（从 10G 筛短样本；≈0.84 GiB / ~202 万条） |
+
+Hub：[`MiniSeek-Pretrain`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-Pretrain)、[`MiniSeek-SFT`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-SFT)（含 config `sft_short256`）。
 
 > MiniMind 旧集（`pretrain_t2t_mini` / `sft_t2t_mini` / `valid.jsonl`）已删除，不再下载。
 
@@ -222,6 +225,31 @@ python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/
   --max-steps 5000 --warmup-steps 200 --lr 1e-4
 ```
 
+### ✅ 推荐：MoE 可行性 SFT（短上下文快跑）
+
+验证「这套 MoE 能不能聊」时，**优先走 short256 + `max_seq_len=256`**，不必一上来吃满 10G / 512：
+
+| 项 | 推荐 |
+|----|------|
+| 数据 | `data/SFT/sft_miniseek_v5_short256.jsonl`（Hub config `sft_short256`） |
+| 长度规则 | 对话 content 字符和 **优先 ≤256**，软上限 **≤280**（约 7% 在 257–280）；更长已在打包时丢掉 |
+| `max_seq_len` | **256**（最多可试 512；可行性验证用 256 最快） |
+| 初始化 | 最近一次 **MoE 预训练** `last.pt` / `best.pt`（`--arch moe` + Init Ckpt） |
+| FlashAttention | 默认开：优先 `flash_attn` 包，否则 **torch SDPA flash**（看 `train.log` 的 `flash_attn=on backend=...`） |
+| 超长截断 | SFT 编码超过 `max_seq_len` 时 **从尾部截断（keep-head）**，尽量留住问题/prompt，丢掉回答尾部 |
+
+```bash
+python -m algo.train_sft \
+  --arch moe \
+  --data data/SFT/sft_miniseek_v5_short256.jsonl \
+  --init-ckpt tasks/<moe-pretrain-id>/last.pt \
+  --max-seq-len 256 \
+  --out-dir tasks/moe-sft-short256 \
+  --flash-attn
+```
+
+Web「训练」Tab 选同一数据与 `max_seq_len=256` 亦可。正式长上下文 SFT 仍用默认 `sft_miniseek_v5_10g.jsonl`。细节见 `data/SFT/SOURCES_v5_short256.md`、`docs/superpowers/specs/2026-10-28-sft-v5-short256-design.md`。
+
 ### Checkpoint 策略
 
 - **默认只保留** `best.pt`（更好时覆盖）与 `last.pt`（结束写一次），避免占满磁盘
@@ -278,7 +306,7 @@ tests/              # 冒烟与单测
 
 # 📌 致谢
 
-- 词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)；训练数据：自建 `pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`
+- 词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)；训练数据：自建 `pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`（可行性 SFT 另有 `sft_miniseek_v5_short256`）
 - 结构对齐参考：[DeepSeek-V4.1 相关论文](https://arxiv.org/html/2609.19969)
 - 客观评测：[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)、C-Eval、CMMLU
 
