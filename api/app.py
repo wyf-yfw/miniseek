@@ -55,7 +55,7 @@ from api import worker_client as wc
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = PROJECT_ROOT / "frontend"
 DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "PT" / "pretrain_mix_12g_clean.jsonl")
-DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "SFT" / "sft_miniseek_v1.jsonl")
+DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "SFT" / "sft_miniseek_v5_10g.jsonl")
 DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "tasks" / "_default_pretrain")
 DEFAULT_SFT_OUT = str(PROJECT_ROOT / "tasks" / "_default_sft")
 DEFAULT_MOE_OUT = str(PROJECT_ROOT / "tasks" / "_default_moe")

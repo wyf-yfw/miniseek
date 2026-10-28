@@ -16,7 +16,7 @@
 
 - 从 **Dense 骨架**出发，按阶段逐步接入 MoE / SWA / CSA2 / CED 等结构（见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)），用**同一套数据与评测**做公平 A/B；**MoE（M0.1：1 shared + 32 routed，top-2）已可训**。
 - Stage 0 主线：`d_model=512`、8 层 Dense Decoder-only，MiniMind 词表 **vocab=6400**，tied 权重约 **28.45M**，单卡 3090 可训。
-- 分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 词表（vocab=6400）；**训练数据用自建 MiniSeek 集**（`pretrain_mix_5g` / `sft_miniseek_v1`），核心模型用 **PyTorch 原生**实现。
+- 分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 词表（vocab=6400）；**训练数据用自建 MiniSeek 集**（`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`），核心模型用 **PyTorch 原生**实现。
 - 自带 **Web UI**：训练 Task、对话、续写、架构可视化、C-Eval / CMMLU / GSM8K 评测（lm-eval）。
 - 权重已开源到 Hugging Face：[`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base)（预训练）、[`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1)（SFT）。
 
@@ -161,9 +161,9 @@ python scripts/download_data.py   # 检查本地 MiniSeek 数据是否齐
 
 | 用途 | 路径 |
 |------|------|
-| 预训练 | `data/pretrain_mix_5g.jsonl` |
-| 验证集 | `data/valid_mix.jsonl` |
-| SFT | `data/sft_miniseek_v1.jsonl` |
+| 预训练 | `data/PT/pretrain_mix_12g_clean.jsonl` |
+| 验证集 | 不单独提供。训练和 `valid_ppl` 用 `--valid-ratio` 从训练集内存划分 |
+| SFT | `data/SFT/sft_miniseek_v5_10g.jsonl`（另有 `sft_miniseek_v5_5g.jsonl` 小跑） |
 
 > MiniMind 旧集（`pretrain_t2t_mini` / `sft_t2t_mini` / `valid.jsonl`）已删除，不再下载。
 
@@ -238,7 +238,7 @@ python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/
 
 | # | 项目 | 说明 |
 |---|------|------|
-| 1 | Valid PPL | 同一 `valid_mix.jsonl` |
+| 1 | Valid PPL | 从训练 jsonl 按 `--valid-ratio` 划分 |
 | 2 | Gen-Smoke | 20 条固定 prompt，seed=42 |
 | 3 | C-Eval valid | lm-eval |
 | 4 | CMMLU | lm-eval（需 `trust_remote_code`；`datasets>=2.14,<4.0`） |
@@ -248,7 +248,7 @@ python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/
 CLI 示例：
 
 ```bash
-python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid_mix.jsonl
+python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --data data/PT/pretrain_mix_12g_clean.jsonl --valid-ratio 0.01
 python -m algo.eval.gen_smoke --ckpt tasks/_default_pretrain/last.pt --seed 42
 # 或 Web「评测」Tab / eval/run_benchmark.py
 ```
@@ -278,7 +278,7 @@ tests/              # 冒烟与单测
 
 # 📌 致谢
 
-- 词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)；训练数据：自建 `pretrain_mix_5g` / `sft_miniseek_v1`
+- 词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)；训练数据：自建 `pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`
 - 结构对齐参考：[DeepSeek-V4.1 相关论文](https://arxiv.org/html/2609.19969)
 - 客观评测：[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)、C-Eval、CMMLU
 

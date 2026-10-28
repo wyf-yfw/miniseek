@@ -4,11 +4,11 @@
 本仓库训练数据已切换为 MiniSeek 自建集，目录与 HF 镜像对齐：
 
     预训练: data/PT/pretrain_mix_12g_clean.jsonl  → wyf-yfw/MiniSeek-Pretrain
-    SFT:    data/SFT/sft_miniseek_v1.jsonl         → wyf-yfw/MiniSeek-SFT
+    SFT:    data/SFT/sft_miniseek_v5_10g.jsonl (default; also sft_miniseek_v5_5g.jsonl) → wyf-yfw/MiniSeek-SFT
 
 验证集不再单独提供；训练用 ``--valid-ratio`` 从 train 抽样。
 
-兼容软链仍保留在 ``data/pretrain_mix_12g_clean.jsonl`` / ``data/sft_miniseek_v1.jsonl``。
+兼容软链仍保留在 ``data/pretrain_mix_12g_clean.jsonl`` / ``data/sft_miniseek_v5_10g.jsonl``。
 
 本脚本保留入口以免旧文档/CI 调用报「找不到文件」；任何参数都只打印说明并退出 0。
 """
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED = {
     "pretrain": ROOT / "data" / "PT" / "pretrain_mix_12g_clean.jsonl",
-    "sft": ROOT / "data" / "SFT" / "sft_miniseek_v1.jsonl",
+    "sft": ROOT / "data" / "SFT" / "sft_miniseek_v5_10g.jsonl",
 }
 
 

@@ -5,7 +5,7 @@
 - Capability targets: dialogue43 / knowledge22 / reasoning15 / creative12 / code8
 - Turns: single75 / multi25; Language: zh80 / en20
 - Route A: deepctrl **full on-disk** (ModelScope zh+en) + Fineweb Pure QA (`sft/cleaned`) + Magpie-Qwen2-Pro-200K-Chinese + Congliu R1 **final only** (`content`, not `reasoning_content`)
-- 10G is a superset of 5G (same seed family); v1 not deleted; no HF upload in this step
+- 10G is a superset of 5G (same seed family); v1 deleted; Hub cut over to v5 (train only)
 
 ## 10G pack (`sft_miniseek_v5_10g.jsonl`)
 

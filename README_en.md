@@ -16,7 +16,7 @@
 
 - Start from a **Dense** backbone, then add MoE / SWA / CSA2 / CED stage by stage ([`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)), with **locked data + Eval-Core** for fair A/B.
 - Stage 0: `d_model=512`, 8-layer dense decoder-only, MiniMind tokenizer **vocab=6400**, ~**28.45M** tied params—trainable on a single RTX 3090.
-- Tokenizer aligned with [MiniMind](https://github.com/jingyaogong/minimind) (vocab=6400); **training data is MiniSeek's own** (`pretrain_mix_5g` / `sft_miniseek_v1`); core model in **native PyTorch**.
+- Tokenizer aligned with [MiniMind](https://github.com/jingyaogong/minimind) (vocab=6400); **training data is MiniSeek's own** (`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`); core model in **native PyTorch**.
 - Built-in **Web UI**: training Tasks, chat, continuation, architecture viz, and C-Eval / CMMLU / GSM8K (lm-eval).
 - Open weights: [`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) (pretrain), [`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) (SFT).
 
@@ -155,9 +155,9 @@ python scripts/download_data.py   # check local MiniSeek datasets
 
 | Use | Path |
 |-----|------|
-| Pretrain | `data/pretrain_mix_5g.jsonl` |
-| Valid | `data/valid_mix.jsonl` |
-| SFT | `data/sft_miniseek_v1.jsonl` |
+| Pretrain | `data/PT/pretrain_mix_12g_clean.jsonl` |
+| Valid | No separate file. Training and `valid_ppl` split the train jsonl in memory with `--valid-ratio` |
+| SFT | `data/SFT/sft_miniseek_v5_10g.jsonl` (also `sft_miniseek_v5_5g.jsonl` for small runs) |
 
 > Legacy MiniMind dumps (`pretrain_t2t_mini` / `sft_t2t_mini` / `valid.jsonl`) were removed and are no longer downloaded.
 
@@ -231,7 +231,7 @@ Or drive the same loop from the Web **Train** tab (`tasks/<id>/`).
 
 | # | Item | Notes |
 |---|------|--------|
-| 1 | Valid PPL | shared `valid_mix.jsonl` |
+| 1 | Valid PPL | split from the train jsonl with `--valid-ratio` |
 | 2 | Gen-Smoke | 20 fixed prompts, seed=42 |
 | 3 | C-Eval valid | lm-eval |
 | 4 | CMMLU | lm-eval (`trust_remote_code`; pin `datasets>=2.14,<4.0`) |
@@ -239,7 +239,7 @@ Or drive the same loop from the Web **Train** tab (`tasks/<id>/`).
 | 6 | Efficiency | peak VRAM / tokens/s on fixed HW |
 
 ```bash
-python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --valid data/valid_mix.jsonl
+python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --data data/PT/pretrain_mix_12g_clean.jsonl --valid-ratio 0.01
 python -m algo.eval.gen_smoke --ckpt tasks/_default_pretrain/last.pt --seed 42
 # or Web Bench tab / eval/run_benchmark.py
 ```
@@ -268,7 +268,7 @@ tests/              # smoke / unit tests
 
 # 📌 Acknowledgements
 
-- Tokenizer: [jingyaogong/minimind](https://github.com/jingyaogong/minimind); training data: MiniSeek `pretrain_mix_5g` / `sft_miniseek_v1`
+- Tokenizer: [jingyaogong/minimind](https://github.com/jingyaogong/minimind); training data: MiniSeek `pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`
 - Structure reference: [DeepSeek-V4.1 paper HTML](https://arxiv.org/html/2609.19969)
 - Benchmarks: [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness), C-Eval, CMMLU
 

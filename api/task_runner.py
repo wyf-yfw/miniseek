@@ -153,7 +153,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
 
     module = "algo.train_sft" if mode == "sft" else "algo.train_pretrain"
     _default_data = PROJECT_ROOT / "data" / (
-        "SFT/sft_miniseek_v1.jsonl" if mode == "sft" else "PT/pretrain_mix_12g_clean.jsonl"
+        "SFT/sft_miniseek_v5_10g.jsonl" if mode == "sft" else "PT/pretrain_mix_12g_clean.jsonl"
     )
     data_path = str(_hp(hp, "data_path", _default_data))
     out_dir = str(task["out_dir"])
