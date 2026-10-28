@@ -316,7 +316,7 @@
       display: flex; align-items: center; gap: 8px;
       margin: 0 2px 8px; font-size: 12px; color: var(--muted);
     }
-    .loss-tools input[type="range"] { width: 140px; accent-color: var(--accent); }
+    .loss-tools input[type="range"] { width: 120px; accent-color: var(--accent); }
     .loss-tools b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
     .loss-hint { margin-left: auto; color: #9ca3af; }
 
@@ -1039,7 +1039,10 @@
                 <span>平滑</span>
                 <input id="loss-smooth" type="range" min="0" max="0.95" step="0.05" value="0.8" />
                 <b id="loss-smooth-value">0.80</b>
-                <span class="loss-hint">浅色 = 原始值，深色 = 平滑趋势</span>
+                <span style="margin-left:12px">取点间隔</span>
+                <input id="loss-stride" type="range" min="0" max="8" step="1" value="4" />
+                <b id="loss-stride-value">100</b>
+                <span class="loss-hint">从 train.log 重采样，训练中可改</span>
               </div>
               <canvas id="loss-canvas" width="800" height="210"></canvas>
               <div class="loss-caption" id="loss-caption"></div>
@@ -2104,6 +2107,41 @@
     }
 
     let lossSmooth = 0.8; // 0 = 不平滑；越大越平滑
+    const LOSS_STRIDE_OPTIONS = [1, 5, 10, 20, 50, 100, 200, 500, 1000];
+    let lossStride = 100; // plot_every-style resample from train.log
+    let lossStrideTimer = null;
+    let lossMetricsTaskId = null;
+
+    function lossStrideIndex(v) {
+      const n = Number(v);
+      let best = 0, bestD = Infinity;
+      LOSS_STRIDE_OPTIONS.forEach((x, i) => {
+        const d = Math.abs(x - n);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      return best;
+    }
+
+    async function fetchLossMetrics(taskId, stride) {
+      const pe = Math.max(1, Number(stride) || 100);
+      const url = `/api/tasks/${encodeURIComponent(taskId)}/metrics?plot_every=${pe}&max_points=5000`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(await readError(res));
+      return res.json();
+    }
+
+    function scheduleLossResample() {
+      if (!lossMetricsTaskId) return;
+      if (lossStrideTimer) clearTimeout(lossStrideTimer);
+      lossStrideTimer = setTimeout(async () => {
+        const id = lossMetricsTaskId;
+        try {
+          const m = await fetchLossMetrics(id, lossStride);
+          if (lossMetricsTaskId !== id) return;
+          applyMetrics(m);
+        } catch (_) { /* ignore transient */ }
+      }, 200);
+    }
 
     // 指数移动平均：acc = acc*w + x*(1-w)，用首点做种子，没有冷启动偏差
     function smoothLosses(points, weight) {
@@ -2312,7 +2350,8 @@
             '<span>最低 <b>' + fmtAxis(best.loss) + '</b> @ ' + best.step + '</span>' +
             '<span>ppl <b>' + pplTxt + '</b></span>' +
             '<span>lr <b>' + lrTxt + '</b></span>' +
-            '<span>采样 <b>' + lossPoints.length + '</b></span>';
+            '<span>采样 <b>' + lossPoints.length + '</b></span>' +
+            '<span>间隔 <b>' + lossStride + '</b></span>';
         }
         if (hasValid) {
           const vlast = validPoints[validPoints.length - 1];
@@ -2338,6 +2377,21 @@
       });
     }
 
+    const lossStrideInput = $("loss-stride");
+    if (lossStrideInput) {
+      const syncStrideLabel = () => {
+        const idx = Math.max(0, Math.min(LOSS_STRIDE_OPTIONS.length - 1, Number(lossStrideInput.value) || 0));
+        lossStride = LOSS_STRIDE_OPTIONS[idx];
+        const label = $("loss-stride-value");
+        if (label) label.textContent = String(lossStride);
+      };
+      syncStrideLabel();
+      lossStrideInput.addEventListener("input", () => {
+        syncStrideLabel();
+        scheduleLossResample();
+      });
+    }
+
     function applyMetrics(m) {
       lossPoints = (m && m.loss) || [];
       validPoints = (m && m.valid_loss) || [];
@@ -2358,7 +2412,11 @@
         try { pushLine(JSON.parse(ev.data).line); } catch (_) {}
       });
       eventSource.addEventListener("metrics", (ev) => {
-        try { applyMetrics(JSON.parse(ev.data)); } catch (_) {}
+        try {
+          // Prefer live resample from log so 取点间隔 stays effective while training.
+          if (lossMetricsTaskId) scheduleLossResample();
+          else applyMetrics(JSON.parse(ev.data));
+        } catch (_) {}
       });
       eventSource.addEventListener("status", async (ev) => {
         try {
@@ -2515,8 +2573,22 @@
       renderStatusBox(t);
       if (!isConfigPhase(t.status)) {
         await refreshTaskCheckpoints();
-        const metrics = await (await fetch(`/api/tasks/${id}/metrics`)).json();
-        applyMetrics(metrics);
+        lossMetricsTaskId = id;
+        const hpStride = Number((t.hparams || {}).plot_every);
+        if (Number.isFinite(hpStride) && hpStride > 0) {
+          lossStride = hpStride;
+          if (lossStrideInput) {
+            lossStrideInput.value = String(lossStrideIndex(hpStride));
+            const lab = $("loss-stride-value");
+            if (lab) lab.textContent = String(lossStride);
+          }
+        }
+        try {
+          applyMetrics(await fetchLossMetrics(id, lossStride));
+        } catch (_) {
+          const metrics = await (await fetch(`/api/tasks/${id}/metrics`)).json();
+          applyMetrics(metrics);
+        }
         if (!opts.silent) connectTaskLogs(id);
       } else {
         disconnectLogs();

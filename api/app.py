@@ -34,7 +34,7 @@ from algo.model.tokenizer import load_tokenizer
 from api import tasks_store as ts
 from api import bench_store as bs
 from api import clean_store as cs
-from api.task_runner import pid_alive, reconcile_task, start_task, stop_task, validate_sft_init_ckpt
+from api.task_runner import pid_alive, reconcile_task, rebuild_metrics_from_log, start_task, stop_task, validate_sft_init_ckpt
 from api.bench_runner import (
     reconcile_run,
     start_run as bench_start_run,
@@ -1432,9 +1432,15 @@ def api_stop_task(task_id: str) -> dict:
 
 
 @app.get("/api/tasks/{task_id}/metrics")
-def api_task_metrics(task_id: str) -> dict:
+def api_task_metrics(
+    task_id: str,
+    plot_every: Optional[int] = None,
+    max_points: int = 5000,
+) -> dict:
     _get_task_or_404(task_id)
-    return ts.read_metrics(task_id)
+    if plot_every is None:
+        return ts.read_metrics(task_id)
+    return rebuild_metrics_from_log(task_id, plot_every=plot_every, max_points=max_points)
 
 
 @app.get("/api/tasks/{task_id}/checkpoints")

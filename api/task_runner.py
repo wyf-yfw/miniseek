@@ -380,6 +380,73 @@ def _parse_and_append_metrics(task_id: str, line: str, plot_every: int, state: D
     ts.write_metrics(task_id, metrics)
 
 
+
+def rebuild_metrics_from_log(task_id: str, plot_every: int, max_points: int = 5000) -> Dict[str, Any]:
+    """Resample train/valid loss from train.log. Does not rewrite metrics.json.
+
+    plot_every: keep one train point per N steps (bucket = step // plot_every).
+    Valid lines are kept as logged (usually already sparse).
+    """
+    every = max(1, int(plot_every))
+    max_points = max(50, min(int(max_points), 20000))
+    log_path = ts.task_dir(task_id) / "train.log"
+    loss: List[Dict[str, Any]] = []
+    valid: List[Dict[str, Any]] = []
+    loss_bucket = 0
+    if not log_path.exists():
+        return {"loss": [], "valid_loss": [], "expert_load": None, "plot_every": every}
+    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            line = raw.replace("\x00", "").strip()
+            if not line:
+                continue
+            resumed = RESUME_RE.search(line)
+            if resumed:
+                loss_bucket = int(resumed.group(1)) // every
+                continue
+            vm = VALID_RE.search(line)
+            if vm:
+                point = {
+                    "step": int(vm.group(1)),
+                    "loss": float(vm.group(2)),
+                    "ppl": float(vm.group(3)),
+                }
+                if vm.group(4) is not None:
+                    point["tokens"] = int(vm.group(4))
+                valid.append(point)
+                continue
+            matched = STEP_RE.search(line)
+            if not matched:
+                continue
+            step = int(matched.group(1))
+            bucket = step // every
+            if bucket < 1 or bucket <= loss_bucket:
+                continue
+            loss_bucket = bucket
+            loss.append(
+                {
+                    "step": step,
+                    "loss": float(matched.group(2)),
+                    "ppl": float(matched.group(3)),
+                    "lr": float(matched.group(4)),
+                }
+            )
+    # Prefer latest window if too dense
+    if len(loss) > max_points:
+        loss = loss[-max_points:]
+    if len(valid) > max_points:
+        valid = valid[-max_points:]
+    # Preserve expert_load from on-disk metrics if present
+    disk = ts.read_metrics(task_id)
+    return {
+        "loss": loss,
+        "valid_loss": valid,
+        "expert_load": disk.get("expert_load"),
+        "plot_every": every,
+        "source": "train.log",
+    }
+
+
 def _tail_log(task_id: str, pid: int, token: int, plot_every: int) -> None:
     log_path = ts.task_dir(task_id) / "train.log"
     state: Dict[str, Any] = {"loss_bucket": 0}
