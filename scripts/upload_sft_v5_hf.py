@@ -13,9 +13,11 @@ ROOT = Path(__file__).resolve().parents[1] / "data" / "SFT"
 FILES = [
     "sft_miniseek_v5_10g.jsonl",
     "sft_miniseek_v5_5g.jsonl",
+    "sft_miniseek_v5_short256.jsonl",
     "README.md",
     "SOURCES.md",
     "SOURCES_v5.md",
+    "SOURCES_v5_short256.md",
 ]
 
 
@@ -33,7 +35,7 @@ def upload_with_retry(api: HfApi, name: str, attempts: int = 8) -> None:
                 path_in_repo=name,
                 repo_id=REPO,
                 repo_type="dataset",
-                commit_message=f"Add/update {name} (SFT v5 cutover)",
+                commit_message=f"Add/update {name} (SFT v5 / short256)",
             )
             print(f"  done {name} in {time.time() - t0:.1f}s", flush=True)
             return
@@ -52,7 +54,15 @@ def main() -> None:
     import os
 
     files = list(FILES)
-    if os.environ.get("SKIP_10G") == "1":
+    if os.environ.get("SHORT256_ONLY") == "1":
+        files = [
+            "sft_miniseek_v5_short256.jsonl",
+            "README.md",
+            "SOURCES.md",
+            "SOURCES_v5_short256.md",
+        ]
+        print("SHORT256_ONLY=1 — upload short256 + docs only", flush=True)
+    elif os.environ.get("SKIP_10G") == "1":
         files = [f for f in files if f != "sft_miniseek_v5_10g.jsonl"]
         print("SKIP_10G=1 — skipping already-uploaded 10g", flush=True)
     for name in files:

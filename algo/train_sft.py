@@ -40,7 +40,7 @@ from torch.utils.data import DataLoader, Dataset
 from algo.batching import (
     LengthBucketBatchSampler,
     PackedSFTBatchIter,
-    truncate_keep_tail_with_eos,
+    truncate_keep_head_with_eos,
 )
 from algo.model import build_model
 from algo.model.attn_backend import configure_attn_backend
@@ -116,7 +116,7 @@ class JsonlSFTDataset(Dataset):
         return len(self.samples)
 
     def encode_conversation(self, conv: List[dict]) -> Tuple[List[int], List[int]]:
-        """Encode one multi-turn sample to full ids/labels (keep-tail + trailing eos)."""
+        """Encode one multi-turn sample to full ids/labels (keep-head + trailing eos)."""
         bos = getattr(self.tokenizer, "bos_token", "<|im_start|>") or "<|im_start|>"
         eos = getattr(self.tokenizer, "eos_token", "<|im_end|>") or "<|im_end|>"
         eos_id = int(getattr(self.tokenizer, "eos_token_id", 2) or 2)
@@ -140,7 +140,7 @@ class JsonlSFTDataset(Dataset):
             else:
                 labels.extend([-100] * len(ids))
 
-        input_ids, labels = truncate_keep_tail_with_eos(
+        input_ids, labels = truncate_keep_head_with_eos(
             input_ids, self.max_seq_len, eos_id, labels=labels
         )
         assert labels is not None

@@ -297,6 +297,44 @@ def truncate_keep_tail_with_eos(
     return ids_list, lab_list
 
 
+
+
+def truncate_keep_head_with_eos(
+    ids: Sequence[int],
+    max_seq_len: int,
+    eos_id: int,
+    labels: Optional[Sequence[int]] = None,
+) -> Tuple[List[int], Optional[List[int]]]:
+    """Keep the head of a token sequence; drop overflow from the end.
+
+    Prefer preserving the prompt/question at the start over the completion tail.
+    Always force a trailing ``eos_id`` on the kept window so SFT still trains the
+    stop token (needed when truncation cuts off the real ending eos). Labels
+    truncate in lockstep; forced trailing eos uses label=eos_id.
+    """
+    if max_seq_len < 2:
+        raise ValueError("max_seq_len must be >= 2")
+    ids_list = [int(t) for t in ids]
+    lab_list: Optional[List[int]] = None
+    if labels is not None:
+        lab_list = [int(t) for t in labels]
+        if len(lab_list) != len(ids_list):
+            raise ValueError("ids/labels length mismatch")
+    if len(ids_list) > max_seq_len:
+        ids_list = ids_list[:max_seq_len]
+        if lab_list is not None:
+            lab_list = lab_list[:max_seq_len]
+    if not ids_list:
+        ids_list = [int(eos_id)]
+        if lab_list is not None:
+            lab_list = [int(eos_id)]
+    else:
+        ids_list[-1] = int(eos_id)
+        if lab_list is not None:
+            lab_list[-1] = int(eos_id)
+    return ids_list, lab_list
+
+
 def stack_sft_pack_group(
     group: Sequence[Tuple[Sequence[int], Sequence[int]]],
     max_seq: int,

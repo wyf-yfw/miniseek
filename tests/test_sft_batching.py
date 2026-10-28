@@ -1,4 +1,4 @@
-"""SFT keep-tail truncation + pack/bucket helpers."""
+"""SFT keep-head truncation (prompt-first) + pack/bucket helpers."""
 from __future__ import annotations
 
 import json
@@ -9,6 +9,7 @@ import torch
 from algo.batching import (
     PackedSFTBatchIter,
     stack_sft_pack_group,
+    truncate_keep_head_with_eos,
     truncate_keep_tail_with_eos,
 )
 from algo.train_sft import JsonlSFTDataset
@@ -59,12 +60,25 @@ def test_truncate_keep_tail_forces_eos_if_stripped():
     assert out_ids[-1] == eos
 
 
-def test_sft_dataset_keep_tail_not_head(tmp_path: Path):
-    # long assistant reply so total > max_seq; eos must remain
+def test_truncate_keep_head_preserves_prompt_and_trailing_eos():
+    eos = 2
+    # head = prompt-ish tokens; tail = completion
+    ids = list(range(100, 120)) + list(range(200, 220)) + [eos]
+    labs = [-100] * 20 + list(range(300, 321))
+    assert len(ids) == len(labs) == 41
+    out_ids, out_labs = truncate_keep_head_with_eos(ids, max_seq_len=10, eos_id=eos, labels=labs)
+    assert len(out_ids) == 10
+    assert out_ids[0] == ids[0], "kept head (prompt side), not tail"
+    assert out_ids[-1] == eos
+    assert out_labs is not None and out_labs[-1] == eos
+
+
+def test_sft_dataset_keep_head_not_tail(tmp_path: Path):
+    # long assistant reply so total > max_seq; prompt (user) should survive; eos forced
     long_ans = "回答" * 80
     row = {
         "conversations": [
-            {"role": "user", "content": "问"},
+            {"role": "user", "content": "问UNIQUEPROMPT"},
             {"role": "assistant", "content": long_ans},
         ]
     }
@@ -73,7 +87,9 @@ def test_sft_dataset_keep_tail_not_head(tmp_path: Path):
     ds = JsonlSFTDataset(str(p), _FakeTok(), max_seq_len=32)
     ids, labs = ds.encode_conversation(ds.samples[0])
     assert len(ids) == 32
-    assert 2 in ids[-5:], "trailing eos should survive keep-tail"
+    assert ids[-1] == 2, "trailing eos should be forced after keep-head truncate"
+    # FakeTok encodes user content chars into ids; prompt marker chars must appear near head
+    # '问' and 'U' from UNIQUEPROMPT appear early in encoding
     x, y = ds[0]
     assert x.shape[0] == y.shape[0] == 31
 

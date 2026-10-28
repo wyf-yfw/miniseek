@@ -39,3 +39,9 @@
 - `sft_miniseek_v1.jsonl` removed.
 - Raw build caches under `data/_raw_sft_v5/` removed after packs landed.
 - Hub: train files only (10g + 5g + README/SOURCES); no separate valid split.
+
+## short256 (2026-10-28)
+
+- File: `sft_miniseek_v5_short256.jsonl` — filtered from 10G; prefer content-chars ≤256, soft max ≤280; drop longer.
+- Details: `SOURCES_v5_short256.md`. WebUI default remains 10G.
+- SFT overflow truncation: keep-head (prompt first).
