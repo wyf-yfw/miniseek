@@ -21,7 +21,7 @@
 - `data/PT/`、`data/SFT/`：与 HF `wyf-yfw/MiniSeek-Pretrain`、`wyf-yfw/MiniSeek-SFT` 镜像（README / SOURCES / stats 可进库）。
 - 大 `.jsonl`、checkpoint、`tasks/`：**gitignore，勿提交**。
 - 训练默认 PT 清洗集：`data/clean/.../clean.jsonl`（常由 `data/PT/pretrain_mix_12g_clean.jsonl` 软链）；SFT 当前仍默认 `data/SFT/sft_miniseek_v1.jsonl`。
-- **SFT v5 混数（设计已定，文件尚未落地）**：见 `docs/superpowers/specs/2026-10-28-sft-v5-mix-design.md`。计划产出约 5G / 10G 两包；**正式默认将改为 ~10G**（5G 仅小跑对照）；落盘并确认后再清 v1、改代码默认、上传 HF。**现在不要**假定 `sft_miniseek_v5_*.jsonl` 已存在，也勿提前删 v1 或改训练默认。
+- **SFT v5 混数（已落盘）**：见 `docs/superpowers/specs/2026-10-28-sft-v5-mix-design.md` 与 `data/SFT/SOURCES_v5.md`。文件：`data/SFT/sft_miniseek_v5_5g.jsonl`（~5.00 GiB，比例贴近目标）与 `sft_miniseek_v5_10g.jsonl`（**池子上限约 6.48 GiB**，未满名义 10G；5G⊂该包）。**正式默认拟改用该「10G」包**（现实际 ~6.5G）；**尚未**清 v1、改训练/WebUI 默认、或上传 HF——确认后再做。训练默认仍为 `data/SFT/sft_miniseek_v1.jsonl`。
 
 ## 代码结构（简）
 
@@ -72,7 +72,7 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 ## HF 数据
 
 - Pretrain：`wyf-yfw/MiniSeek-Pretrain`（主文件 `pretrain_mix_12g_clean.jsonl`）。
-- SFT：`wyf-yfw/MiniSeek-SFT`（当前 Hub/本地主文件仍为 v1；v5 10G 替换是后续步骤，见上条设计）。
+- SFT：`wyf-yfw/MiniSeek-SFT`（当前 Hub/本地主文件仍为 v1；本地已有 v5 5G + ~6.5G「10G」包，替换 Hub/默认是后续步骤，见上条）。
 - Hub 上只保留 train 主文件 + 卡片文档；勿再上传独立 valid；Valid-ratio 仅本地。
 - 上传用本机 `hf` / `huggingface_hub`，**不要**把大文件塞进 Git。
 
@@ -98,7 +98,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 ## 当前状态（滚动更新）
 
 - **PT 训练**：`moe-pretrain-3` 在 wyf 上跑（resume 自 PT `last.pt`，数据 `clean.jsonl` / 12g clean）。
-- **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 已有 `pretrain_mix_12g_clean.jsonl`；训练用 `--valid-ratio`，不再随仓/HF 提供独立 valid。SFT **v5 混数设计已批准**（5G+10G，正式默认将用 10G），**包未构建**；构建并确认前继续用 v1，勿杀/换正在跑的 SFT 任务数据路径。
+- **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 已有 `pretrain_mix_12g_clean.jsonl`；训练用 `--valid-ratio`，不再随仓/HF 提供独立 valid。SFT **v5 已落盘**（`sft_miniseek_v5_5g.jsonl` ~5.00G；`sft_miniseek_v5_10g.jsonl` ~6.48G 池尽；见 `SOURCES_v5.md`）。**默认与 HF 仍用 v1**，确认后再切/上传；勿杀正在跑的 SFT 任务。
 - **代码**：公仓已含 PT/SFT 布局、valid-ratio、`.gitignore`；`data/scripts` 旧拼盘脚本已删；`deploy/miniseek-tunnel.service` 不上库。
 - **架构页**：含 DeepSeek-V4.1-Flash 参考预设（arXiv:2609.19969，`source=reference`，`meta.diagram=fig3`，不可训练）。须画出 **Causal Encoder / Decoder** 分区与 **CED / Indexer / Reindex / Engram** 等 KV 流转箭头，嵌套 ×3(Full+Reuse×5) / ×4(Reindex+Reuse×3)，勿退回扁平 layer 卡片。Tiny / Dense / MoE 用同一套自下而上括号图，按 `DenseLM` / `MoELM` 画：注意力在下，FFN 或 MoE（1 shared + 32 routed、top-2）在上，右侧 ×层数，LM Head 与 Embedding 的 tied 用虚线。未实现的 SWA / CSA2 / CED 不要画进这三档。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。

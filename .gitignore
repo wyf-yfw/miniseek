@@ -96,3 +96,7 @@ release/
 
 # Private ops (local only)
 deploy/miniseek-tunnel.service
+
+# SFT v5 mix working cache
+data/_raw_sft_v5/
+.venv_sft/
