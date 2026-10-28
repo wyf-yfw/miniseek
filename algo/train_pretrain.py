@@ -35,7 +35,7 @@ import signal
 import time
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -95,6 +95,35 @@ def _emit_expert_load_line(
 
 
 
+def reservoir_subset(items, max_samples: Optional[int], seed: int) -> tuple[list, int]:
+    """从全量里均匀抽出 max_samples 条。
+
+    分布上等于先打乱再截断。max_samples 为空，或不少于全量时，保持原顺序。
+    流式蓄水池只留抽出的那一批，避免为了小子集把整份语料再拷一份。
+    """
+    if max_samples is None:
+        kept = list(items)
+        return kept, len(kept)
+    k = int(max_samples)
+    if k <= 0:
+        n = sum(1 for _ in items)
+        return [], n
+    rng = random.Random(int(seed))
+    buf: list = []
+    n = 0
+    for item in items:
+        n += 1
+        if len(buf) < k:
+            buf.append(item)
+        else:
+            j = rng.randrange(n)
+            if j < k:
+                buf[j] = item
+    if n > k:
+        rng.shuffle(buf)
+    return buf, n
+
+
 class JsonlTextDataset(Dataset):
     def __init__(
         self,
@@ -103,28 +132,28 @@ class JsonlTextDataset(Dataset):
         max_seq_len: int = 512,
         max_samples: Optional[int] = None,
         samples: Optional[List[str]] = None,
+        seed: int = 0,
     ):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
         if samples is not None:
-            self.samples = list(samples)
-            if max_samples is not None:
-                self.samples = self.samples[: max(0, int(max_samples))]
+            self.samples, self.n_seen = reservoir_subset(samples, max_samples, seed)
         else:
             if not path:
                 raise ValueError("JsonlTextDataset 需要 path 或 samples")
-            self.samples = []
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    obj = json.loads(line)
-                    text = obj.get("text") or obj.get("content") or ""
-                    if text:
-                        self.samples.append(text)
-                    if max_samples is not None and len(self.samples) >= max_samples:
-                        break
+
+            def _texts():
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        obj = json.loads(line)
+                        text = obj.get("text") or obj.get("content") or ""
+                        if text:
+                            yield text
+
+            self.samples, self.n_seen = reservoir_subset(_texts(), max_samples, seed)
         if not self.samples:
             raise RuntimeError(f"数据为空: {path or '(samples)'}")
 
@@ -298,6 +327,25 @@ def prune_step_ckpts(out_dir: Path, keep_last: int) -> None:
             pass
 
 
+def resolve_step_budget(
+    start_step: int,
+    max_steps: Optional[int],
+    plan_steps: int,
+) -> Tuple[int, Optional[int]]:
+    """本轮 LR / 进度分母，以及本轮停止步（对照从 0 起的 run counter）。
+
+    Max Steps 无论新开还是续训，都只表示**本轮**预算；checkpoint 里的
+    历史步数绝不并进余弦分母。``start_step`` 仅为调用方兼容保留，不参与计算。
+    返回 (schedule_total, step_limit)；step_limit 与本轮 step（从 0 起）比较。
+    """
+    _ = start_step  # lifetime must not affect schedule / progress denominator
+    plan = max(1, int(plan_steps))
+    if max_steps is not None and int(max_steps) > 0:
+        n = int(max_steps)
+        return n, n
+    return plan, None
+
+
 def lr_at_step(
     step: int,
     *,
@@ -338,8 +386,18 @@ def main() -> None:
     p.add_argument("--min-lr", type=float, default=1e-5, help="cosine floor LR")
     p.add_argument("--warmup-steps", type=int, default=200)
     p.add_argument("--epochs", type=int, default=1)
-    p.add_argument("--max-steps", type=int, default=None, help="smoke: --max-steps 2")
-    p.add_argument("--max-samples", type=int, default=None)
+    p.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="本轮步数上限（新开/续训相同）；续训时进度与 LR 从 0 起算，不把 ckpt 旧步数并进分母。不传则只按 epochs",
+    )
+    p.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="先从全量合格样本里按 --seed 均匀抽取这么多条，再按 epoch 打乱。不传则用全量",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--log-every", type=int, default=10)
@@ -425,12 +483,6 @@ def main() -> None:
         help="从 checkpoint 继续（含 optimizer）",
     )
     p.add_argument(
-        "--valid",
-        type=str,
-        default="",
-        help="验证集 jsonl（每行 text 字段）；空=不跑 valid",
-    )
-    p.add_argument(
         "--valid-every",
         type=int,
         default=0,
@@ -446,7 +498,7 @@ def main() -> None:
         "--valid-ratio",
         type=float,
         default=0.0,
-        help="从训练集按比例随机抽 valid（0=关闭；>0 时忽略 --valid 文件，不改写源 jsonl）",
+        help="从训练集按比例随机抽 valid（0=关闭；不读独立 valid 文件，不改写源 jsonl）",
     )
     p.add_argument(
         "--valid-seed",
@@ -516,8 +568,18 @@ def main() -> None:
         args.max_steps = args.max_steps or 2
 
     ds = JsonlTextDataset(
-        args.data, tok, max_seq_len=args.max_seq_len, max_samples=args.max_samples
+        args.data,
+        tok,
+        max_seq_len=args.max_seq_len,
+        max_samples=args.max_samples,
+        seed=int(args.seed),
     )
+    if args.max_samples is not None and ds.n_seen > len(ds):
+        print(
+            f"[train] max-samples={len(ds)} / {ds.n_seen}"
+            f"（先打乱再截断，seed={int(args.seed)}）",
+            flush=True,
+        )
     # 打乱顺序按任务派生，避免每次续训都重放同一批开头样本
     salt = run_salt(args)
     shuffle_seed = (int(args.seed) + salt) % (2**31 - 1)
@@ -585,13 +647,7 @@ def main() -> None:
 
     valid_loader = None
     valid_ratio = float(args.valid_ratio or 0.0)
-    valid_path = str(args.valid or "").strip()
     if int(args.valid_every) > 0 and valid_ratio > 0:
-        if valid_path:
-            print(
-                f"[train] valid-ratio={valid_ratio} > 0：忽略独立 valid 文件 {valid_path}",
-                flush=True,
-            )
         train_samples, valid_samples = split_samples_by_ratio(
             ds.samples, valid_ratio, int(args.valid_seed)
         )
@@ -668,33 +724,9 @@ def main() -> None:
             f"max_samples={args.valid_max_samples} (源文件未改写)",
             flush=True,
         )
-    elif int(args.valid_every) > 0 and valid_path:
-        if Path(valid_path).exists():
-            valid_ds = JsonlTextDataset(
-                valid_path,
-                tok,
-                max_seq_len=args.max_seq_len,
-                max_samples=int(args.valid_max_samples) if int(args.valid_max_samples) > 0 else None,
-            )
-            valid_loader = DataLoader(
-                valid_ds,
-                batch_size=args.batch_size,
-                shuffle=False,
-                collate_fn=partial(collate_pad, pad_id=pad_id),
-                num_workers=0,
-                pin_memory=(device.type == "cuda"),
-            )
-            print(
-                f"[train] valid={valid_path} every={args.valid_every} "
-                f"samples={len(valid_ds)} max_samples={args.valid_max_samples}",
-                flush=True,
-            )
-        else:
-            print(f"[train] WARN: valid 文件不存在，跳过: {valid_path}", flush=True)
 
     steps_per_epoch = max(1, int(steps_per_epoch_est))
     plan_steps = steps_per_epoch * max(1, args.epochs)
-    total_steps = int(args.max_steps) if args.max_steps is not None else plan_steps
 
     opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
     if bool(args.fused_adamw) and device.type == "cuda":
@@ -717,7 +749,8 @@ def main() -> None:
     if hit_thresholds:
         print(f"[train] existing milestones: {sorted(hit_thresholds, reverse=True)}")
 
-    global_step = 0
+    global_step = 0  # this-run counter (LR + progress + stop)
+    lifetime_base = 0  # ckpt 累计步；续训加载后写入 ckpt，不进 LR 分母
     best_loss = float("inf")
     best_step = 0
     recent_losses: "collections.deque[float]" = collections.deque(
@@ -732,27 +765,35 @@ def main() -> None:
                 opt.load_state_dict(blob["optimizer"])
             except Exception as e:  # noqa: BLE001
                 print(f"[train] WARN: optimizer 未恢复: {e}")
-        global_step = int(blob.get("step", 0))
+        lifetime_base = int(blob.get("step", 0))
+        global_step = 0
         if blob.get("loss") is not None:
             best_loss = float(blob["loss"])
-            best_step = global_step
-        if args.max_steps is None:
-            # 续训没给绝对步数时，"epochs" 表示再扫几遍数据：
-            # 总预算 = 已跑 + 本次，LR 余弦才会覆盖整段而不是从头重算
-            total_steps = global_step + plan_steps
-        print(f"[train] resumed from {resume_path} step={global_step} best_loss={best_loss}")
+            best_step = 0
+        print(
+            f"[train] resumed from {resume_path} lifetime_step={lifetime_base} "
+            f"best_loss={best_loss}"
+        )
+
+    total_steps, step_limit = resolve_step_budget(lifetime_base, args.max_steps, plan_steps)
+    if lifetime_base > 0 and step_limit is not None:
+        print(
+            f"[train] max-steps={int(args.max_steps)} 为本轮步数，"
+            f"进度/LR 从 0→{step_limit}（ckpt lifetime 从 {lifetime_base} 起记）",
+            flush=True,
+        )
 
     print(
         f"[train] samples={len(ds)} steps/epoch≈{steps_per_epoch} "
-        f"start_step={global_step} total_steps={total_steps} "
+        f"start_step=0 total_steps={total_steps} "
         f"shuffle_salt={salt} warmup={args.warmup_steps} "
         f"lr={args.lr}→{args.min_lr} thresholds={thresholds} "
         f"stable_steps={args.stable_steps}"
+        + (f" lifetime_base={lifetime_base}" if lifetime_base else "")
     )
-    if global_step >= total_steps:
+    if total_steps < 1:
         print(
-            f"[train] WARN: 起点 step={global_step} 已不低于 total_steps={total_steps}，"
-            f"本次不会再有有效训练步"
+            f"[train] WARN: total_steps={total_steps}，本次不会再有有效训练步"
         )
 
     model.train()
@@ -763,7 +804,7 @@ def main() -> None:
         # filename: loss-10.pt for 10.0, loss-9.5.pt for 9.5
         tag = f"{threshold:g}"
         path = out_dir / f"loss-{tag}.pt"
-        ckpt = build_ckpt(model, opt, cfg, step, vocab, loss_val)
+        ckpt = build_ckpt(model, opt, cfg, lifetime_base + step, vocab, loss_val)
         save_ckpt(path, ckpt)
         print(
             f"[train] milestone save loss<={threshold:g} stable={args.stable_steps} "
@@ -792,7 +833,7 @@ def main() -> None:
             return
         best_loss = window_min
         best_step = step
-        ckpt = build_ckpt(model, opt, cfg, step, vocab, window_min)
+        ckpt = build_ckpt(model, opt, cfg, lifetime_base + step, vocab, window_min)
         save_ckpt(out_dir / "best.pt", ckpt)
         print(
             f"[train] best save loss={window_min:.4f} window={need} "
@@ -801,7 +842,7 @@ def main() -> None:
         )
 
     def save_last(step: int, loss_val: float) -> None:
-        ckpt = build_ckpt(model, opt, cfg, step, vocab, loss_val)
+        ckpt = build_ckpt(model, opt, cfg, lifetime_base + step, vocab, loss_val)
         save_ckpt(out_dir / "last.pt", ckpt)  # save_ckpt 内部已做 tmp + replace 原子替换
 
     def maybe_save_last(step: int, loss_val: float) -> None:
@@ -813,8 +854,9 @@ def main() -> None:
     def maybe_save_step(step: int, loss_val: float) -> None:
         if args.save_every <= 0 or step % args.save_every != 0:
             return
-        ckpt = build_ckpt(model, opt, cfg, step, vocab, loss_val)
-        step_path = out_dir / f"step-{step}.pt"
+        life = lifetime_base + step
+        ckpt = build_ckpt(model, opt, cfg, life, vocab, loss_val)
+        step_path = out_dir / f"step-{life}.pt"
         save_ckpt(step_path, ckpt)
         prune_step_ckpts(out_dir, args.keep_last)
         print(f"[train] step save @ step={step} loss={loss_val:.4f} -> {step_path}", flush=True)
@@ -826,6 +868,8 @@ def main() -> None:
         else:
             epoch_iter = loader
         for input_ids, labels in epoch_iter:
+            if _STOP["flag"] or (step_limit is not None and global_step >= step_limit):
+                break
             input_ids = input_ids.to(device)
             labels = labels.to(device)
 
@@ -921,11 +965,11 @@ def main() -> None:
 
             if _STOP["flag"]:
                 break
-            if args.max_steps is not None and global_step >= args.max_steps:
+            if step_limit is not None and global_step >= step_limit:
                 break
         if _STOP["flag"]:
             break
-        if args.max_steps is not None and global_step >= args.max_steps:
+        if step_limit is not None and global_step >= step_limit:
             break
 
     if last_loss is None:
@@ -940,7 +984,8 @@ def main() -> None:
 
     elapsed = time.time() - t0
     print(
-        f"[train] done steps={global_step} elapsed={elapsed:.1f}s "
+        f"[train] done steps={global_step} "
+        f"lifetime_step={lifetime_base + global_step} elapsed={elapsed:.1f}s "
         f"dir={out_dir} best_loss={best_loss if best_loss < float('inf') else 'n/a'} "
         f"milestones_hit={sorted(hit_thresholds, reverse=True)}"
     )

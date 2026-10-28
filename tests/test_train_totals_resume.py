@@ -1,4 +1,4 @@
-"""Resume progress totals: absolute target = start_step + this_run (legacy logs)."""
+"""Resume progress totals: this-run denominator; legacy absolute / inflate still parsed."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,8 +34,31 @@ def test_legacy_sft_resume_total_is_start_plus_budget(tmp_path, monkeypatch):
     assert info["samples"] == 229126
 
 
-def test_new_sft_resume_total_not_double_counted(tmp_path, monkeypatch):
-    tid = "t-new-resume"
+def test_new_resume_this_run_from_zero(tmp_path, monkeypatch):
+    tid = "t-new-resume-zero"
+    root = tmp_path / "tasks"
+    monkeypatch.setattr(app.ts, "task_dir", lambda task_id: root / task_id)
+    app._train_totals_cache.clear()
+    _write_log(
+        root / tid,
+        "\n".join(
+            [
+                "[train] resumed from /tmp/last.pt lifetime_step=106586 best_loss=2.6",
+                "[train] max-steps=1000 为本轮步数，进度/LR 从 0→1000（ckpt lifetime 从 106586 起记）",
+                "[train] samples=100 start_step=0 total_steps=1000 warmup=200 "
+                "lr=0.001→1e-05 lifetime_base=106586",
+                "epoch=0 step=1 loss=2.5 lr=5.00e-06",
+            ]
+        )
+        + "\n",
+    )
+    info = app._train_totals(tid)
+    assert info["start_step"] == 0
+    assert info["total_steps"] == 1000
+
+
+def test_old_absolute_resume_not_double_counted(tmp_path, monkeypatch):
+    tid = "t-old-absolute"
     root = tmp_path / "tasks"
     monkeypatch.setattr(app.ts, "task_dir", lambda task_id: root / task_id)
     app._train_totals_cache.clear()

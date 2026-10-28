@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STEP_RE = re.compile(
     r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
 )
-RESUME_RE = re.compile(r"resumed from .* step=(\d+)")
+RESUME_RE = re.compile(r"resumed from .* (?:lifetime_step|step)=(\d+)")
 VALID_RE = re.compile(
     r"valid\s+step=(\d+)\s+loss=([0-9.eE+-]+)\s+ppl=([0-9.eE+-]+)"
     r"(?:\s+tokens=(\d+))?"
@@ -209,29 +209,18 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         if resume and Path(resume).exists():
             cmd.extend(["--resume", resume])
 
-    valid_path = str(_hp(hp, "valid_path", "") or "").strip()
     valid_every = int(_hp(hp, "valid_every", 20 if arch == "tiny" else 500))
     valid_max_samples = int(_hp(hp, "valid_max_samples", 512))
     valid_ratio = float(_hp(hp, "valid_ratio", 0) or 0)
     valid_seed = int(_hp(hp, "valid_seed", 42))
-    if mode == "pretrain" and valid_every > 0 and valid_ratio > 0:
+    # 验证只从训练集按比例抽，不接受独立 valid 文件（hparams.valid_path 忽略）。
+    if valid_every > 0 and valid_ratio > 0:
         cmd.extend(
             [
                 "--valid-ratio",
                 str(valid_ratio),
                 "--valid-seed",
                 str(valid_seed),
-                "--valid-every",
-                str(valid_every),
-                "--valid-max-samples",
-                str(valid_max_samples),
-            ]
-        )
-    elif valid_path and valid_every > 0:
-        cmd.extend(
-            [
-                "--valid",
-                valid_path,
                 "--valid-every",
                 str(valid_every),
                 "--valid-max-samples",
@@ -342,7 +331,11 @@ def _spawn_training(cmd: List[str], log_path: Path) -> subprocess.Popen:
 def _parse_and_append_metrics(task_id: str, line: str, plot_every: int, state: Dict[str, Any]) -> None:
     resumed = RESUME_RE.search(line)
     if resumed:
-        state["loss_bucket"] = int(resumed.group(1)) // max(1, plot_every)
+        # 续训进度/曲线从本轮 0 起；不要用 ckpt lifetime 把 bucket 抬高，否则点画不上。
+        if "lifetime_step=" in line:
+            state["loss_bucket"] = 0
+        else:
+            state["loss_bucket"] = int(resumed.group(1)) // max(1, plot_every)
     vm = VALID_RE.search(line)
     if vm:
         step = int(vm.group(1))
@@ -402,7 +395,11 @@ def rebuild_metrics_from_log(task_id: str, plot_every: int, max_points: int = 50
                 continue
             resumed = RESUME_RE.search(line)
             if resumed:
-                loss_bucket = int(resumed.group(1)) // every
+                # 新日志 lifetime_step=：本轮从 0 画曲线；旧日志 step= 仍跳过已画 bucket。
+                if "lifetime_step=" in line:
+                    loss_bucket = 0
+                else:
+                    loss_bucket = int(resumed.group(1)) // every
                 continue
             vm = VALID_RE.search(line)
             if vm:

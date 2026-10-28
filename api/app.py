@@ -81,7 +81,7 @@ def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
 _TRAIN_TOTALS_RE = re.compile(r"total_steps=(\d+)")
 _TRAIN_SAMPLES_RE = re.compile(r"samples=(\d+)")
 _TRAIN_START_STEP_RE = re.compile(r"start_step=(\d+)")
-_TRAIN_RESUMED_STEP_RE = re.compile(r"resumed from .* step=(\d+)")
+_TRAIN_RESUMED_STEP_RE = re.compile(r"resumed from .* (?:lifetime_step|step)=(\d+)")
 # train.log uses "step=123"; do not use "step": (expert_load JSON) or start_step=/total_steps=
 _TRAIN_STEP_RE = re.compile(r"(?<![A-Za-z0-9_])step=(\d+)\b")
 _train_totals_cache: Dict[str, Dict[str, Optional[int]]] = {}
@@ -107,9 +107,10 @@ def _latest_train_step(task_id: str) -> Optional[int]:
 def _train_totals(task_id: str) -> Dict[str, Optional[int]]:
     """从 train.log 头部取 samples / total_steps / start_step。
 
-    新日志会打印绝对 total_steps（含 resume 起点）。旧 SFT 续训会在 resume 前
-    打印「本轮」total_steps，再打印 resumed step=N，此时需要把分母修成
-    start_step + this_run，否则进度条会出现 4205/2538、100%。
+    现行约定：续训也从本轮 0 起，``start_step=0``、``total_steps``=本轮 max_steps，
+    进度分母不含 ckpt 历史步。旧日志若先打本轮 total、后打 resumed step=N，
+    且 total<=start，则仍把分母修成 start+this_run（兼容历史）。
+    更旧的「绝对 total=起点+本轮」日志：前端用 (step-start)/(total-start) 显示本轮进度。
     """
     hit = _train_totals_cache.get(task_id)
     if hit is not None:
@@ -143,8 +144,9 @@ def _train_totals(task_id: str) -> Dict[str, Optional[int]]:
                     info["start_step"] = int(m.group(1))
                 m = _TRAIN_RESUMED_STEP_RE.search(line)
                 if m:
-                    # start_step= (if present) already preferred; else use resume.
-                    if info["start_step"] is None:
+                    # Legacy "resumed ... step=N" may seed start_step; new logs use
+                    # lifetime_step= and always print start_step=0 afterwards.
+                    if info["start_step"] is None and "lifetime_step=" not in line:
                         info["start_step"] = int(m.group(1))
     except OSError:
         pass
@@ -405,7 +407,7 @@ class InferenceEngine:
         if not hasattr(self.model, "probe_expert_load"):
             raise HTTPException(status_code=400, detail="该 MoE 权重不支持专家负载探针")
 
-        data_p = Path(data_path.strip() or str(PROJECT_ROOT / "data" / "valid_mix.jsonl"))
+        data_p = Path(data_path.strip() or DEFAULT_PRETRAIN_DATA)
         if not data_p.is_absolute():
             data_p = (PROJECT_ROOT / data_p).resolve()
         if not data_p.exists():
@@ -435,7 +437,7 @@ class InferenceEngine:
                 if len(texts) >= num_samples:
                     break
         if not texts:
-            raise HTTPException(status_code=400, detail="验证数据为空")
+            raise HTTPException(status_code=400, detail="探针数据为空")
 
         total_counts = torch.zeros(n_routed, dtype=torch.long)
         n_tokens = 0
@@ -856,7 +858,7 @@ class LoadRequest(BaseModel):
 
 class ExpertLoadRequest(BaseModel):
     ckpt_path: str = ""
-    data_path: str = str(PROJECT_ROOT / "data" / "valid_mix.jsonl")
+    data_path: str = DEFAULT_PRETRAIN_DATA
     num_samples: int = Field(default=64, ge=1, le=2048)
     max_seq_len: int = Field(default=512, ge=8, le=4096)
     batch_size: int = Field(default=4, ge=1, le=16)
@@ -1166,7 +1168,6 @@ def defaults() -> dict:
             "compile": True,
             "fused_adamw": True,
             "plot_every": 500,
-            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
             "valid_ratio": 0.01,
@@ -1195,7 +1196,6 @@ def defaults() -> dict:
             "compile": True,
             "fused_adamw": True,
             "plot_every": 500,
-            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
             "valid_ratio": 0.01,
@@ -1224,7 +1224,6 @@ def defaults() -> dict:
             "compile": True,
             "fused_adamw": True,
             "plot_every": 1,
-            "valid_path": "",
             "valid_every": 20,
             "valid_max_samples": 512,
             "valid_ratio": 0.01,
@@ -1243,7 +1242,6 @@ def defaults() -> dict:
             "warmup_steps": 200,
             "stable_steps": 50,
             "plot_every": 500,
-            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
             "valid_ratio": 0.01,
@@ -1263,7 +1261,6 @@ def defaults() -> dict:
             "warmup_steps": 200,
             "stable_steps": 50,
             "plot_every": 500,
-            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
             "valid_ratio": 0.01,
@@ -1282,7 +1279,6 @@ def defaults() -> dict:
             "min_lr": 1e-5,
             "warmup_steps": 100,
             "plot_every": 500,
-            "valid_path": "",
             "valid_every": 500,
             "valid_max_samples": 512,
             "valid_ratio": 0.0,

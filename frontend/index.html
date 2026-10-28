@@ -10,7 +10,7 @@
       --bg: #f3f4f6;
       --card: #ffffff;
       --ink: #111827;
-      --muted: #6b7280;
+      --muted: #4b5563;
       --line: #e5e7eb;
       --accent: #1d4ed8;
       --accent-ink: #ffffff;
@@ -125,7 +125,7 @@
     #bench-task-list li:hover { background: rgba(127,127,127,.12); }
     #bench-task-list li.active { background: rgba(127,127,127,.2); }
     #bench-task-list .name { font-size: 13px; font-weight: 600; }
-    #bench-task-list .sub { font-size: 11px; color: var(--muted); }
+    #bench-task-list .sub { font-size: 12px; color: var(--muted); }
 
     .bench-tasks { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 8px 0 12px; }
     .bench-tasks label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
@@ -196,7 +196,7 @@
     #task-list li.active { background: #eff6ff; border-color: #bfdbfe; }
     #task-list .meta { flex: 1; min-width: 0; }
     #task-list .name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #task-list .sub { color: var(--muted); font-size: 11px; }
+    #task-list .sub { color: var(--muted); font-size: 12px; }
     .task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
     .card {
       background: var(--card);
@@ -209,7 +209,7 @@
     label .field-title { color: var(--ink); font-weight: 600; }
     label .field-title .req-mark { color: #dc2626; font-weight: 700; margin-left: 2px; }
     #init-ckpt.required-empty { border-color: #f87171; background: #fef2f2; }
-    label .field-hint { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.35; }
+    label .field-hint { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; font-size: 12px; line-height: 1.35; }
     input, select, textarea {
       width: 100%;
       margin-top: 4px;
@@ -318,7 +318,7 @@
     }
     .loss-tools input[type="range"] { width: 120px; accent-color: var(--accent); }
     .loss-tools b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
-    .loss-hint { margin-left: auto; color: #9ca3af; }
+    .loss-hint { margin-left: auto; color: #4b5563; }
 
     .train-progress { margin-bottom: 12px; }
     .tp-head {
@@ -376,7 +376,7 @@
       margin: 4px 0 0;
     }
     .clean-ops-head .field-title { font-size: 13px; font-weight: 600; color: var(--ink); }
-    .clean-ops-head .field-hint { display: inline; margin: 0; font-size: 11px; color: var(--muted); }
+    .clean-ops-head .field-hint { display: inline; margin: 0; font-size: 12px; color: var(--muted); }
     .clean-op-row {
       display: grid;
       grid-template-columns: minmax(108px, 140px) 1fr;
@@ -388,7 +388,7 @@
       background: #fafbfc;
     }
     .clean-op-row:hover { background: #f3f4f6; border-color: #d1d5db; }
-    .clean-op-row.is-off { opacity: 0.55; }
+    .clean-op-row.is-off { opacity: 1; }
     .clean-op-enable {
       display: inline-flex !important;
       align-items: center;
@@ -433,7 +433,7 @@
       margin: 0 !important;
       white-space: nowrap;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 500;
     }
     .clean-op-controls input[type="number"],
@@ -497,7 +497,7 @@
     #clean-job-list li:hover { background: #f9fafb; }
     #clean-job-list li.active { background: #eff6ff; border-color: #bfdbfe; }
     #clean-job-list .name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #clean-job-list .sub { color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
+    #clean-job-list .sub { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
     #clean-preview {
       margin-top: 12px;
       max-height: 220px;
@@ -534,7 +534,7 @@
     .msg-avatar {
       width: 28px; height: 28px; border-radius: 50%;
       background: #e5e7eb; display: flex; align-items: center; justify-content: center;
-      font-size: 11px; flex-shrink: 0;
+      font-size: 12px; flex-shrink: 0;
     }
     .msg-row.user .msg-avatar { background: #dbeafe; }
     .msg-body {
@@ -629,14 +629,14 @@
     .arch-block .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
     .arch-block .shape {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 12px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       margin-top: 3px;
       font-weight: 500;
     }
     .arch-connector { width: 2px; height: 12px; background: var(--line); }
     .arch-drawer {
-      width: 280px;
+      width: 380px;
       border-left: 1px solid var(--line);
       padding: 12px;
       background: #fbfbfc;
@@ -648,8 +648,22 @@
     .arch-msg.err { color: var(--fail); }
     .arch-summary { font-size: 13px; line-height: 1.5; color: var(--ink); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
     .arch-part { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: #fff; }
-    .arch-part .lbl { font-weight: 600; margin-bottom: 4px; }
-    .arch-part .fact { color: var(--muted); font-size: 12px; line-height: 1.55; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .arch-part .lbl { font-weight: 700; margin-bottom: 4px; color: #111827; }
+    .arch-k { margin: 8px 0 2px; font-size: 13px; font-weight: 700; color: #111827; }
+    .arch-role { margin: 0; color: #1f2937; font-size: 13px; line-height: 1.5; }
+    .arch-formula {
+      margin: 0;
+      padding: 8px 10px;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      color: #111827;
+      font-size: 13px;
+      line-height: 1.45;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .arch-part .fact { color: #1f2937; font-size: 12px; line-height: 1.55; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     @media (max-width: 900px) {
       .arch-shell { grid-template-columns: 1fr; }
       .arch-canvas-wrap { grid-template-columns: 1fr; }
@@ -692,258 +706,260 @@
     .arch-layer-group .arch-block.part .shape {
       display: block;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 12px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       margin-top: 3px;
       font-weight: 500;
     }
 
-    /* DeepSeek-V4.1-Flash Fig.3 schematic (CED + KV flows) */
+    /* DeepSeek-V4.1-Flash Fig.3: bottom-up stacks, right-side repeats, wires on the blocks */
     .fig3-wrap {
       width: 100%;
-      max-width: 980px;
+      max-width: 1080px;
       margin: 0 auto;
-      font-size: 12px;
+      font-size: 14px;
       color: var(--ink);
+      overflow-x: auto;
     }
     .fig3-title {
       font-weight: 700;
-      font-size: 14px;
+      font-size: 16px;
       text-align: center;
       margin-bottom: 8px;
+      color: #111827;
     }
-    .fig3-grid {
+    .fig3-board { position: relative; width: 100%; padding: 4px 10px 4px 18px; }
+    .fig3-stage {
       display: grid;
-      grid-template-columns: 92px 1fr 1fr 120px;
-      gap: 10px;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 124px;
+      grid-template-areas:
+        "enc dec pool"
+        "inputs . .";
+      column-gap: 22px;
+      row-gap: 12px;
       align-items: stretch;
-      position: relative;
-    }
-    @media (max-width: 860px) {
-      .fig3-grid { grid-template-columns: 1fr; }
-      .fig3-side-col { order: 4; }
-    }
-    .fig3-engram-col, .fig3-side-col {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      justify-content: center;
     }
     .fig3-region {
-      border: 2px solid #64748b;
-      border-radius: 12px;
+      border: 1.5px solid #334155;
+      border-radius: 16px;
       background: #f8fafc;
-      padding: 10px;
+      padding: 12px 12px 14px;
       display: flex;
       flex-direction: column;
       gap: 8px;
-      min-height: 420px;
+      min-height: 100%;
     }
-    .fig3-region.encoder { border-color: #475569; background: #f1f5f9; }
-    .fig3-region.decoder { border-color: #334155; background: #eef2ff; }
+    .fig3-region.encoder { grid-area: enc; }
+    .fig3-region.decoder { grid-area: dec; }
     .fig3-region-title {
       font-weight: 800;
-      font-size: 13px;
+      font-size: 15px;
       text-align: center;
-      letter-spacing: 0.02em;
-      padding: 4px 6px;
-      border-radius: 8px;
-      background: rgba(15,23,42,0.06);
+      color: #111827;
+      padding: 2px 6px 0;
     }
     .fig3-stack {
+      margin-top: auto;
       display: flex;
-      flex-direction: column-reverse;
+      flex-direction: column;
+      gap: 0;
+    }
+    .fig3-bracket {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 8px;
-      flex: 1;
+      align-items: center;
     }
-    .fig3-group {
-      border: 1.5px dashed #94a3b8;
-      border-radius: 10px;
-      padding: 6px;
-      background: rgba(255,255,255,0.65);
-      position: relative;
-    }
-    .fig3-group-badge {
-      position: absolute;
-      top: -9px;
-      right: 8px;
-      background: #0f172a;
-      color: #fff;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 1px 6px;
-      border-radius: 999px;
-    }
-    .fig3-nested {
-      border: 1.5px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 6px;
-      margin-top: 4px;
-      background: #fff;
-      position: relative;
-    }
-    .fig3-row {
+    .fig3-bracket-body {
+      border: 1.5px dashed #64748b;
+      border-radius: 12px;
+      padding: 8px;
+      background: rgba(255,255,255,0.72);
       display: flex;
-      gap: 6px;
-      margin: 4px 0;
-      align-items: stretch;
+      flex-direction: column;
+    }
+    .fig3-repeat {
+      font-weight: 800;
+      font-size: 15px;
+      color: #111827;
+      line-height: 1;
+    }
+    .fig3-pair { display: flex; flex-direction: column; align-items: stretch; }
+    .fig3-mini-arrow {
+      width: 0;
+      height: 0;
+      margin: 4px auto;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 8px solid #111827;
+    }
+    .fig3-stem {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: #0f766e;
+      font-size: 13px;
+      font-weight: 700;
     }
     .fig3-chip {
-      flex: 1;
       text-align: center;
-      border: 1px solid #94a3b8;
+      border: 1px solid #475569;
       border-radius: 8px;
-      padding: 7px 6px;
+      padding: 8px 8px;
       font-weight: 700;
-      font-size: 11px;
+      font-size: 14px;
+      line-height: 1.3;
       background: #fff;
+      color: #111827;
       cursor: default;
     }
-    .fig3-chip[data-clickable="1"] { cursor: pointer; }
-    .fig3-chip[data-clickable="1"]:hover { box-shadow: 0 0 0 2px rgba(37,99,235,0.18); }
-    .fig3-chip.swa { background: #fda4af; border-color: #fb7185; }
-    .fig3-chip.csa2-full { background: #86efac; border-color: #4ade80; }
-    .fig3-chip.csa2-reuse { background: #fde047; border-color: #facc15; }
-    .fig3-chip.csa2-reindex { background: #93c5fd; border-color: #60a5fa; }
-    .fig3-chip.moe { background: #fff; border-color: #94a3b8; font-weight: 600; }
+    .fig3-chip[data-clickable="1"],
+    .fig3-node[data-clickable="1"],
+    .fig3-input-chip[data-clickable="1"] { cursor: pointer; }
+    .fig3-chip[data-clickable="1"]:hover,
+    .fig3-node[data-clickable="1"]:hover,
+    .fig3-input-chip[data-clickable="1"]:hover { box-shadow: 0 0 0 2px rgba(37,99,235,0.28); }
+    .fig3-chip.swa { background: #fda4af; border-color: #e11d48; }
+    .fig3-chip.csa2-full { background: #86efac; border-color: #15803d; }
+    .fig3-chip.csa2-reuse { background: #fde047; border-color: #a16207; }
+    .fig3-chip.csa2-reindex { background: #93c5fd; border-color: #1d4ed8; }
+    .fig3-chip.moe { background: #fff; border-color: #334155; font-weight: 700; }
     .fig3-node {
-      border: 1.5px solid #64748b;
+      border: 1.5px solid #334155;
       border-radius: 10px;
       padding: 8px 10px;
       text-align: center;
       font-weight: 700;
+      font-size: 14px;
       background: #fff;
+      color: #111827;
     }
+    .fig3-sub { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: #334155; }
     .fig3-node.enc-hidden {
       background: #e2e8f0;
       border-color: #0f172a;
       border-width: 2px;
+      box-shadow: 0 -4px 0 #cbd5e1, 0 -8px 0 #e2e8f0;
+      margin-top: 10px;
     }
     .fig3-node.dspark {
       background: #fdf2f8;
-      border-color: #db2777;
+      border-color: #9d174d;
       border-style: dashed;
+    }
+    .fig3-node.embed { background: #fff; }
+    .fig3-pool {
+      grid-area: pool;
+      align-self: end;
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .fig3-pool-label {
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.25;
+      text-align: center;
+      color: #1e3a8a;
     }
     .fig3-node.candidate {
       background: #eff6ff;
-      border-color: #2563eb;
-      writing-mode: horizontal-tb;
-      min-height: 72px;
+      border-color: #1d4ed8;
+      width: 100%;
+      min-height: 64px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    .fig3-node.engram {
-      background: #f0fdfa;
-      border-color: #0d9488;
-      min-height: 88px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .fig3-inputs {
-      margin-top: 12px;
+    .fig3-inputs { grid-area: inputs; }
+    .fig3-input-row {
       display: grid;
-      grid-template-columns: 1fr 1.2fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 8px;
-      align-items: center;
+      align-items: start;
     }
-    .fig3-input-col {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      align-items: stretch;
-    }
+    .fig3-vision { display: flex; flex-direction: column; }
     .fig3-input-chip {
-      border: 1px solid #94a3b8;
+      border: 1px solid #334155;
       border-radius: 8px;
-      padding: 7px 8px;
+      padding: 8px 8px;
       text-align: center;
       background: #fff;
-      font-weight: 600;
+      color: #111827;
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1.3;
     }
-    .fig3-input-chip.vision { background: #f5f3ff; border-color: #7c3aed; }
-    .fig3-input-chip.mhc { background: #ecfeff; border-color: #0891b2; }
-    .fig3-flows {
-      position: relative;
-      margin-top: 8px;
-      min-height: 110px;
-    }
-    .fig3-flows svg {
+    .fig3-input-chip.engram { background: #f0fdfa; border-color: #0f766e; }
+    .fig3-input-chip.vision { background: #f5f3ff; border-color: #6d28d9; }
+    .fig3-wires {
+      position: absolute;
+      inset: 0;
       width: 100%;
-      height: 110px;
-      display: block;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+      z-index: 2;
     }
     .fig3-legend {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 8px 14px;
       justify-content: center;
-      margin: 10px 0 6px;
+      margin: 8px 0 12px;
     }
     .fig3-legend span {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 13px;
+      font-weight: 700;
+      color: #111827;
     }
     .fig3-swatch {
-      width: 14px; height: 14px; border-radius: 4px; border: 1px solid #64748b;
+      width: 14px; height: 14px; border-radius: 4px; border: 1px solid #334155; flex: 0 0 auto;
     }
-    .fig3-kv-list {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      padding: 8px 10px;
-      margin-top: 8px;
-    }
-    .fig3-kv-list .kv-item {
-      font-size: 11px;
+    .fig3-notes {
+      margin: 12px 0 0;
+      padding: 0;
+      list-style: none;
+      color: #1f2937;
+      font-size: 13px;
       line-height: 1.45;
-      margin: 4px 0;
-      color: #334155;
     }
-    .fig3-kv-list .kv-item b { color: #0f172a; }
-    .fig3-caption {
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.5;
-      margin-top: 8px;
-      text-align: left;
+    .fig3-notes li { margin: 4px 0; }
+
+    /* Own models: same bottom-up bracket drawing as Fig.3, from DenseLM / MoELM. */
+    .own-stage { width: min(480px, 100%); margin: 0 auto; }
+    .fig3-stem.own-stem { color: #334155; }
+    .fig3-chip.attn { background: #86efac; border-color: #15803d; }
+    .fig3-chip.ffn { background: #bfdbfe; border-color: #1d4ed8; }
+    .fig3-chip.router { background: #fde047; border-color: #a16207; }
+    .fig3-chip.shared { background: #fff; border-color: #334155; }
+    .fig3-chip.routed { background: #93c5fd; border-color: #1d4ed8; }
+    .fig3-chip.norm { background: #e2e8f0; border-color: #334155; }
+    .fig3-chip.is-on, .fig3-node.is-on, .fig3-bracket.is-on { box-shadow: 0 0 0 2px #1d4ed8; }
+    .own-sub { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: #1f2937; }
+    .own-add {
+      width: 28px; height: 28px; margin: 0 auto; border-radius: 50%;
+      border: 1.5px solid #15803d; background: #dcfce7; color: #14532d;
+      font-weight: 800; font-size: 14px; line-height: 28px; text-align: center;
     }
-    .fig3-bridge {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      margin: 6px 0;
-      font-weight: 800;
-      color: #b45309;
-    }
-    .fig3-bridge .arrow {
-      flex: 1;
-      height: 0;
-      border-top: 2px dashed #b45309;
-      position: relative;
-    }
-    .fig3-ced-banner {
+    .own-add[data-clickable="1"] { cursor: pointer; }
+    .own-add.is-on, .own-add[data-clickable="1"]:hover { box-shadow: 0 0 0 2px #b45309; }
+    .fig3-wires .own-res-hit { pointer-events: stroke; cursor: pointer; }
+    .fig3-wires text.own-res-hit,
+    .fig3-wires circle.own-res-hit { pointer-events: all; cursor: pointer; }
+    .own-moe-row {
       display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      gap: 8px;
-      align-items: center;
-      margin: 8px 0;
+      grid-template-columns: minmax(0, 1fr) 128px;
+      gap: 16px;
+      align-items: end;
     }
-    .fig3-ced-label {
-      background: #fff7ed;
-      border: 2px solid #ea580c;
-      color: #9a3412;
-      font-weight: 800;
-      padding: 6px 10px;
-      border-radius: 999px;
-      text-align: center;
-      font-size: 12px;
-    }
+    .fig3-bracket-body.has-res { padding-right: 46px; }
 
     .arch-block.part.add-node {
       width: 36px;
@@ -1103,7 +1119,7 @@
     }
     .fs-entry.is-dir .fs-name { font-weight: 600; }
     .fs-entry .fs-meta {
-      color: var(--muted); font-size: 11px;
+      color: var(--muted); font-size: 12px;
       font-variant-numeric: tabular-nums; white-space: nowrap;
     }
     .fs-picker-status {
@@ -1187,18 +1203,14 @@
 
               <div class="param-group" id="group-data">
                 <div class="group-title">数据</div>
-                <p class="group-desc" id="data-group-desc">训练 jsonl；验证默认按 Valid 比例从训练集划分。Resume / Init Ckpt 由你填写。</p>
+                <p class="group-desc" id="data-group-desc">训练 jsonl。验证只从这份训练集里按比例抽，没有独立 valid 文件。Resume / Init Ckpt 由你填写。</p>
                 <label><span class="field-title">数据路径</span><span class="field-hint" id="data-path-hint">Pretrain：每行 {"text": "..."}；可含尾部 &lt;|im_end|&gt;。</span><div class="path-row"><input id="data-path" type="text" /><button type="button" class="btn-browse" data-for="data-path">浏览</button></div></label>
                 <div class="grid">
-                  <label><span class="field-title">Valid 比例 %</span><span class="field-hint">Pretrain：从训练集随机抽验证（默认 1）；0=关闭。不改写源 jsonl。</span><input id="valid-ratio-pct" type="number" min="0" max="50" step="0.1" /></label>
+                  <label><span class="field-title">Valid 比例 %</span><span class="field-hint">从当前训练 jsonl 随机抽验证（Pretrain 默认 1，SFT 默认 0）；0=关闭。不读独立文件，不改写源 jsonl。</span><input id="valid-ratio-pct" type="number" min="0" max="50" step="0.1" /></label>
                   <label><span class="field-title">Valid Seed</span><span class="field-hint">划分随机种子，可复现。</span><input id="valid-seed" type="number" step="1" /></label>
                   <label><span class="field-title">Valid Every</span><span class="field-hint">每隔多少 step 跑一次验证；0=关闭。</span><input id="valid-every" type="number" min="0" /></label>
                   <label><span class="field-title">Valid Max Samples</span><span class="field-hint">每次验证最多用多少条样本。</span><input id="valid-max-samples" type="number" min="1" /></label>
                 </div>
-                <details class="advanced-valid" style="margin-top:8px">
-                  <summary style="cursor:pointer;color:#64748b">高级：独立 Valid 路径（比例为 0 时才生效）</summary>
-                  <label style="margin-top:8px"><span class="field-title">Valid 路径</span><span class="field-hint">可选独立验证 jsonl；Valid 比例 &gt; 0 时忽略此路径。</span><div class="path-row"><input id="valid-path" type="text" /><button type="button" class="btn-browse" data-for="valid-path">浏览</button></div></label>
-                </details>
               </div>
 
               <div class="param-group mode-sft" id="group-sft-only">
@@ -1224,7 +1236,7 @@
                   <label><span class="field-title">Min LR</span><span class="field-hint">余弦衰减后的学习率下限。</span><input id="min-lr" type="number" step="any" /></label>
                   <label><span class="field-title">Warmup</span><span class="field-hint">前多少步线性升温到峰值 LR；0 表示不升温。</span><input id="warmup-steps" type="number" min="0" /></label>
                   <label><span class="field-title">Epochs</span><span class="field-hint">完整扫过数据集的轮数。</span><input id="epochs" type="number" min="1" /></label>
-                  <label><span class="field-title">Max Steps</span><span class="field-hint">最多训练多少步；0 或空表示不按步数截断，只跑完 epochs。</span><input id="max-steps" type="number" min="0" /></label>
+                  <label><span class="field-title">Max Steps</span><span class="field-hint">从头训练是绝对步数上限。Resume 是在已有 step 上再加这么多步。0 或空表示不按步数截断，只跑完 epochs。</span><input id="max-steps" type="number" min="0" /></label>
                   <label><span class="field-title">Log Every</span><span class="field-hint">每隔多少步往日志打印一次 loss 等指标。</span><input id="log-every" type="number" min="1" /></label>
                   <label><span class="field-title">Plot Every</span><span class="field-hint">每隔多少步给 Loss 曲线记一个点。</span><input id="plot-every" type="number" min="1" /></label>
                   <label><span class="field-title">Grad Clip</span><span class="field-hint">梯度裁剪阈值，抑制爆炸；常见 1.0。</span><input id="grad-clip" type="number" step="any" /></label>
@@ -1352,7 +1364,7 @@
             <input type="checkbox" id="chk-debug-step" />
             <label for="chk-debug-step" style="margin:0">逐步调试</label>
           </div>
-          <div class="grid" id="debug-opts" style="opacity:0.45;pointer-events:none">
+          <div class="grid" id="debug-opts" style="pointer-events:none">
             <label>展示 Top-K<input id="debug-topk" type="number" value="10" min="1" max="50" /></label>
             <label>自动间隔 ms<input id="debug-auto-ms" type="number" value="400" min="50" step="50" /></label>
           </div>
@@ -1662,14 +1674,14 @@
       <div class="layout">
         <div class="card">
           <h2>专家负载 (Expert Load)</h2>
-          <p class="mode-hint">在验证集上跑 MoE 路由探针，看每个路由专家被 top-k 选中的占比（DeepSeek 式负载图）。shared 专家始终启用，不计入下图。</p>
+          <p class="mode-hint">在训练 jsonl 上抽样跑 MoE 路由探针，看每个路由专家被 top-k 选中的占比（DeepSeek 式负载图）。不是单独的验证集。shared 专家始终启用，不计入下图。</p>
           <label>Checkpoint
             <select id="moe-ckpt-select"></select>
           </label>
           <div class="row">
             <button type="button" id="btn-moe-refresh-ckpt">刷新</button>
           </div>
-          <label>验证数据
+          <label>训练数据
             <input id="moe-data" type="text" />
           </label>
           <div class="grid">
@@ -1680,7 +1692,7 @@
           <div class="actions">
             <button type="button" id="btn-moe-probe">跑验证探针</button>
           </div>
-          <p id="moe-msg" class="caption">先选 MoE checkpoint，再点「跑验证探针」。训练占 GPU 时会自动用 CPU。</p>
+          <p id="moe-msg" class="caption">先选 MoE checkpoint，再点「跑验证探针」。数据用训练 jsonl，不读独立 valid 文件。训练占 GPU 时会自动用 CPU。</p>
         </div>
         <div class="card">
           <h2>调用占比</h2>
@@ -1978,7 +1990,7 @@
         function setFormEnabled(editable) {
       ["task-name","data-path","batch-size","max-seq-len","lr","min-lr","warmup-steps","epochs",
        "max-steps","log-every","plot-every","grad-clip","batch-mode","compile","fused-adamw",
-       "valid-path","valid-ratio-pct","valid-seed","valid-every","valid-max-samples",
+       "valid-ratio-pct","valid-seed","valid-every","valid-max-samples",
        "save-loss-thresholds","stable-steps",
        "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
         $(id).disabled = !editable && id !== "task-name";
@@ -2021,8 +2033,8 @@
       const dataDesc = $("data-group-desc");
       if (dataDesc) {
         dataDesc.textContent = isSft
-          ? "SFT 训练/验证路径自己填。Init Ckpt 在「SFT 专属」区（无 Resume 时必填）；Resume 在「断点 / 速度」。"
-          : "Pretrain 训练/验证路径自己填。Batch Mode 在「Pretrain 专属」；Resume 在「断点 / 速度」。";
+          ? "SFT 训练路径自己填，验证从这份数据按比例抽。Init Ckpt 在「SFT 专属」区（无 Resume 时必填）；Resume 在「断点 / 速度」。"
+          : "Pretrain 训练路径自己填，验证从这份数据按比例抽。Batch Mode 在「Pretrain 专属」；Resume 在「断点 / 速度」。";
       }
       syncInitCkptRequired();
     }
@@ -2132,7 +2144,6 @@
       }
       // Keep user/mode paths: data / valid / resume / init_ckpt
       next.data_path = cur.data_path;
-      next.valid_path = cur.valid_path;
       next.valid_ratio = cur.valid_ratio;
       next.valid_seed = cur.valid_seed;
       next.resume = cur.resume;
@@ -2167,7 +2178,6 @@
       if (hp.batch_mode) set("batch-mode", hp.batch_mode);
       if (hp.compile !== undefined && hp.compile !== null) set("compile", String(!!hp.compile));
       if (hp.fused_adamw !== undefined && hp.fused_adamw !== null) set("fused-adamw", String(!!hp.fused_adamw));
-      set("valid-path", hp.valid_path);
       {
         const pct = (hp.valid_ratio != null && hp.valid_ratio !== "")
           ? (Number(hp.valid_ratio) <= 1 ? Number(hp.valid_ratio) * 100 : Number(hp.valid_ratio))
@@ -2202,7 +2212,6 @@
         batch_mode: ($("batch-mode") && $("batch-mode").value) || "pack",
         compile: (($("compile") && $("compile").value) || "true") === "true",
         fused_adamw: (($("fused-adamw") && $("fused-adamw").value) || "true") === "true",
-        valid_path: $("valid-path").value.trim(),
         valid_ratio: (function () {
           const pct = num("valid-ratio-pct");
           if (pct == null || Number.isNaN(pct) || pct <= 0) return 0;
@@ -2267,15 +2276,17 @@
 
       const elapsed = s && s.elapsed_sec != null ? Number(s.elapsed_sec) : null;
       let rate = s && s.step_s != null ? Number(s.step_s) : null;
-      const startStep = s && s.start_step != null ? Number(s.start_step) : null;
+      const startStep = s && s.start_step != null ? Number(s.start_step) : 0;
+      const start = Number.isFinite(startStep) ? Math.max(0, startStep) : 0;
+      // 进度/ETA 只看本轮：新日志 start_step=0；旧绝对日志用 (step-start)/(total-start)
+      const done = Math.max(0, step - start);
+      const denom = (total > start) ? (total - start) : total;
       if (!rate && elapsed) {
-        const done = (Number.isFinite(startStep) && step >= startStep)
-          ? (step - startStep) : step;
         rate = Math.max(0, done) / Math.max(1, elapsed);
       }
       const active = status === "running" || status === "stopping";
       const fill = $("tp-fill");
-      const pct = total > 0 ? Math.max(0, Math.min(100, (step / total) * 100)) : null;
+      const pct = denom > 0 ? Math.max(0, Math.min(100, (done / denom) * 100)) : null;
 
       if (pct == null) {
         fill.classList.add("indeterminate");
@@ -2288,11 +2299,11 @@
         $("tp-percent").textContent = pct.toFixed(1) + "%";
         let eta = "—";
         if (!active) eta = "已结束";
-        else if (step >= total) eta = "即将结束";
-        else if (rate && rate > 0) eta = formatElapsed(Math.round((total - step) / rate));
+        else if (done >= denom) eta = "即将结束";
+        else if (rate && rate > 0) eta = formatElapsed(Math.round((denom - done) / rate));
         $("tp-eta").textContent = eta;
       }
-      $("tp-steps").textContent = total > 0 ? step + " / " + total : String(step);
+      $("tp-steps").textContent = denom > 0 ? done + " / " + denom : String(done);
       $("tp-rate").textContent = rate && rate > 0 ? rate.toFixed(2) + " step/s" : "—";
       $("tp-elapsed").textContent = elapsed != null ? formatElapsed(elapsed) : "—";
       const samples = s && s.samples != null ? Number(s.samples) : null;
@@ -2444,7 +2455,7 @@
       const hasTrain = lossPoints.length > 0;
       const hasValid = validPoints.length > 0;
       if (!hasTrain && !hasValid) {
-        ctx.fillStyle = "#9ca3af";
+        ctx.fillStyle = "#4b5563";
         ctx.font = "12px system-ui, sans-serif";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
@@ -2743,7 +2754,6 @@
         ["plot_every", hp.plot_every],
         ["valid_ratio", hp.valid_ratio],
         ["valid_seed", hp.valid_seed],
-        ["valid_path", hp.valid_path],
         ["valid_every", hp.valid_every],
         ["compile", hp.compile],
         ["fused_adamw", hp.fused_adamw],
@@ -3788,6 +3798,115 @@
       if (drawer) drawer.hidden = true;
       document.querySelectorAll(".arch-block.layer").forEach((el) => el.classList.remove("selected"));
       document.querySelectorAll(".arch-layer-group").forEach((el) => el.classList.remove("selected"));
+      document.querySelectorAll(".fig3-chip.is-on, .fig3-node.is-on").forEach((el) => el.classList.remove("is-on"));
+    }
+
+    function archNums() {
+      const c = (archData && archData.config) || {};
+      const theta = c.rope_theta === 1000000 || c.rope_theta === 1e6 ? "1e6" : (c.rope_theta != null ? String(c.rope_theta) : "1e6");
+      const eps = c.rms_norm_eps === 1e-5 || c.rms_norm_eps == null ? "1e-5" : String(c.rms_norm_eps);
+      return {
+        d: c.d_model,
+        heads: c.n_heads,
+        hd: c.head_dim,
+        mid: (c.arch === "moe" || c.use_moe) ? c.moe_intermediate_size : c.intermediate_size,
+        moeMid: c.moe_intermediate_size,
+        ffnMid: c.intermediate_size,
+        nRouted: c.n_routed_experts,
+        topk: c.num_experts_per_tok,
+        vocab: c.vocab_size,
+        eps,
+        theta,
+        isMoe: c.arch === "moe" || !!c.use_moe,
+      };
+    }
+
+    function archShape(a, b) {
+      return (a != null && b != null) ? `[${a}, ${b}]` : "";
+    }
+
+    function archModuleInfo(id) {
+      const n = archNums();
+      const tied = !!(archData && archData.tie_word_embeddings);
+      const d = n.d != null ? n.d : "d";
+      const hd = n.hd != null ? n.hd : "d_head";
+      const heads = n.heads != null ? n.heads : "H";
+      const vocab = n.vocab != null ? n.vocab : "V";
+      const ffn = n.ffnMid != null ? n.ffnMid : "d_ff";
+      const moeH = n.moeMid != null ? n.moeMid : "d_moe";
+      const nExp = n.nRouted != null ? n.nRouted : "N";
+      const k = n.topk != null ? n.topk : "k";
+      const rms = `RMSNorm(x) = x * rsqrt(mean(x^2) + ε) * w\nε = ${n.eps}\nw 可学习，形状 [${d}]`;
+      const gelu = "GELU(z) = 0.5 * z * (1 + erf(z / sqrt(2)))";
+      const table = {
+        embed: {
+          role: "把 token id 查成向量，作为整层堆栈的输入。",
+          formula: `h = E[token_id]\nE 形状 ${archShape(vocab, d) || "[V, d]"}` + (tied ? "\n这份 E 同时就是 LM Head 的权重" : ""),
+        },
+        lm_head: {
+          role: tied
+            ? "把最后的隐状态投回词表，得到下一个 token 的 logits。不另存一套权重，直接用 Embedding 那张表。"
+            : "把最后的隐状态投回词表，得到下一个 token 的 logits。",
+          formula: tied
+            ? `logits = h @ E^T\nE 与 Token Embedding 是同一份，形状 ${archShape(vocab, d) || "[V, d]"}`
+            : `logits = h @ W\nW 形状 ${archShape(d, vocab) || "[d, V]"}`,
+        },
+        norm: {
+          role: "堆栈结束后再归一化一次，让各维尺度接近，然后才进 LM Head。",
+          formula: rms,
+        },
+        attn_norm: {
+          role: "注意力前面的 Pre-Norm。残差支路在这一步之前就分走了，Norm 只作用在进注意力的那一路。",
+          formula: rms,
+        },
+        ffn_norm: {
+          role: "FFN 或 MoE 前面的 Pre-Norm。这里的 x 已经是注意力残差加完的结果，不是层一开始的输入。",
+          formula: rms,
+        },
+        attn: {
+          role: `因果自注意力。Q、K、V 从一个无 bias 的线性层切出来，RoPE 加在 Q 和 K 上。每个 token 只能看见自己和它前面的 token。当前是 ${heads} 头，每头 ${hd} 维。输出会加回进 Norm 之前的 x。`,
+          formula: `Q,K,V = split(Linear(x))\nLinear: ${d} → ${Number(d) ? Number(d) * 3 : "3d"}，无 bias\nQ,K = RoPE(Q), RoPE(K)\nθ_i = ${n.theta} ^ (-2i / ${hd})\nA = softmax(Q K^T / sqrt(${hd}) + mask) V\nmask 把未来位置打成 -inf\nOut = Linear(A)\n输出投影: ${d} → ${d}，无 bias`,
+        },
+        ffn: {
+          role: "每个 token 单独做的前馈网络：先升维，过 GELU，再投回原来的宽度。两个线性层都没有 bias。输出会加回进 Norm 之前的 x。",
+          formula: `h = GELU(W1(x))\ny = W2(h)\nW1: ${d} → ${ffn}\nW2: ${ffn} → ${d}\n无 bias\n${gelu}`,
+        },
+        router: {
+          role: `给每个 token 对 ${nExp} 个路由专家打分，留下概率最大的 ${k} 个，再把这 ${k} 个权重归一化到和为 1。共享专家不经过这里。`,
+          formula: `p = softmax(W_g(x))\nW_g: ${d} → ${nExp}，无 bias\n取 p 里最大的 ${k} 个，记为 p_i\np_i = p_i / sum(p_i)\n训练时另加负载均衡损失：\naux = ${nExp} * Σ (f_i * P_i)\nf_i 是分到专家 i 的 token 比例\nP_i 是该专家概率的平均值`,
+        },
+        shared_experts: {
+          role: "共享专家。每个 token 都要算一遍，不看 Router。算法和稠密 FFN 一样，中间维更窄。最后和路由专家的输出相加。",
+          formula: `y_s = W2(GELU(W1(x)))\nW1: ${d} → ${moeH}\nW2: ${moeH} → ${d}\n无 bias\n${gelu}`,
+        },
+        routed_experts: {
+          role: `路由专家共 ${nExp} 个。一个 token 只计算被 Router 选中的 ${k} 个，其余这次不跑。输出按归一化权重相加，再和共享专家相加。`,
+          formula: `y_r = Σ p_i * Expert_i(x)\nExpert_i(x) = W2_i(GELU(W1_i(x)))\nW1_i: ${d} → ${moeH}\nW2_i: ${moeH} → ${d}\ni 只取 top-${k}\ny = y_s + y_r`,
+        },
+        moe: {
+          role: "这一层的 FFN 位置。共享专家始终计算，路由专家只算 top-k，两边相加。",
+          formula: `y = Shared(x) + Σ p_i Expert_i(x)\np = softmax(W_g(x)) 的 top-${k}，再归一化`,
+        },
+        "res-attn": {
+          role: "注意力的残差。橙色圆点是这一层的输入，在进 pre-Attn RMSNorm 之前分出来。这条 x 不进 Norm，也不进注意力，直接加到注意力的输出上。",
+          formula: "x_in = 这一层的输入\ny = Attn(RMSNorm(x_in))\nx_out = x_in + y",
+        },
+        "res-ffn": {
+          role: n.isMoe
+            ? "MoE 的残差。橙色圆点在注意力残差加完之后、进 pre-FFN RMSNorm 之前。这条 x 不进 Norm，也不进 MoE，直接加到 MoE 的输出上。"
+            : "FFN 的残差。橙色圆点在注意力残差加完之后、进 pre-FFN RMSNorm 之前。这条 x 不进 Norm，也不进 FFN，直接加到 FFN 的输出上。",
+          formula: n.isMoe
+            ? "x_in = 注意力残差之后的结果\ny = MoE(RMSNorm(x_in))\nx_out = x_in + y"
+            : "x_in = 注意力残差之后的结果\ny = FFN(RMSNorm(x_in))\nx_out = x_in + y",
+        },
+      };
+      return table[id] || null;
+    }
+
+    function archExplainHtml(info) {
+      if (!info) return "";
+      return `<div class="arch-k">作用</div><p class="arch-role">${fig3Esc(info.role)}</p>`
+        + `<div class="arch-k">公式</div><pre class="arch-formula">${fig3Esc(info.formula)}</pre>`;
     }
 
     function openArchDrawer(block) {
@@ -3797,7 +3916,19 @@
       $("arch-drawer-title").textContent = block.label || block.id;
       const body = $("arch-drawer-body");
       const parts = (block.parts || []).filter((p) => p.kind !== "add" && !(p.id || "").startsWith("add_"));
-      body.innerHTML = `<p class="field-hint">本层参数 ${fmtParams(block.params)}</p>` +
+      const isLayer = block.kind === "layer" || String(block.id || "").indexOf("layer-") === 0;
+      const layerInfo = isLayer ? {
+        role: archNums().isMoe
+          ? "先做因果注意力，再做 MoE。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。"
+          : "先做因果注意力，再做 FFN。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。",
+        formula: archNums().isMoe
+          ? "x = x + Attn(RMSNorm(x))\nx = x + MoE(RMSNorm(x))\nMoE(h) = Shared(h) + Σ p_i Expert_i(h)"
+          : "x = x + Attn(RMSNorm(x))\nx = x + FFN(RMSNorm(x))",
+      } : null;
+      const layerHtml = layerInfo
+        ? `<div class="arch-part"><div class="lbl">这一层怎么算</div>${archExplainHtml(layerInfo)}</div>`
+        : "";
+      body.innerHTML = `<p class="arch-role">参数 ${fmtParams(block.params)}</p>` + layerHtml +
         parts.map((p) => {
           const lines = [];
           if (p.shape_in) lines.push(`输入: ${p.shape_in}`);
@@ -3815,8 +3946,8 @@
               if (v != null) lines.push(`${k}: ${v}`);
             });
           }
-          const facts = lines.map((line) => `<div class="fact">${line}</div>`).join("");
-          return `<div class="arch-part"><div class="lbl">${p.label}</div>${facts}</div>`;
+          const facts = lines.map((line) => `<div class="fact">${fig3Esc(line)}</div>`).join("");
+          return `<div class="arch-part"><div class="lbl">${fig3Esc(p.label)}</div>${archExplainHtml(archModuleInfo(p.id))}${facts ? `<div class="arch-k">参数</div>${facts}` : ""}</div>`;
         }).join("");
       document.querySelectorAll(".arch-block.layer").forEach((el) => {
         el.classList.toggle("selected", el.dataset.id === block.id);
@@ -3951,18 +4082,142 @@
       return "";
     }
 
-    function fig3RowHtml(rows) {
-      return `<div class="fig3-row">${(rows || []).map((r) =>
-        `<div class="fig3-chip ${fig3ChipClass(r.type)}" data-node="${r.id || ""}" data-mode="${r.mode || ""}" data-clickable="1">${r.label}</div>`
-      ).join("")}</div>`;
+    let fig3ResizeObs = null;
+    let fig3WireFrame = 0;
+
+    function fig3Esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[ch]));
     }
 
-    function fig3GroupHtml(g) {
-      const badge = g.repeat && g.repeat > 1 ? `<div class="fig3-group-badge">×${g.repeat}</div>` : "";
-      const nested = g.nested
-        ? `<div class="fig3-nested">${g.nested.repeat && g.nested.repeat > 1 ? `<div class="fig3-group-badge">×${g.nested.repeat}</div>` : ""}${fig3RowHtml(g.nested.rows)}</div>`
-        : "";
-      return `<div class="fig3-group" data-group="${g.id || ""}" title="${(g.note || "").replace(/"/g, "&quot;")}">${badge}${fig3RowHtml(g.rows)}${nested}</div>`;
+    function fig3Arrow() {
+      return `<div class="fig3-mini-arrow" aria-hidden="true"></div>`;
+    }
+
+    function joinUp(chunks) {
+      return chunks.filter(Boolean).join(fig3Arrow());
+    }
+
+    function fig3ChipHtml(r) {
+      if (!r) return "";
+      return `<div class="fig3-chip ${fig3ChipClass(r.type)}" data-node="${fig3Esc(r.id || "")}" data-mode="${fig3Esc(r.mode || "")}" data-clickable="1">${fig3Esc(r.label)}</div>`;
+    }
+
+    function fig3PairHtml(rows) {
+      const attn = (rows || []).find((row) => row.type !== "moe");
+      const moe = (rows || []).find((row) => row.type === "moe");
+      return `<div class="fig3-pair">${fig3ChipHtml(moe)}${fig3Arrow()}${fig3ChipHtml(attn)}</div>`;
+    }
+
+    function fig3BracketHtml(repeat, innerHtml, note) {
+      const title = note ? ` title="${fig3Esc(note)}"` : "";
+      const mark = repeat > 1 ? `<div class="fig3-repeat">×${repeat}</div>` : "";
+      return `<div class="fig3-bracket"${title}><div class="fig3-bracket-body">${innerHtml}</div>${mark}</div>`;
+    }
+
+    // Payload groups are bottom-up (first row is the earlier layer). Draw top-down.
+    function fig3GroupVisualHtml(g) {
+      const pair = fig3PairHtml(g.rows);
+      let body = pair;
+      if (g.nested && g.nested.rows && g.nested.rows.length) {
+        body = fig3BracketHtml(g.nested.repeat || 1, fig3PairHtml(g.nested.rows), "") + fig3Arrow() + pair;
+      }
+      if ((g.repeat || 1) > 1) return fig3BracketHtml(g.repeat, body, g.note || "");
+      return `<div class="fig3-once">${body}</div>`;
+    }
+
+    function fig3Rel(board, el) {
+      const s = board.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return {
+        l: r.left - s.left,
+        r: r.right - s.left,
+        t: r.top - s.top,
+        b: r.bottom - s.top,
+        cx: r.left - s.left + r.width / 2,
+        cy: r.top - s.top + r.height / 2,
+      };
+    }
+
+    function scheduleFig3Wires(board) {
+      cancelAnimationFrame(fig3WireFrame);
+      fig3WireFrame = requestAnimationFrame(() => {
+        if (board && board.isConnected) drawFig3Wires(board);
+      });
+    }
+
+    function drawFig3Wires(board) {
+      const svg = board.querySelector(".fig3-wires");
+      if (!svg) return;
+      const root = board.getBoundingClientRect();
+      if (root.width < 40 || root.height < 40) return;
+      svg.setAttribute("viewBox", `0 0 ${root.width} ${root.height}`);
+      svg.setAttribute("width", String(root.width));
+      svg.setAttribute("height", String(root.height));
+      const node = (id) => board.querySelector(`[data-node="${id}"]`);
+      const parts = [];
+      const text = (x, y, str, fill, anchor) => {
+        parts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" fill="${fill}" font-size="13" font-weight="700" text-anchor="${anchor || "middle"}" paint-order="stroke" stroke="#ffffff" stroke-width="4">${fig3Esc(str)}</text>`);
+      };
+      const path = (d, color, extra) => {
+        parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" ${extra || ""}/>`);
+      };
+      const eng = node("engram");
+      const swa = node("enc_swa_attn");
+      const efull = node("enc_full");
+      const hid = node("enc_hidden");
+      const dfull = node("dec_full");
+      const pool = node("candidate_pool");
+      const re = node("dec_reindex");
+      const emb = node("embedding");
+      if (eng && swa && efull) {
+        const a = fig3Rel(board, eng);
+        const b = fig3Rel(board, swa);
+        const c = fig3Rel(board, efull);
+        const lane = 12;
+        const top = Math.min(b.cy, c.cy);
+        path(`M ${a.l.toFixed(1)} ${a.cy.toFixed(1)} H ${lane} V ${top.toFixed(1)}`, "#0f766e");
+        path(`M ${lane} ${b.cy.toFixed(1)} H ${b.l.toFixed(1)}`, "#0f766e", 'marker-end="url(#fig3-mk-eng)"');
+        path(`M ${lane} ${c.cy.toFixed(1)} H ${c.l.toFixed(1)}`, "#0f766e", 'marker-end="url(#fig3-mk-eng)"');
+      }
+      if (hid && dfull) {
+        const a = fig3Rel(board, hid);
+        const b = fig3Rel(board, dfull);
+        const gutter = (a.r + b.l) / 2;
+        path(`M ${a.r.toFixed(1)} ${a.cy.toFixed(1)} H ${gutter.toFixed(1)} V ${b.cy.toFixed(1)} H ${b.l.toFixed(1)}`, "#c2410c", 'marker-end="url(#fig3-mk-ced)"');
+        text(b.l - 8, b.cy - 12, "CED", "#9a3412", "end");
+      }
+      if (dfull && pool) {
+        const a = fig3Rel(board, dfull);
+        const b = fig3Rel(board, pool);
+        path(`M ${a.r.toFixed(1)} ${a.cy.toFixed(1)} H ${b.l.toFixed(1)}`, "#1d4ed8", 'marker-end="url(#fig3-mk-idx)"');
+      }
+      if (pool && re) {
+        const a = fig3Rel(board, pool);
+        const b = fig3Rel(board, re);
+        const laneR = Math.min(root.width - 6, a.r + 6);
+        path(`M ${a.r.toFixed(1)} ${a.cy.toFixed(1)} H ${laneR.toFixed(1)} V ${b.cy.toFixed(1)} H ${b.r.toFixed(1)}`, "#1d4ed8", 'stroke-dasharray="6 4" marker-end="url(#fig3-mk-idx)"');
+        const labelEl = board.querySelector(".fig3-pool-label");
+        const lab = labelEl ? fig3Rel(board, labelEl) : null;
+        const labelY = lab ? Math.min(lab.t - 14, b.cy + (a.t - b.cy) * 0.45) : (a.t + b.cy) / 2;
+        text(laneR - 8, labelY, "Reindex Top-K", "#1e3a8a", "end");
+      }
+      if (emb) {
+        ["text_emb", "vision_emb", "engram"].forEach((id) => {
+          const el = node(id);
+          if (!el) return;
+          const a = fig3Rel(board, el);
+          const b = fig3Rel(board, emb);
+          path(`M ${a.cx.toFixed(1)} ${a.t.toFixed(1)} V ${(a.t - 8).toFixed(1)} L ${b.cx.toFixed(1)} ${b.b.toFixed(1)}`, "#334155", 'marker-end="url(#fig3-mk-in)"');
+        });
+      }
+      svg.innerHTML = `<defs>
+          <marker id="fig3-mk-ced" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c2410c"/></marker>
+          <marker id="fig3-mk-idx" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1d4ed8"/></marker>
+          <marker id="fig3-mk-eng" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#0f766e"/></marker>
+          <marker id="fig3-mk-in" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#334155"/></marker>
+        </defs>${parts.join("")}`;
     }
 
     function openFig3Node(data, nodeId, label, extraDetail) {
@@ -4001,94 +4256,83 @@
       const fig = data.fig3 || {};
       const enc = fig.encoder || (data.sections && data.sections.encoder) || {};
       const dec = fig.decoder || (data.sections && data.sections.decoder) || {};
-      const flows = fig.kv_flows || data.kv_flows || [];
       const modes = fig.csa2_modes || [];
       const wrap = document.createElement("div");
       wrap.className = "fig3-wrap";
       wrap.addEventListener("click", (ev) => ev.stopPropagation());
 
-      const legend = modes.map((m) =>
-        `<span><i class="fig3-swatch" style="background:${m.color}"></i>${m.mode}: ${m.kv}</span>`
-      ).join("");
+      const legendSpec = [
+        ["Full", "#86efac", "产出 main KV、indexer K 和 Top-K"],
+        ["Reuse", "#fde047", "复用 main KV 和已有 Top-K"],
+        ["Reindex", "#93c5fd", "复用 KV，只在候选池里重选 Top-K"],
+        ["SWA", "#fda4af", "只画最底两层。其余层仍有本层滑窗"],
+      ];
+      const legend = legendSpec.map(([mode, fallback, kv]) => {
+        const hit = modes.find((m) => m.mode === mode);
+        const color = (hit && hit.color) || fallback;
+        return `<span><i class="fig3-swatch" style="background:${color}"></i>${mode}: ${kv}</span>`;
+      }).join("");
 
-      const encGroups = (enc.groups || []).map(fig3GroupHtml).join("");
-      const decGroups = (dec.groups || []).map(fig3GroupHtml).join("");
+      const encGroups = [...(enc.groups || [])].reverse().map(fig3GroupVisualHtml);
+      const hiddenHtml = `<div class="fig3-node enc-hidden" data-node="enc_hidden" data-clickable="1">${fig3Esc((enc.output && enc.output.label) || "Enc. Hidden States")}</div>`;
+      const stem = `<div class="fig3-stem">${fig3Arrow()}<span>Single-Pass mHC</span></div>`;
+      const embHtml = `<div class="fig3-node embed" data-node="embedding" data-clickable="1">Embedding</div>`;
+      const encStack = [hiddenHtml, joinUp(encGroups)].filter(Boolean).join(fig3Arrow()) + stem + embHtml;
+
+      const decGroups = dec.groups || [];
+      const fullG = decGroups.find((g) => (g.rows || []).some((r) => r.id === "dec_full")) || null;
+      const upper = decGroups.filter((g) => g !== fullG).reverse().map(fig3GroupVisualHtml);
+      const dsparkHtml = `<div class="fig3-node dspark" data-node="dspark" data-clickable="1">DSpark<div class="fig3-sub">推测解码，不计入 20 层</div></div>`;
+      const exitHtml = fullG ? fig3PairHtml(fullG.rows) : "";
+      const decStack = [dsparkHtml, joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
 
       wrap.innerHTML = `
-        <div class="fig3-title">${fig.title || "DeepSeek-V4.1-Flash · Fig.3"}</div>
+        <div class="fig3-title">${fig3Esc(fig.title || "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash")}</div>
         <div class="fig3-legend">${legend}</div>
-        <div class="fig3-grid">
-          <div class="fig3-engram-col">
-            <div class="fig3-node engram" data-node="engram" data-clickable="1">Engram<br><span style="font-weight:600;font-size:10px;color:#0f766e">@L1 &amp; @L14</span></div>
-          </div>
-          <div class="fig3-region encoder" data-section="encoder">
-            <div class="fig3-region-title">${enc.label || "Causal Encoder (20L)"}</div>
-            <div class="fig3-stack">
-              ${encGroups}
-              <div class="fig3-node enc-hidden" data-node="enc_hidden" data-clickable="1">${(enc.output && enc.output.label) || "Enc. Hidden States"}</div>
+        <div class="fig3-board">
+          <div class="fig3-stage">
+            <div class="fig3-region encoder" data-section="encoder">
+              <div class="fig3-region-title">${fig3Esc(enc.label || "Causal Encoder (20L)")}</div>
+              <div class="fig3-stack">${encStack}</div>
+            </div>
+            <div class="fig3-region decoder" data-section="decoder">
+              <div class="fig3-region-title">${fig3Esc(dec.label || "Decoder (20L)")}</div>
+              <div class="fig3-stack">${decStack}</div>
+            </div>
+            <div class="fig3-pool">
+              <div class="fig3-pool-label">Hierarchical<br>Sparse Indexer</div>
+              <div class="fig3-node candidate" data-node="candidate_pool" data-clickable="1">Candidate Pool</div>
+            </div>
+            <div class="fig3-inputs">
+              <div class="fig3-input-row">
+                <div class="fig3-input-chip engram" data-node="engram" data-clickable="1">Engram<div class="fig3-sub">@L1 · @L14</div></div>
+                <div class="fig3-input-chip" data-node="text_emb" data-clickable="1">Text Embedding</div>
+                <div class="fig3-vision">
+                  <div class="fig3-input-chip vision" data-node="vision_emb" data-clickable="1">Vision Embedding</div>
+                  ${fig3Arrow()}
+                  <div class="fig3-input-chip vision" data-node="vision_enc" data-clickable="1">Vision Encoder</div>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="fig3-region decoder" data-section="decoder">
-            <div class="fig3-region-title">${dec.label || "Decoder (20L)"}</div>
-            <div class="fig3-stack">
-              ${decGroups}
-              <div class="fig3-node dspark" data-node="dspark" data-clickable="1">${(dec.output && dec.output.label) || "DSpark"}</div>
-            </div>
-          </div>
-          <div class="fig3-side-col">
-            <div class="fig3-node candidate" data-node="candidate_pool" data-clickable="1">Candidate Pool</div>
-          </div>
+          <svg class="fig3-wires" aria-hidden="true"></svg>
         </div>
-        <div class="fig3-ced-banner">
-          <div class="arrow" style="border-top:2px dashed #ea580c;height:0"></div>
-          <div class="fig3-ced-label" title="Decoder global KV from Enc.Hidden">CED · KV: Enc.Hidden → Decoder CSA2(Full) → shared Reuse/Reindex</div>
-          <div class="arrow" style="border-top:2px dashed #ea580c;height:0"></div>
-        </div>
-        <div class="fig3-flows">
-          <svg viewBox="0 0 980 110" preserveAspectRatio="xMidYMid meet" aria-label="KV flows">
-            <defs>
-              <marker id="fig3-arrow-ced" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ea580c"/></marker>
-              <marker id="fig3-arrow-idx" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2563eb"/></marker>
-              <marker id="fig3-arrow-eng" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#0d9488"/></marker>
-            </defs>
-            <!-- Engram → Encoder -->
-            <path d="M 70 55 H 160" stroke="#0d9488" stroke-width="2.5" fill="none" marker-end="url(#fig3-arrow-eng)"/>
-            <text x="95" y="48" fill="#0d9488" font-size="11" font-weight="700">Engram</text>
-            <!-- CED Enc.Hidden → Decoder Full -->
-            <path d="M 320 30 H 520" stroke="#ea580c" stroke-width="3" fill="none" marker-end="url(#fig3-arrow-ced)"/>
-            <text x="390" y="22" fill="#ea580c" font-size="12" font-weight="800">CED (global KV from H_{L/2})</text>
-            <!-- Decoder Full → Candidate Pool -->
-            <path d="M 700 40 H 860" stroke="#2563eb" stroke-width="2.5" fill="none" marker-end="url(#fig3-arrow-idx)"/>
-            <text x="710" y="32" fill="#2563eb" font-size="11" font-weight="700">Hierarchical Sparse Indexer</text>
-            <!-- Candidate Pool → Reindex -->
-            <path d="M 860 70 H 700" stroke="#2563eb" stroke-width="2.5" fill="none" stroke-dasharray="5 3" marker-end="url(#fig3-arrow-idx)"/>
-            <text x="720" y="88" fill="#2563eb" font-size="11" font-weight="700">Reindex Top-K</text>
-            <!-- local SWA note -->
-            <text x="200" y="100" fill="#64748b" font-size="11">Per layer: own global Q + SWA KV local · SWA Bounded Replay</text>
-          </svg>
-        </div>
-        <div class="fig3-inputs">
-          <div class="fig3-input-col">
-            <div class="fig3-input-chip vision">Vision Encoder</div>
-            <div class="fig3-input-chip vision">Vision Embedding</div>
-          </div>
-          <div class="fig3-input-col">
-            <div class="fig3-input-chip mhc">Single-Pass mHC</div>
-            <div class="fig3-input-chip">Embedding</div>
-          </div>
-          <div class="fig3-input-col">
-            <div class="fig3-input-chip">Text Embedding</div>
-          </div>
-        </div>
-        <div class="fig3-kv-list">
-          ${(flows || []).filter((f) => f.style !== "engram" || f.id === "engram_feed").map((f) =>
-            `<div class="kv-item"><b>${f.label}</b> · ${f.from} → ${f.to}<br>${f.note || ""}</div>`
-          ).join("")}
-        </div>
-        <div class="fig3-caption">${fig.act_note || ""}<br>${fig.caption || ""}</div>
+        <ul class="fig3-notes">
+          <li>自下而上计算。注意力在下，MoE 在上。右侧 ×N 是这一括号重复的次数。</li>
+          <li>CED：编码器最终隐状态 H<sub>L/2</sub> 只在解码器最底下的 CSA2(1, Full) 投影成全局 KV。Reuse 和 Reindex 复用这份 KV。每层仍有自己的 global Q 和 SWA KV。</li>
+          <li>Indexer：Full 建立候选池（最多 2048 块 × 8）。Reindex 只在池里重选 Top-512。</li>
+          <li>Engram 打进第 1 层（SWA）和第 14 层（编码器第三组的 Full），层号从 0 起。</li>
+          <li>粉色 SWA 只表示最底两层纯滑窗。其余层是 CSA2，同时还有本层滑窗（窗口 128）。</li>
+          <li>Single-Pass mHC 是层与层之间的残差混合（扩张 4）。DSpark 是另训的 3 层推测解码，不在这 40 层里。预填充激活约 8B，解码约 16B。</li>
+        </ul>
       `;
 
       canvas.appendChild(wrap);
+      const board = wrap.querySelector(".fig3-board");
+      if (fig3ResizeObs) fig3ResizeObs.disconnect();
+      fig3ResizeObs = new ResizeObserver(() => scheduleFig3Wires(board));
+      fig3ResizeObs.observe(board);
+      scheduleFig3Wires(board);
 
       // Click handlers for chips / nodes
       wrap.querySelectorAll("[data-clickable='1'], .fig3-chip[data-clickable='1'], .fig3-node[data-clickable='1']").forEach((el) => {
@@ -4114,7 +4358,281 @@
       });
     }
 
+    function ownChip(id, cls, title, sub, res) {
+      const extra = sub ? `<span class="own-sub">${fig3Esc(sub)}</span>` : "";
+      const resAttr = res ? ` data-res="${fig3Esc(res)}"` : "";
+      return `<div class="fig3-chip ${cls}" data-node="${fig3Esc(id)}" data-clickable="1"${resAttr}>${fig3Esc(title)}${extra}</div>`;
+    }
+
+    function ownStem(label) {
+      return `<div class="fig3-stem own-stem">${fig3Arrow()}<span>${fig3Esc(label)}</span></div>`;
+    }
+
+    function ownAdd(which) {
+      const name = which === "attn" ? "注意力残差" : "FFN / MoE 残差";
+      return `<div class="own-add" data-res="${which}-add" data-node="res-${which}" data-clickable="1" title="${name}">⊕</div>`;
+    }
+
+    function ownDrawerBlock(data, nodeId, label) {
+      if (nodeId === "res-attn" || nodeId === "res-ffn") {
+        const moe = !!((data.config || {}).arch === "moe" || (data.config || {}).use_moe);
+        const name = nodeId === "res-attn" ? "注意力残差" : (moe ? "MoE 残差" : "FFN 残差");
+        return {
+          id: nodeId,
+          label: name,
+          params: 0,
+          parts: [{ id: nodeId, label: name, params: 0 }],
+        };
+      }
+      const blocks = data.blocks || [];
+      const all = blocks.concat(data.tail || []);
+      const direct = all.find((b) => b.id === nodeId);
+      const wrapPart = (block) => {
+        if (block.parts && block.parts.length) return block;
+        return {
+          id: block.id,
+          label: block.label,
+          params: block.params,
+          tied: block.tied,
+          parts: [{
+            id: block.id,
+            label: block.label,
+            params: block.params,
+            detail: block.detail,
+            weight_shapes: block.weight_shapes,
+            shape_in: block.shape_in,
+            shape_out: block.shape_out,
+          }],
+        };
+      };
+      if (direct) return wrapPart(direct);
+      const layer = blocks.find((b) => b.kind === "layer");
+      if (!layer) {
+        return { id: nodeId, label: label || nodeId, params: 0, parts: [{ id: nodeId, label: label || nodeId, params: 0 }] };
+      }
+      const part = (layer.parts || []).find((p) => p.id === nodeId);
+      if (!part) return layer;
+      return { id: part.id, label: part.label || label || part.id, params: part.params, parts: [part] };
+    }
+
+    function drawOwnWires(board) {
+      const svg = board.querySelector(".fig3-wires");
+      if (!svg) return;
+      const root = board.getBoundingClientRect();
+      if (root.width < 40 || root.height < 40) return;
+      svg.setAttribute("viewBox", `0 0 ${root.width} ${root.height}`);
+      svg.setAttribute("width", String(root.width));
+      svg.setAttribute("height", String(root.height));
+      const node = (id) => board.querySelector(`[data-node="${id}"]`);
+      const parts = [];
+      const text = (x, y, str, fill, anchor) => {
+        parts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" fill="${fill}" font-size="13" font-weight="700" text-anchor="${anchor || "middle"}" paint-order="stroke" stroke="#ffffff" stroke-width="4">${fig3Esc(str)}</text>`);
+      };
+      const path = (d, color, extra) => {
+        parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" ${extra || ""}/>`);
+      };
+      const emb = node("embed");
+      const head = node("lm_head");
+      if (board.dataset.tied === "1" && emb && head) {
+        const a = fig3Rel(board, emb);
+        const b = fig3Rel(board, head);
+        const lane = Math.max(8, Math.min(a.l, b.l) - 18);
+        path(`M ${a.l.toFixed(1)} ${a.cy.toFixed(1)} H ${lane.toFixed(1)} V ${b.cy.toFixed(1)} H ${b.l.toFixed(1)}`, "#334155", 'stroke-dasharray="5 4" marker-end="url(#own-mk-tie)"');
+        text(lane - 4, (a.cy + b.cy) / 2, "共用权重", "#1f2937", "end");
+      }
+      const routed = node("routed_experts");
+      const srcEl = node("router") || node("moe");
+      if (routed && srcEl) {
+        const a = fig3Rel(board, srcEl);
+        const b = fig3Rel(board, routed);
+        path(`M ${a.r.toFixed(1)} ${a.cy.toFixed(1)} H ${b.l.toFixed(1)}`, "#1d4ed8", 'stroke-dasharray="6 4" marker-end="url(#own-mk-top)"');
+      }
+      // Pre-norm residual: x splits off before RMSNorm and rejoins at ⊕.
+      const drawRes = (srcName, addName, which) => {
+        const src = board.querySelector(`[data-res="${srcName}"]`);
+        const add = board.querySelector(`[data-res="${addName}"]`);
+        if (!src || !add) return;
+        const a = fig3Rel(board, src);
+        const b = fig3Rel(board, add);
+        const y0 = a.b + 4;
+        const lane = a.r + 18;
+        const d = `M ${a.cx.toFixed(1)} ${y0.toFixed(1)} H ${lane.toFixed(1)} V ${b.cy.toFixed(1)} H ${b.r.toFixed(1)}`;
+        const id = `res-${which}`;
+        path(d, "#b45309", 'marker-end="url(#own-mk-res)"');
+        parts.push(`<path class="own-res-hit" data-res-id="${id}" d="${d}" fill="none" stroke="transparent" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>`);
+        parts.push(`<circle class="own-res-hit" data-res-id="${id}" cx="${a.cx.toFixed(1)}" cy="${y0.toFixed(1)}" r="6" fill="#b45309"/>`);
+        const tx = lane + 5;
+        const ty = (y0 + b.cy) / 2;
+        parts.push(`<text class="own-res-hit" data-res-id="${id}" x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" fill="#9a3412" font-size="13" font-weight="700" text-anchor="start" paint-order="stroke" stroke="#ffffff" stroke-width="4">x</text>`);
+      };
+      drawRes("attn-src", "attn-add", "attn");
+      drawRes("ffn-src", "ffn-add", "ffn");
+      svg.innerHTML = `<defs>
+          <marker id="own-mk-tie" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#334155"/></marker>
+          <marker id="own-mk-top" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1d4ed8"/></marker>
+          <marker id="own-mk-res" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#b45309"/></marker>
+        </defs>${parts.join("")}`;
+    }
+
+    function renderOwnArch(data) {
+      const canvas = $("arch-canvas");
+      canvas.innerHTML = "";
+      const cfg = data.config || {};
+      const meta = data.meta || {};
+      const blocks = data.blocks || [];
+      const tail = data.tail || [];
+      const layers = blocks.filter((b) => b.kind === "layer");
+      const n = Number(cfg.n_layers || layers.length || 1);
+      const isMoe = cfg.arch === "moe" || cfg.use_moe || layers.some((L) => (L.parts || []).some((p) => p.id === "router" || p.id === "routed_experts"));
+      const lm = tail.find((t) => t.id === "lm_head" || t.kind === "lm_head");
+      const tied = lm && Object.prototype.hasOwnProperty.call(lm, "tied") ? !!lm.tied : !!data.tie_word_embeddings;
+      const d = cfg.d_model;
+      const heads = cfg.n_heads;
+      const hd = cfg.head_dim;
+      const mid = isMoe ? cfg.moe_intermediate_size : cfg.intermediate_size;
+      const nShared = cfg.n_shared_experts != null ? cfg.n_shared_experts : 1;
+      const nRouted = cfg.n_routed_experts != null ? cfg.n_routed_experts : 32;
+      const topk = cfg.num_experts_per_tok != null ? cfg.num_experts_per_tok : 2;
+      const theta = cfg.rope_theta;
+      const thetaText = theta === 1000000 || theta === 1e6 ? "1e6" : (theta != null ? String(theta) : "");
+      const mode = archViewMode || "standard";
+      const attnSub = mode === "compact" || heads == null ? "" : `RoPE · QKV 一个线性层 · ${heads}×${hd}`;
+      const attn = ownChip("attn", "attn", "Causal Attn", attnSub);
+      const ffnSub = mode === "compact" || d == null || mid == null ? "" : `GELU · ${d}→${mid}→${d}`;
+      let upper;
+      if (!isMoe) {
+        upper = ownChip("ffn", "ffn", "FFN", ffnSub);
+      } else if (mode === "compact") {
+        upper = `<div class="own-moe-row">${ownChip("moe", "shared", "MoE", "")}${ownChip("routed_experts", "routed", `Routed ×${nRouted}`, "")}</div>`;
+      } else {
+        const sharedLabel = Number(nShared) === 1 ? "Shared Expert" : `Shared ×${nShared}`;
+        const shared = ownChip("shared_experts", "shared", sharedLabel, ffnSub);
+        const router = ownChip("router", "router", "Router", `top-${topk} / ${nRouted}`);
+        const routed = ownChip("routed_experts", "routed", `Routed ×${nRouted}`, "只算被选中的");
+        upper = `<div class="own-moe-row"><div class="own-moe-main">${shared}${fig3Arrow()}${router}</div>${routed}</div>`;
+      }
+      let body;
+      if (mode === "detailed") {
+        const ffnNorm = ownChip("ffn_norm", "norm", "RMSNorm", "pre-FFN", "ffn-src");
+        const attnNorm = ownChip("attn_norm", "norm", "RMSNorm", "pre-Attn", "attn-src");
+        body = joinUp([ownAdd("ffn"), upper, ffnNorm, ownAdd("attn"), attn, attnNorm]);
+      } else if (mode === "compact") {
+        body = `${upper}${fig3Arrow()}${attn}`;
+      } else {
+        body = `${upper}${ownStem("RMSNorm · pre-FFN")}${attn}${ownStem("RMSNorm · pre-Attn")}`;
+      }
+      const name = meta.release_name || (isMoe ? "MiniSeek-M" : "MiniSeek-D");
+      const legend = isMoe
+        ? [
+            ["#86efac", "Causal Attn · RoPE"],
+            ["#ffffff", "Shared Expert · 始终计算"],
+            ["#fde047", "Router"],
+            ["#93c5fd", `Routed ×${nRouted} · top-${topk}`],
+          ]
+        : [
+            ["#86efac", "Causal Attn · RoPE"],
+            ["#bfdbfe", "FFN · GELU"],
+            ["#e2e8f0", "RMSNorm"],
+          ];
+      if (mode === "detailed") legend.push(["#b45309", "残差 x"]);
+      const legendHtml = legend.map(([color, text]) => `<span><i class="fig3-swatch" style="background:${color}"></i>${fig3Esc(text)}</span>`).join("");
+      const lmSub = tied ? "与 Embedding 共用权重" : "独立权重";
+      const notes = [
+        "自下而上计算。注意力在下，FFN 在上。右侧 ×N 是这 N 层用同一结构。",
+        "每个子层是 Pre-Norm。详细视图里橙色线是残差 x：圆点在进 RMSNorm 之前，线绕过子层，加进上面的 ⊕。注意力的 x 是这一层的输入；FFN 的 x 是注意力残差加完之后的结果。",
+        `注意力是 CausalSelfAttention：Q、K、V 共用一个线性层，RoPE 加在 Q 和 K 上${thetaText ? `（θ=${thetaText}）` : ""}，因果 mask，再过输出投影。线性层没有 bias。`,
+      ];
+      if (isMoe) {
+        notes.push(`FFN 位置是 MoE：${nShared} 个共享专家每个 token 都算；Router 在 ${nRouted} 个路由专家里取 top-${topk}，权重归一化后与共享专家相加。专家仍是 GELU MLP${mid != null ? `，中间维 ${mid}` : ""}。`);
+        notes.push("负载均衡 aux 是训练损失，不在这张结构图里单独成块。");
+      } else {
+        notes.push(`FFN 是 Linear → GELU → Linear${d != null && mid != null ? `，${d}→${mid}→${d}` : ""}，没有 bias。`);
+      }
+      if (cfg.arch === "tiny") {
+        notes.push(`这一档和 Dense 是同一个 DenseLM，只是 d=${d}、${n} 层、${heads} 个头，用来在 CPU 上冒烟。`);
+      }
+      notes.push(tied
+        ? "虚线表示 LM Head 和 Token Embedding 是同一份权重。最上面还有一层 Final RMSNorm。"
+        : "LM Head 使用单独的权重。最上面还有一层 Final RMSNorm。");
+      notes.push("这三档没有 SWA、CSA2、CED。那些开关在当前 DenseLM 里会直接报未实现。");
+
+      const wrap = document.createElement("div");
+      wrap.className = "fig3-wrap";
+      wrap.addEventListener("click", (ev) => ev.stopPropagation());
+      wrap.innerHTML = `
+        <div class="fig3-title">${fig3Esc(name)} · Decoder-only</div>
+        <div class="fig3-legend">${legendHtml}</div>
+        <div class="fig3-board" data-tied="${tied ? "1" : "0"}">
+          <div class="own-stage">
+            <div class="fig3-node" data-node="lm_head" data-clickable="1">LM Head<span class="own-sub">${fig3Esc(lmSub)}</span></div>
+            ${fig3Arrow()}
+            <div class="fig3-chip norm" data-node="norm" data-clickable="1">Final RMSNorm</div>
+            ${fig3Arrow()}
+            ${fig3BracketHtml(n, body, `同一结构重复 ${n} 层`)}
+            ${fig3Arrow()}
+            <div class="fig3-node embed" data-node="embed" data-clickable="1">Token Embedding</div>
+          </div>
+          <svg class="fig3-wires" aria-hidden="true"></svg>
+        </div>
+        <ul class="fig3-notes">${notes.map((line) => `<li>${fig3Esc(line)}</li>`).join("")}</ul>
+      `;
+      if (mode === "detailed") {
+        const bodyEl = wrap.querySelector(".fig3-bracket-body");
+        if (bodyEl) bodyEl.classList.add("has-res");
+      }
+      canvas.appendChild(wrap);
+      const board = wrap.querySelector(".fig3-board");
+      if (fig3ResizeObs) fig3ResizeObs.disconnect();
+      fig3ResizeObs = new ResizeObserver(() => {
+        cancelAnimationFrame(fig3WireFrame);
+        fig3WireFrame = requestAnimationFrame(() => {
+          if (board.isConnected) drawOwnWires(board);
+        });
+      });
+      fig3ResizeObs.observe(board);
+      drawOwnWires(board);
+
+      const openNode = (el) => {
+        wrap.querySelectorAll(".is-on").forEach((x) => x.classList.remove("is-on"));
+        el.classList.add("is-on");
+        const nodeId = el.getAttribute("data-node") || "";
+        const label = (el.childNodes[0] && el.childNodes[0].textContent || el.textContent || "").trim();
+        openArchDrawer(ownDrawerBlock(data, nodeId, label));
+      };
+      wrap.querySelectorAll("[data-clickable='1']").forEach((el) => {
+        el.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          openNode(el);
+        });
+      });
+      wrap.addEventListener("click", (ev) => {
+        const hit = ev.target.closest && ev.target.closest("[data-res-id]");
+        if (!hit || !wrap.contains(hit)) return;
+        ev.stopPropagation();
+        const nodeId = hit.getAttribute("data-res-id");
+        wrap.querySelectorAll(".is-on").forEach((x) => x.classList.remove("is-on"));
+        const add = wrap.querySelector(`[data-node="${nodeId}"]`);
+        if (add) add.classList.add("is-on");
+        openArchDrawer(ownDrawerBlock(data, nodeId, ""));
+      });
+      const bracket = wrap.querySelector(".fig3-bracket");
+      if (bracket) {
+        bracket.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const layer = layers[0];
+          if (!layer) return;
+          wrap.querySelectorAll(".is-on").forEach((x) => x.classList.remove("is-on"));
+          bracket.classList.add("is-on");
+          openArchDrawer(layer);
+        });
+      }
+    }
+
     function renderArch(data) {
+      if (fig3ResizeObs) {
+        fig3ResizeObs.disconnect();
+        fig3ResizeObs = null;
+      }
       if (data) archData = data;
       if (!archData) return;
       data = archData;
@@ -4149,6 +4667,13 @@
 
       const blocks = data.blocks || [];
       const tail = data.tail || [];
+      if (blocks.some((b) => b.kind === "layer") && blocks.some((b) => b.kind === "embedding")) {
+        renderOwnArch(data);
+        $("arch-status-text").textContent = "已加载设计";
+        $("arch-dot").className = "dot finished";
+        closeArchDrawer();
+        return;
+      }
       const embed = blocks.filter((b) => b.kind === "embedding" || b.kind === "vision" || b.kind === "engram");
       const layers = blocks.filter((b) => b.kind === "layer");
       const earlyOrdered = blocks.filter((b) => b.kind !== "layer");
@@ -5189,7 +5714,7 @@ $("btn-bench-edit").addEventListener("click", async () => {
       }
     }
 
-    $("moe-data").value = "/home/wyf/miniseek/data/valid_mix.jsonl";
+    $("moe-data").value = "/home/wyf/miniseek/data/PT/pretrain_mix_12g_clean.jsonl";
     $("btn-moe-refresh-ckpt").addEventListener("click", refreshMoeCheckpoints);
     $("btn-moe-probe").addEventListener("click", runMoeProbe);
     document.querySelectorAll(".page-tabs button").forEach((btn) => {
