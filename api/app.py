@@ -261,6 +261,11 @@ class InferenceEngine:
         self.loaded_ckpt: Optional[str] = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._gen_lock = threading.Lock()
+        self._cancel = threading.Event()
+
+    def stop_generation(self) -> None:
+        """Signal the active stream_chat / stream_continue loop to break ASAP."""
+        self._cancel.set()
 
     def load_model(self, ckpt_path: str) -> str:
         if not ckpt_path or not Path(ckpt_path).exists():
@@ -534,7 +539,9 @@ class InferenceEngine:
         token_ids: List[int] = []
         prev_text = ""
         n = 0
+        cancelled = False
         with self._gen_lock:
+            self._cancel.clear()
             for token in self.model.generate_stream(
                 input_ids,
                 max_new_tokens=int(max_new_tokens),
@@ -542,6 +549,9 @@ class InferenceEngine:
                 top_k=int(top_k),
                 eos_token_id=eos_id,
             ):
+                if self._cancel.is_set():
+                    cancelled = True
+                    break
                 n += 1
                 if eos_id is not None and token == int(eos_id):
                     break
@@ -568,6 +578,7 @@ class InferenceEngine:
                 "tokens": n,
                 "seconds": round(cost, 2),
                 "tokens_per_s": round(speed, 1),
+                "cancelled": cancelled,
             },
         }
 
@@ -682,7 +693,9 @@ class InferenceEngine:
         prev_text = ""
         n = 0
         candidates_k = max(1, min(int(debug_topk), 50))
+        cancelled = False
         with self._gen_lock:
+            self._cancel.clear()
             for token, info in self.model.generate_stream_debug(
                 input_ids,
                 max_new_tokens=int(max_new_tokens),
@@ -691,6 +704,9 @@ class InferenceEngine:
                 eos_token_id=eos_id,
                 candidates_k=candidates_k,
             ):
+                if self._cancel.is_set():
+                    cancelled = True
+                    break
                 n += 1
                 topk_rows = self._format_topk(int(token), info)
                 if eos_id is not None and token == int(eos_id):
@@ -742,6 +758,7 @@ class InferenceEngine:
                 "tokens": n,
                 "seconds": round(cost, 2),
                 "tokens_per_s": round(speed, 1),
+                "cancelled": cancelled,
             },
         }
 
@@ -771,7 +788,9 @@ class InferenceEngine:
         token_ids: List[int] = []
         prev_text = ""
         n = 0
+        cancelled = False
         with self._gen_lock:
+            self._cancel.clear()
             for token in self.model.generate_stream(
                 input_ids,
                 max_new_tokens=int(max_new_tokens),
@@ -779,6 +798,9 @@ class InferenceEngine:
                 top_k=int(top_k),
                 eos_token_id=eos_id,
             ):
+                if self._cancel.is_set():
+                    cancelled = True
+                    break
                 n += 1
                 if eos_id is not None and token == int(eos_id):
                     break
@@ -805,6 +827,7 @@ class InferenceEngine:
                 "tokens": n,
                 "seconds": round(cost, 2),
                 "tokens_per_s": round(speed, 1),
+                "cancelled": cancelled,
             },
         }
 
@@ -1960,6 +1983,13 @@ def _single_turn_messages(messages: List[dict]) -> List[dict]:
     if last_user is None:
         return systems
     return systems + [last_user]
+
+
+@app.post("/api/infer/stop")
+def infer_stop() -> dict:
+    """Stop in-flight chat/continue generation so the next request is not blocked on _gen_lock."""
+    infer_engine.stop_generation()
+    return {"ok": True, "message": "已请求停止生成"}
 
 
 @app.post("/api/infer/chat/stream")

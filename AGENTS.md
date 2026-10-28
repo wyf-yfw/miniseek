@@ -97,6 +97,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 - **代码**：公仓已含 PT/SFT 布局、valid-ratio、`.gitignore`；`data/scripts` 旧拼盘脚本已删；`deploy/miniseek-tunnel.service` 不上库。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。
+- **推理停止**：对话/续写点停止会 `POST /api/infer/stop`，打断服务端 `generate_stream` 并释放 `_gen_lock`（不能只 abort 前端 fetch）。
 
 ## 维护约定（固定动作）
 

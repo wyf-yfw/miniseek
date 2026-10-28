@@ -3179,11 +3179,20 @@
       renderChat();
     });
     $("btn-send").addEventListener("click", sendChat);
+    
+    async function stopInferGeneration() {
+      try {
+        await fetch("/api/infer/stop", { method: "POST" });
+      } catch (_) { /* ignore */ }
+    }
+
     $("btn-stop-gen").addEventListener("click", () => {
       if (!chatState.streaming || !chatState.abort) return;
       $("btn-stop-gen").disabled = true;
       stopDebugAuto();
-      chatState.abort.abort();
+      stopInferGeneration().finally(() => {
+        try { chatState.abort.abort(); } catch (_) {}
+      });
     });
     if ($("chk-debug-step")) {
       $("chk-debug-step").addEventListener("change", syncDebugOpts);
@@ -3397,7 +3406,9 @@
     $("btn-cont-stop").addEventListener("click", () => {
       if (!contState.streaming || !contState.abort) return;
       $("btn-cont-stop").disabled = true;
-      contState.abort.abort();
+      stopInferGeneration().finally(() => {
+        try { contState.abort.abort(); } catch (_) {}
+      });
     });
     $("btn-cont-clear").addEventListener("click", () => {
       contState.prefix = "";
