@@ -95,6 +95,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 - **PT 训练**：`moe-pretrain-3` 在 wyf 上跑（resume 自 PT `last.pt`，数据 `clean.jsonl` / 12g clean）。
 - **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 已有 `pretrain_mix_12g_clean.jsonl`；训练用 `--valid-ratio`，不再随仓/HF 提供独立 valid。
 - **代码**：公仓已含 PT/SFT 布局、valid-ratio、`.gitignore`；`data/scripts` 旧拼盘脚本已删；`deploy/miniseek-tunnel.service` 不上库。
+- **架构页**：含 DeepSeek-V4.1-Flash 参考预设（arXiv:2609.19969，`source=reference`，不可训练；组级 Fig.3 示意）。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。
 - **Loss 图**：取点间隔可在 UI 调节（从 train.log 按 `plot_every` 重采样），不绑死训练启动时的 plot_every。

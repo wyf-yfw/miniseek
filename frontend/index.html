@@ -605,6 +605,22 @@
       text-align: center;
     }
     .arch-block.layer { cursor: pointer; }
+    .arch-block.vision {
+      border-color: #7c3aed;
+      background: #f5f3ff;
+    }
+    .arch-block.engram {
+      border-color: #0d9488;
+      background: #f0fdfa;
+    }
+    .arch-block.dspark {
+      border-color: #db2777;
+      background: #fdf2f8;
+      border-style: dashed;
+    }
+    .arch-block.moe-hint {
+      border-color: #ea580c;
+    }
     .arch-block.layer:hover, .arch-block.layer.selected {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
@@ -1185,6 +1201,7 @@
             <button type="button" id="arch-preset-tiny" data-arch-preset="tiny">Tiny</button>
             <button type="button" id="arch-preset-dense" class="active" data-arch-preset="dense">Dense</button>
             <button type="button" id="arch-preset-moe" data-arch-preset="moe">MoE</button>
+            <button type="button" id="arch-preset-v41-flash" data-arch-preset="v41-flash">V4.1-Flash</button>
           </div>
           <p id="arch-preset-hint" class="mode-hint">Dense：MiniSeek-D0.1（d=512 L=8）。</p>
           <p id="arch-msg" class="arch-msg"></p>
@@ -1204,7 +1221,7 @@
           </div>
           <div class="arch-canvas-wrap">
             <div id="arch-canvas" class="arch-canvas">
-              <span class="chat-empty" id="arch-empty">点左侧 Tiny / Dense / MoE 查看设计架构。</span>
+              <span class="chat-empty" id="arch-empty">点左侧 Tiny / Dense / MoE / V4.1-Flash 查看设计或参考架构。</span>
             </div>
             <aside id="arch-drawer" class="arch-drawer" hidden>
               <div class="arch-drawer-head">
@@ -3499,11 +3516,13 @@
       tiny: "Tiny：冒烟档 DenseLM，d=64 L=2，适合 CPU。",
       dense: "Dense：MiniSeek-D0.1，d=512 L=8 FFN=2048。",
       moe: "MoE：MiniSeek-M0.1，同主干 + 1 shared / 32 routed / top-2。",
+      "v41-flash": "V4.1-Flash 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
     };
 
     function fmtParams(n) {
       if (n == null) return "-";
       if (n === 0) return "结构（无独立参数）";
+      if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e11 ? 0 : 2) + "B";
       if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
       if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
       return String(n);
@@ -3567,11 +3586,16 @@
       const isAdd = b.kind === "add" || (b.id || "").startsWith("add_");
       const isStruct = !isAdd && ((b.params === 0) || (b.id || "").startsWith("residual"));
       const isPart = extraClass === "part";
+      const kindClass = (b.kind === "vision" || b.kind === "engram" || b.kind === "dspark")
+        ? (" " + b.kind) : "";
+      const clickableKind = b.kind === "layer" || b.kind === "vision" || b.kind === "dspark" || b.kind === "engram";
       el.className = "arch-block"
         + (extraClass ? " " + extraClass : "")
         + (b.kind === "layer" ? " layer" : "")
+        + kindClass
         + (isAdd ? " add-node" : "")
-        + (isStruct ? " struct" : "");
+        + (isStruct ? " struct" : "")
+        + (clickableKind && !isPart ? " layer" : "");
       el.dataset.id = b.id;
       if (isAdd) {
         el.innerHTML = `<div class="lbl">⊕</div>`;
@@ -3678,15 +3702,26 @@
       const cfg = data.config || {};
       const meta = data.meta || {};
       $("arch-summary").style.display = "block";
+      const isRef = meta.source === "reference";
+      let paramLine = isRef
+        ? `<div>主干 ${fmtParams(meta.backbone_params || data.total_params)}`
+          + (meta.act_prefill != null ? ` · 激活 prefill ${fmtParams(meta.act_prefill)} / decode ${fmtParams(meta.act_decode)}` : "")
+          + (meta.engram_params != null ? ` · Engram ${fmtParams(meta.engram_params)}` : "")
+          + `</div>`
+        : `<div>设计参数量 ${fmtParams(data.total_params)}${data.tie_word_embeddings ? " · tie embeddings" : ""}</div>`;
+      const srcHint = isRef
+        ? `来源=论文参考${meta.paper ? " · " + meta.paper : ""}（不可训练）`
+        : "来源=设计规格";
       $("arch-summary").innerHTML =
         `<div><b>${meta.release_name || cfg.arch || "-"}</b> · d=${cfg.d_model || "-"} · L=${cfg.n_layers || "-"} · heads=${cfg.n_heads || "-"}</div>` +
-        `<div>设计参数量 ${fmtParams(data.total_params)}${data.tie_word_embeddings ? " · tie embeddings" : ""}</div>` +
-        `<div class="field-hint">来源=设计规格 · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
+        paramLine +
+        `<div class="field-hint">${srcHint} · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
 
       const blocks = data.blocks || [];
       const tail = data.tail || [];
-      const embed = blocks.filter((b) => b.kind === "embedding");
+      const embed = blocks.filter((b) => b.kind === "embedding" || b.kind === "vision" || b.kind === "engram");
       const layers = blocks.filter((b) => b.kind === "layer");
+      const earlyOrdered = blocks.filter((b) => b.kind !== "layer");
       let first = true;
       const pushNode = (nodeEl) => {
         if (!first) appendConnector(canvas);
@@ -3695,13 +3730,14 @@
       };
 
       if (archViewMode === "compact") {
-        embed.forEach((b) => pushNode(makeBlock(b)));
+        earlyOrdered.forEach((b) => pushNode(makeBlock(b)));
         if (layers.length) {
           const total = layers.reduce((s, b) => s + (b.params || 0), 0);
+          const nL = cfg.n_layers || layers.length;
           const el = makeBlock({
             id: "layers-compact",
             kind: "layer",
-            label: `Transformer × ${layers.length}`,
+            label: isRef ? `CED Transformer ${nL}L · ${layers.length} groups` : `Transformer × ${layers.length}`,
             params: total,
           }, "compact-layers");
           el.addEventListener("click", (ev) => {
@@ -3722,9 +3758,25 @@
         }
         tail.forEach((b) => pushNode(makeBlock(b)));
       } else if (archViewMode === "detailed") {
-        [...embed, ...layers, ...tail].forEach((b) => {
+        [...earlyOrdered, ...layers, ...tail].forEach((b) => {
           if (b.kind !== "layer") {
-            pushNode(makeBlock(b, "part"));
+            const el = makeBlock(b, b.kind === "vision" || b.kind === "dspark" || b.kind === "engram" ? "" : "part");
+            if (b.parts && b.parts.length) {
+              el.classList.add("layer");
+              el.addEventListener("click", (ev) => { ev.stopPropagation(); openArchDrawer(b); });
+            } else if (b.detail) {
+              el.classList.add("layer");
+              el.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                openArchDrawer({
+                  id: b.id,
+                  label: b.label,
+                  params: b.params,
+                  parts: [{ id: b.id, label: b.label, params: b.params, detail: b.detail, weight_shapes: b.weight_shapes, shape_in: b.shape_in, shape_out: b.shape_out }],
+                });
+              });
+            }
+            pushNode(el);
             return;
           }
           if (!first) appendConnector(canvas);
@@ -3762,12 +3814,27 @@
           requestAnimationFrame(() => drawLayerResiduals(group, b.residuals));
         });
       } else {
-        [...embed, ...layers, ...tail].forEach((b) => {
+        [...earlyOrdered, ...layers, ...tail].forEach((b) => {
           const el = makeBlock(b);
           if (b.kind === "layer") {
             el.addEventListener("click", (ev) => {
               ev.stopPropagation();
               openArchDrawer(b);
+            });
+          } else if (b.detail || (b.parts && b.parts.length)) {
+            el.classList.add("layer");
+            el.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              openArchDrawer({
+                id: b.id,
+                label: b.label,
+                params: b.params,
+                parts: b.parts && b.parts.length ? b.parts : [{
+                  id: b.id, label: b.label, params: b.params,
+                  detail: b.detail, weight_shapes: b.weight_shapes,
+                  shape_in: b.shape_in, shape_out: b.shape_out,
+                }],
+              });
             });
           }
           pushNode(el);

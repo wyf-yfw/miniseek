@@ -867,7 +867,7 @@ class ArchInspectRequest(BaseModel):
 
 
 class ArchDesignRequest(BaseModel):
-    arch: str = "dense"  # tiny | dense | moe
+    arch: str = "dense"  # tiny | dense | moe | v41-flash (reference)
 
 
 class BenchCreate(BaseModel):

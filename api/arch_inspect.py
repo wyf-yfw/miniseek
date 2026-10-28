@@ -12,7 +12,15 @@ from algo.model.config import ModelConfig
 
 _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
 
-PRESET_ARCHS = ("tiny", "dense", "moe")
+PRESET_ARCHS = ("tiny", "dense", "moe", "v41-flash")
+
+# Reference-only aliases (DeepSeek-V4.1-Flash paper diagram; not ModelConfig.preset).
+_V41_FLASH_ALIASES = frozenset({
+    "v41-flash",
+    "v4.1-flash",
+    "deepseek-v4.1-flash",
+    "v41flash",
+})
 
 
 def preset_config(arch: str) -> ModelConfig:
@@ -23,7 +31,9 @@ def preset_config(arch: str) -> ModelConfig:
         return ModelConfig()  # D0.1 defaults
     if a == "moe":
         return ModelConfig(arch="moe")
-    raise ValueError(f"未知架构: {arch}（可选: tiny / dense / moe）")
+    raise ValueError(
+        f"未知架构: {arch}（可选: tiny / dense / moe / v41-flash）"
+    )
 
 
 def _attn_params(d: int) -> int:
@@ -297,7 +307,511 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
 
 
 def inspect_design(arch: str) -> Dict[str, Any]:
+    a = (arch or "").strip().lower()
+    if a in _V41_FLASH_ALIASES:
+        return inspect_v41_flash()
     return inspect_from_config(preset_config(arch), source="design")
+
+
+def inspect_v41_flash() -> Dict[str, Any]:
+    """DeepSeek-V4.1-Flash reference architecture (arXiv:2609.19969 §2.1 / Fig.3 / §4.2.1).
+
+    Reference-only design diagram — not a trainable MiniSeek ModelConfig.
+    Layer blocks are *group-level* (matching Fig.3 readability), not 40 expanded stacks.
+    """
+    d = 5120
+    n_layers = 40  # CED: 20 causal encoder + 20 decoder
+    n_heads = 64
+    head_dim = 512
+    btd = f"[b,t,{d}]"
+    bt = "[b,t]"
+
+    # Approx expert FFN (SwiGLU gate+up+down): 3 * d * intermediate
+    moe_inter = 2304
+    n_shared, n_routed, topk = 1, 384, 6
+    one_exp = 3 * d * moe_inter
+    moe_per_layer = n_shared * one_exp + n_routed * one_exp  # ~13.6B illustrative
+    backbone = 552_000_000_000
+    engram_total = 196_000_000_000
+
+    def moe_parts(layer_note: str = "") -> List[Dict[str, Any]]:
+        detail = {
+            "n_shared_experts": n_shared,
+            "n_routed_experts": n_routed,
+            "num_experts_per_tok": topk,
+            "moe_intermediate_size": moe_inter,
+            "activation": "SwiGLU (clamp 10)",
+            "note": "DeepSeekMoE every Transformer layer",
+        }
+        if layer_note:
+            detail["layer_note"] = layer_note
+        return [
+            {
+                "id": "moe",
+                "label": f"DeepSeekMoE 1+{n_routed} top-{topk}",
+                "params": moe_per_layer,
+                "shape_in": btd,
+                "shape_out": btd,
+                "weight_shapes": [
+                    _w("gate.weight", [n_routed, d]),
+                    _w("expert.w_gate/up/down", [moe_inter, d], note=f"×{n_shared + n_routed} SwiGLU"),
+                ],
+                "detail": detail,
+            }
+        ]
+
+    def mhc_part() -> Dict[str, Any]:
+        return {
+            "id": "mhc",
+            "label": "Single-Pass mHC (×4)",
+            "params": 0,
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [],
+            "detail": {
+                "variant": "Single-Pass mHC",
+                "expansion_factor": 4,
+                "note": "manifold-constrained hyper-connections",
+            },
+        }
+
+    def attn_swa(*, layers: str) -> Dict[str, Any]:
+        return {
+            "id": "attn",
+            "label": f"SWA only (n_win=128) · {layers}",
+            "params": 0,
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [],
+            "detail": {
+                "attn": "SWA",
+                "n_win": 128,
+                "layers": layers,
+                "n_heads": n_heads,
+                "head_dim": head_dim,
+                "kv_dtype": "FP8 (SWA KV)",
+            },
+        }
+
+    def attn_csa2(
+        *,
+        mode: str,
+        m: int,
+        layers: str,
+        pattern: str,
+        ced_note: str = "",
+    ) -> Dict[str, Any]:
+        detail: Dict[str, Any] = {
+            "attn": f"CSA2(m={m})",
+            "mode": mode,
+            "pattern": pattern,
+            "layers": layers,
+            "n_heads": n_heads,
+            "head_dim": head_dim,
+            "query_compression_dim": 1280,
+            "out_proj_groups": 8,
+            "attn_out_intermediate": 1024,
+            "indexer_q_heads": 32,
+            "indexer_head_dim": 128,
+            "attention_topk": 512,
+            "own_global_Q": True,
+            "own_swa_KV": True,
+            "main_kv_dtype": "FP4 (post-train QAT)",
+            "swa_kv_dtype": "FP8",
+            "note": "All CSA2 layers keep own global Q + SWA KV; modes differ for main KV / indexer K / Top-K",
+        }
+        if mode == "Reindex":
+            detail["hierarchical_sparse_indexer"] = (
+                "First Full builds candidate pool (≤2048 blocks × 8 = 16384); "
+                "later Reindex select Top-512 from pool"
+            )
+        if ced_note:
+            detail["CED"] = ced_note
+        return {
+            "id": "attn",
+            "label": f"CSA2(m={m}) {mode} · {pattern}",
+            "params": 0,
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [],
+            "detail": detail,
+        }
+
+    def engram_part(layer_idx: int) -> Dict[str, Any]:
+        return {
+            "id": "engram",
+            "label": f"Engram @{layer_idx}",
+            "params": engram_total // 2,  # 196B total at L1 and L14
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [
+                _w("engram.emb", "N-gram{2,3,4} × 8 hash heads × dim 2048/order"),
+            ],
+            "detail": {
+                "layers_0indexed": [1, 14],
+                "this_layer": layer_idx,
+                "total_params": engram_total,
+                "n_gram_orders": [2, 3, 4],
+                "hash_heads": 8,
+                "emb_dim_per_order": 2048,
+            },
+        }
+
+    def layer_group(
+        *,
+        gid: str,
+        label: str,
+        index: int,
+        n_in_group: int,
+        parts: List[Dict[str, Any]],
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        # Illustrative share of backbone (not exact FLOPs / param accounting).
+        share = int(backbone * n_in_group / n_layers)
+        # Add Engram share into displayed params when present
+        eng = sum(int(p.get("params") or 0) for p in parts if p.get("id") == "engram")
+        blk: Dict[str, Any] = {
+            "id": gid,
+            "kind": "layer",
+            "index": index,
+            "label": label,
+            "params": share + eng,
+            "parts": parts,
+            "residuals": [
+                {"id": "attn", "from": "layer_in", "to": "add_attn", "label": "x"},
+                {"id": "ffn", "from": "post_attn", "to": "add_ffn", "label": "x"},
+            ],
+        }
+        if detail:
+            blk["detail"] = detail
+        return blk
+
+    # --- early blocks: text embed + vision ---
+    blocks: List[Dict[str, Any]] = [
+        {
+            "id": "embed",
+            "kind": "embedding",
+            "label": "Token Embedding",
+            "params": 0,
+            "shape_in": bt,
+            "shape_out": btd,
+            "weight_shapes": [_w("tok_emb.weight", f"[vocab,{d}]")],
+            "detail": {"d_model": d, "note": "Multimodal MoE Transformer backbone"},
+        },
+        {
+            "id": "vision",
+            "kind": "vision",
+            "label": "DeepSeek-ViT → Projector",
+            "params": 0,
+            "shape_in": "[b,H,W,3]",
+            "shape_out": btd,
+            "weight_shapes": [
+                _w("vit", "32L d=1024 heads=16 patch=14 2D-RoPE RMSNorm SwiGLU"),
+                _w("pixel_unshuffle", "3×3"),
+                _w("mlp_projector", f"2-layer MLP hidden={d}"),
+            ],
+            "detail": {
+                "vit_layers": 32,
+                "vit_d_model": 1024,
+                "vit_heads": 16,
+                "patch_size": 14,
+                "rope": "2D-RoPE",
+                "norm": "RMSNorm",
+                "ffn": "SwiGLU",
+                "pixel_unshuffle": "3×3",
+                "projector": f"2-layer MLP hidden {d} → visual embeddings into sequence",
+            },
+        },
+    ]
+
+    # L0–1: SWA only; Engram @1
+    parts_01: List[Dict[str, Any]] = [
+        {
+            "id": "attn_norm",
+            "label": "RMSNorm (pre-Attn)",
+            "params": d,
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [_w("weight", [d])],
+        },
+        attn_swa(layers="L0–1"),
+        {
+            "id": "add_attn",
+            "label": "⊕",
+            "params": 0,
+            "kind": "add",
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [],
+        },
+        {
+            "id": "ffn_norm",
+            "label": "RMSNorm (pre-MoE)",
+            "params": d,
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [_w("weight", [d])],
+        },
+        *moe_parts("L0–1"),
+        mhc_part(),
+        engram_part(1),
+        {
+            "id": "add_ffn",
+            "label": "⊕",
+            "params": 0,
+            "kind": "add",
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [],
+        },
+    ]
+    blocks.append(
+        layer_group(
+            gid="layer-swa-0-1",
+            label="L0–1 · SWA (Engram@1)",
+            index=0,
+            n_in_group=2,
+            parts=parts_01,
+            detail={"section": "encoder-early", "attn": "SWA", "engram": 1},
+        )
+    )
+
+    ced_kv = "CED: decoder global KV projected from encoder final hidden H_{L/2}=H_20 (not each decoder H_l); SWA still layer-local"
+
+    def csa2_group(
+        *,
+        gid: str,
+        label: str,
+        index: int,
+        layers: str,
+        mode: str,
+        m: int,
+        pattern: str,
+        n_in_group: int,
+        engram_at: Optional[int] = None,
+        is_decoder: bool = False,
+    ) -> Dict[str, Any]:
+        parts: List[Dict[str, Any]] = [
+            {
+                "id": "attn_norm",
+                "label": "RMSNorm (pre-Attn)",
+                "params": d,
+                "shape_in": btd,
+                "shape_out": btd,
+                "weight_shapes": [_w("weight", [d])],
+            },
+            attn_csa2(
+                mode=mode,
+                m=m,
+                layers=layers,
+                pattern=pattern,
+                ced_note=ced_kv if is_decoder else "",
+            ),
+            {
+                "id": "add_attn",
+                "label": "⊕",
+                "params": 0,
+                "kind": "add",
+                "shape_in": btd,
+                "shape_out": btd,
+                "weight_shapes": [],
+            },
+            {
+                "id": "ffn_norm",
+                "label": "RMSNorm (pre-MoE)",
+                "params": d,
+                "shape_in": btd,
+                "shape_out": btd,
+                "weight_shapes": [_w("weight", [d])],
+            },
+            *moe_parts(layers),
+            mhc_part(),
+        ]
+        if engram_at is not None:
+            parts.append(engram_part(engram_at))
+        parts.append(
+            {
+                "id": "add_ffn",
+                "label": "⊕",
+                "params": 0,
+                "kind": "add",
+                "shape_in": btd,
+                "shape_out": btd,
+                "weight_shapes": [],
+            }
+        )
+        detail: Dict[str, Any] = {
+            "section": "decoder" if is_decoder else "encoder",
+            "csa2_m": m,
+            "mode": mode,
+            "pattern": pattern,
+            "layers": layers,
+        }
+        if is_decoder:
+            detail["CED"] = ced_kv
+        if engram_at is not None:
+            detail["engram"] = engram_at
+        return layer_group(
+            gid=gid,
+            label=label,
+            index=index,
+            n_in_group=n_in_group,
+            parts=parts,
+            detail=detail,
+        )
+
+    # Encoder L2–19: CSA2 m=2, three groups of 6: Full + Reuse×5
+    blocks.append(
+        csa2_group(
+            gid="layer-enc-2-7",
+            label="L2–7 · Enc CSA2(m=2) Full+Reuse×5",
+            index=2,
+            layers="L2–7",
+            mode="Full",
+            m=2,
+            pattern="Full + Reuse×5",
+            n_in_group=6,
+        )
+    )
+    blocks.append(
+        csa2_group(
+            gid="layer-enc-8-13",
+            label="L8–13 · Enc CSA2(m=2) Full+Reuse×5",
+            index=8,
+            layers="L8–13",
+            mode="Full",
+            m=2,
+            pattern="Full + Reuse×5",
+            n_in_group=6,
+        )
+    )
+    blocks.append(
+        csa2_group(
+            gid="layer-enc-14-19",
+            label="L14–19 · Enc CSA2(m=2) Full+Reuse×5 (Engram@14)",
+            index=14,
+            layers="L14–19",
+            mode="Full",
+            m=2,
+            pattern="Full + Reuse×5",
+            n_in_group=6,
+            engram_at=14,
+        )
+    )
+
+    # Decoder L20–39: CSA2 m=1, five groups of 4
+    blocks.append(
+        csa2_group(
+            gid="layer-dec-20-23",
+            label="L20–23 · Dec CSA2(m=1) Full+Reuse×3",
+            index=20,
+            layers="L20–23",
+            mode="Full",
+            m=1,
+            pattern="Full + Reuse×3",
+            n_in_group=4,
+            is_decoder=True,
+        )
+    )
+    for start, gid_suffix in ((24, "24-27"), (28, "28-31"), (32, "32-35"), (36, "36-39")):
+        end = start + 3
+        blocks.append(
+            csa2_group(
+                gid=f"layer-dec-{gid_suffix}",
+                label=f"L{start}–{end} · Dec CSA2(m=1) Reindex+Reuse×3",
+                index=start,
+                layers=f"L{start}–{end}",
+                mode="Reindex",
+                m=1,
+                pattern="Reindex + Reuse×3",
+                n_in_group=4,
+                is_decoder=True,
+            )
+        )
+
+    tail: List[Dict[str, Any]] = [
+        {
+            "id": "norm",
+            "kind": "norm",
+            "label": "Final RMSNorm",
+            "params": d,
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [_w("weight", [d])],
+        },
+        {
+            "id": "lm_head",
+            "kind": "lm_head",
+            "label": "LM Head",
+            "params": 0,
+            "tied": False,
+            "shape_in": btd,
+            "shape_out": "[b,t,vocab]",
+            "weight_shapes": [_w("lm_head.weight", f"[vocab,{d}]")],
+        },
+        {
+            "id": "dspark",
+            "kind": "dspark",
+            "label": "DSpark (post-hoc)",
+            "params": 0,
+            "shape_in": btd,
+            "shape_out": btd,
+            "weight_shapes": [],
+            "detail": {
+                "blocks": 3,
+                "attn": "SWA 128",
+                "draft": "semi-AR draft + confidence-scheduled verify",
+                "note": "Post-hoc speculative decoding; not in backbone pretrain",
+            },
+        },
+    ]
+
+    config: Dict[str, Any] = {
+        "arch": "deepseek-v4.1-flash",
+        "release_name": "DeepSeek-V4.1-Flash",
+        "d_model": d,
+        "n_layers": n_layers,
+        "n_heads": n_heads,
+        "head_dim": head_dim,
+        "use_moe": True,
+        "n_shared_experts": n_shared,
+        "n_routed_experts": n_routed,
+        "num_experts_per_tok": topk,
+        "moe_intermediate_size": moe_inter,
+        "ced": "20 causal encoder + 20 decoder",
+        "csa2": "encoder m=2 (Full+Reuse×5 ×3); decoder m=1 (Full+Reuse×3, then Reindex+Reuse×3 ×4)",
+        "swa_early": "L0–1 SWA n_win=128",
+        "engram_layers": [1, 14],
+        "mhc": "Single-Pass mHC expansion=4",
+        "context_max": 1_000_000,
+        "act_prefill_params": 8_000_000_000,
+        "act_decode_params": 16_000_000_000,
+        "backbone_params": backbone,
+        "engram_params": engram_total,
+        "note": "Reference diagram only (arXiv:2609.19969); not a MiniSeek trainable preset",
+    }
+
+    meta: Dict[str, Any] = {
+        "step": None,
+        "loss": None,
+        "source": "reference",
+        "release_name": "DeepSeek-V4.1-Flash",
+        "paper": "arXiv:2609.19969",
+        "backbone_params": backbone,
+        "act_prefill": 8_000_000_000,
+        "act_decode": 16_000_000_000,
+        "engram_params": engram_total,
+    }
+
+    return {
+        "path": "reference:deepseek-v4.1-flash",
+        "config": config,
+        "meta": meta,
+        "total_params": backbone,
+        "tie_word_embeddings": False,
+        "blocks": blocks,
+        "tail": tail,
+    }
 
 
 def load_ckpt_blob(path: str | Path) -> Dict[str, Any]:
