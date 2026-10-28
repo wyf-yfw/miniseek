@@ -697,6 +697,254 @@
       margin-top: 3px;
       font-weight: 500;
     }
+
+    /* DeepSeek-V4.1-Flash Fig.3 schematic (CED + KV flows) */
+    .fig3-wrap {
+      width: 100%;
+      max-width: 980px;
+      margin: 0 auto;
+      font-size: 12px;
+      color: var(--ink);
+    }
+    .fig3-title {
+      font-weight: 700;
+      font-size: 14px;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    .fig3-grid {
+      display: grid;
+      grid-template-columns: 92px 1fr 1fr 120px;
+      gap: 10px;
+      align-items: stretch;
+      position: relative;
+    }
+    @media (max-width: 860px) {
+      .fig3-grid { grid-template-columns: 1fr; }
+      .fig3-side-col { order: 4; }
+    }
+    .fig3-engram-col, .fig3-side-col {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      justify-content: center;
+    }
+    .fig3-region {
+      border: 2px solid #64748b;
+      border-radius: 12px;
+      background: #f8fafc;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 420px;
+    }
+    .fig3-region.encoder { border-color: #475569; background: #f1f5f9; }
+    .fig3-region.decoder { border-color: #334155; background: #eef2ff; }
+    .fig3-region-title {
+      font-weight: 800;
+      font-size: 13px;
+      text-align: center;
+      letter-spacing: 0.02em;
+      padding: 4px 6px;
+      border-radius: 8px;
+      background: rgba(15,23,42,0.06);
+    }
+    .fig3-stack {
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      flex: 1;
+    }
+    .fig3-group {
+      border: 1.5px dashed #94a3b8;
+      border-radius: 10px;
+      padding: 6px;
+      background: rgba(255,255,255,0.65);
+      position: relative;
+    }
+    .fig3-group-badge {
+      position: absolute;
+      top: -9px;
+      right: 8px;
+      background: #0f172a;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .fig3-nested {
+      border: 1.5px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 6px;
+      margin-top: 4px;
+      background: #fff;
+      position: relative;
+    }
+    .fig3-row {
+      display: flex;
+      gap: 6px;
+      margin: 4px 0;
+      align-items: stretch;
+    }
+    .fig3-chip {
+      flex: 1;
+      text-align: center;
+      border: 1px solid #94a3b8;
+      border-radius: 8px;
+      padding: 7px 6px;
+      font-weight: 700;
+      font-size: 11px;
+      background: #fff;
+      cursor: default;
+    }
+    .fig3-chip[data-clickable="1"] { cursor: pointer; }
+    .fig3-chip[data-clickable="1"]:hover { box-shadow: 0 0 0 2px rgba(37,99,235,0.18); }
+    .fig3-chip.swa { background: #fda4af; border-color: #fb7185; }
+    .fig3-chip.csa2-full { background: #86efac; border-color: #4ade80; }
+    .fig3-chip.csa2-reuse { background: #fde047; border-color: #facc15; }
+    .fig3-chip.csa2-reindex { background: #93c5fd; border-color: #60a5fa; }
+    .fig3-chip.moe { background: #fff; border-color: #94a3b8; font-weight: 600; }
+    .fig3-node {
+      border: 1.5px solid #64748b;
+      border-radius: 10px;
+      padding: 8px 10px;
+      text-align: center;
+      font-weight: 700;
+      background: #fff;
+    }
+    .fig3-node.enc-hidden {
+      background: #e2e8f0;
+      border-color: #0f172a;
+      border-width: 2px;
+    }
+    .fig3-node.dspark {
+      background: #fdf2f8;
+      border-color: #db2777;
+      border-style: dashed;
+    }
+    .fig3-node.candidate {
+      background: #eff6ff;
+      border-color: #2563eb;
+      writing-mode: horizontal-tb;
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .fig3-node.engram {
+      background: #f0fdfa;
+      border-color: #0d9488;
+      min-height: 88px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .fig3-inputs {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1.2fr 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+    .fig3-input-col {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: stretch;
+    }
+    .fig3-input-chip {
+      border: 1px solid #94a3b8;
+      border-radius: 8px;
+      padding: 7px 8px;
+      text-align: center;
+      background: #fff;
+      font-weight: 600;
+    }
+    .fig3-input-chip.vision { background: #f5f3ff; border-color: #7c3aed; }
+    .fig3-input-chip.mhc { background: #ecfeff; border-color: #0891b2; }
+    .fig3-flows {
+      position: relative;
+      margin-top: 8px;
+      min-height: 110px;
+    }
+    .fig3-flows svg {
+      width: 100%;
+      height: 110px;
+      display: block;
+    }
+    .fig3-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin: 10px 0 6px;
+    }
+    .fig3-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .fig3-swatch {
+      width: 14px; height: 14px; border-radius: 4px; border: 1px solid #64748b;
+    }
+    .fig3-kv-list {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 8px 10px;
+      margin-top: 8px;
+    }
+    .fig3-kv-list .kv-item {
+      font-size: 11px;
+      line-height: 1.45;
+      margin: 4px 0;
+      color: #334155;
+    }
+    .fig3-kv-list .kv-item b { color: #0f172a; }
+    .fig3-caption {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+      margin-top: 8px;
+      text-align: left;
+    }
+    .fig3-bridge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin: 6px 0;
+      font-weight: 800;
+      color: #b45309;
+    }
+    .fig3-bridge .arrow {
+      flex: 1;
+      height: 0;
+      border-top: 2px dashed #b45309;
+      position: relative;
+    }
+    .fig3-ced-banner {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 8px;
+      align-items: center;
+      margin: 8px 0;
+    }
+    .fig3-ced-label {
+      background: #fff7ed;
+      border: 2px solid #ea580c;
+      color: #9a3412;
+      font-weight: 800;
+      padding: 6px 10px;
+      border-radius: 999px;
+      text-align: center;
+      font-size: 12px;
+    }
+
     .arch-block.part.add-node {
       width: 36px;
       height: 36px;
@@ -3693,6 +3941,179 @@
       group.appendChild(svg);
     }
 
+
+    function fig3ChipClass(type) {
+      if (type === "swa") return "swa";
+      if (type === "csa2-full") return "csa2-full";
+      if (type === "csa2-reuse") return "csa2-reuse";
+      if (type === "csa2-reindex") return "csa2-reindex";
+      if (type === "moe") return "moe";
+      return "";
+    }
+
+    function fig3RowHtml(rows) {
+      return `<div class="fig3-row">${(rows || []).map((r) =>
+        `<div class="fig3-chip ${fig3ChipClass(r.type)}" data-node="${r.id || ""}" data-mode="${r.mode || ""}" data-clickable="1">${r.label}</div>`
+      ).join("")}</div>`;
+    }
+
+    function fig3GroupHtml(g) {
+      const badge = g.repeat && g.repeat > 1 ? `<div class="fig3-group-badge">×${g.repeat}</div>` : "";
+      const nested = g.nested
+        ? `<div class="fig3-nested">${g.nested.repeat && g.nested.repeat > 1 ? `<div class="fig3-group-badge">×${g.nested.repeat}</div>` : ""}${fig3RowHtml(g.nested.rows)}</div>`
+        : "";
+      return `<div class="fig3-group" data-group="${g.id || ""}" title="${(g.note || "").replace(/"/g, "&quot;")}">${badge}${fig3RowHtml(g.rows)}${nested}</div>`;
+    }
+
+    function openFig3Node(data, nodeId, label, extraDetail) {
+      const flows = (data.kv_flows || data.fig3 && data.fig3.kv_flows) || [];
+      const related = flows.filter((f) => f.from === nodeId || f.to === nodeId || (Array.isArray(f.to) && f.to.includes(nodeId)));
+      const parts = [];
+      if (extraDetail) {
+        parts.push({ id: nodeId, label: label || nodeId, params: 0, detail: extraDetail });
+      }
+      related.forEach((f) => {
+        parts.push({
+          id: f.id,
+          label: `KV / flow · ${f.label}`,
+          params: 0,
+          detail: { from: f.from, to: f.to, note: f.note || "" },
+        });
+      });
+      // Prefer matching layer block for drawer richness
+      const blocks = (data.blocks || []).concat(data.tail || []);
+      const hit = blocks.find((b) => (b.id || "").includes(nodeId) || (b.label || "").includes(label || "___never___"));
+      if (hit && hit.parts && hit.parts.length) {
+        openArchDrawer(hit);
+        return;
+      }
+      openArchDrawer({
+        id: nodeId || "fig3-node",
+        label: label || nodeId || "Fig.3",
+        params: 0,
+        parts: parts.length ? parts : [{ id: "note", label: label || "Fig.3", params: 0, detail: extraDetail || { note: "DeepSeek-V4.1-Flash reference" } }],
+      });
+    }
+
+    function renderFig3Arch(data) {
+      const canvas = $("arch-canvas");
+      canvas.innerHTML = "";
+      const fig = data.fig3 || {};
+      const enc = fig.encoder || (data.sections && data.sections.encoder) || {};
+      const dec = fig.decoder || (data.sections && data.sections.decoder) || {};
+      const flows = fig.kv_flows || data.kv_flows || [];
+      const modes = fig.csa2_modes || [];
+      const wrap = document.createElement("div");
+      wrap.className = "fig3-wrap";
+      wrap.addEventListener("click", (ev) => ev.stopPropagation());
+
+      const legend = modes.map((m) =>
+        `<span><i class="fig3-swatch" style="background:${m.color}"></i>${m.mode}: ${m.kv}</span>`
+      ).join("");
+
+      const encGroups = (enc.groups || []).map(fig3GroupHtml).join("");
+      const decGroups = (dec.groups || []).map(fig3GroupHtml).join("");
+
+      wrap.innerHTML = `
+        <div class="fig3-title">${fig.title || "DeepSeek-V4.1-Flash · Fig.3"}</div>
+        <div class="fig3-legend">${legend}</div>
+        <div class="fig3-grid">
+          <div class="fig3-engram-col">
+            <div class="fig3-node engram" data-node="engram" data-clickable="1">Engram<br><span style="font-weight:600;font-size:10px;color:#0f766e">@L1 &amp; @L14</span></div>
+          </div>
+          <div class="fig3-region encoder" data-section="encoder">
+            <div class="fig3-region-title">${enc.label || "Causal Encoder (20L)"}</div>
+            <div class="fig3-stack">
+              ${encGroups}
+              <div class="fig3-node enc-hidden" data-node="enc_hidden" data-clickable="1">${(enc.output && enc.output.label) || "Enc. Hidden States"}</div>
+            </div>
+          </div>
+          <div class="fig3-region decoder" data-section="decoder">
+            <div class="fig3-region-title">${dec.label || "Decoder (20L)"}</div>
+            <div class="fig3-stack">
+              ${decGroups}
+              <div class="fig3-node dspark" data-node="dspark" data-clickable="1">${(dec.output && dec.output.label) || "DSpark"}</div>
+            </div>
+          </div>
+          <div class="fig3-side-col">
+            <div class="fig3-node candidate" data-node="candidate_pool" data-clickable="1">Candidate Pool</div>
+          </div>
+        </div>
+        <div class="fig3-ced-banner">
+          <div class="arrow" style="border-top:2px dashed #ea580c;height:0"></div>
+          <div class="fig3-ced-label" title="Decoder global KV from Enc.Hidden">CED · KV: Enc.Hidden → Decoder CSA2(Full) → shared Reuse/Reindex</div>
+          <div class="arrow" style="border-top:2px dashed #ea580c;height:0"></div>
+        </div>
+        <div class="fig3-flows">
+          <svg viewBox="0 0 980 110" preserveAspectRatio="xMidYMid meet" aria-label="KV flows">
+            <defs>
+              <marker id="fig3-arrow-ced" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ea580c"/></marker>
+              <marker id="fig3-arrow-idx" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2563eb"/></marker>
+              <marker id="fig3-arrow-eng" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#0d9488"/></marker>
+            </defs>
+            <!-- Engram → Encoder -->
+            <path d="M 70 55 H 160" stroke="#0d9488" stroke-width="2.5" fill="none" marker-end="url(#fig3-arrow-eng)"/>
+            <text x="95" y="48" fill="#0d9488" font-size="11" font-weight="700">Engram</text>
+            <!-- CED Enc.Hidden → Decoder Full -->
+            <path d="M 320 30 H 520" stroke="#ea580c" stroke-width="3" fill="none" marker-end="url(#fig3-arrow-ced)"/>
+            <text x="390" y="22" fill="#ea580c" font-size="12" font-weight="800">CED (global KV from H_{L/2})</text>
+            <!-- Decoder Full → Candidate Pool -->
+            <path d="M 700 40 H 860" stroke="#2563eb" stroke-width="2.5" fill="none" marker-end="url(#fig3-arrow-idx)"/>
+            <text x="710" y="32" fill="#2563eb" font-size="11" font-weight="700">Hierarchical Sparse Indexer</text>
+            <!-- Candidate Pool → Reindex -->
+            <path d="M 860 70 H 700" stroke="#2563eb" stroke-width="2.5" fill="none" stroke-dasharray="5 3" marker-end="url(#fig3-arrow-idx)"/>
+            <text x="720" y="88" fill="#2563eb" font-size="11" font-weight="700">Reindex Top-K</text>
+            <!-- local SWA note -->
+            <text x="200" y="100" fill="#64748b" font-size="11">Per layer: own global Q + SWA KV local · SWA Bounded Replay</text>
+          </svg>
+        </div>
+        <div class="fig3-inputs">
+          <div class="fig3-input-col">
+            <div class="fig3-input-chip vision">Vision Encoder</div>
+            <div class="fig3-input-chip vision">Vision Embedding</div>
+          </div>
+          <div class="fig3-input-col">
+            <div class="fig3-input-chip mhc">Single-Pass mHC</div>
+            <div class="fig3-input-chip">Embedding</div>
+          </div>
+          <div class="fig3-input-col">
+            <div class="fig3-input-chip">Text Embedding</div>
+          </div>
+        </div>
+        <div class="fig3-kv-list">
+          ${(flows || []).filter((f) => f.style !== "engram" || f.id === "engram_feed").map((f) =>
+            `<div class="kv-item"><b>${f.label}</b> · ${f.from} → ${f.to}<br>${f.note || ""}</div>`
+          ).join("")}
+        </div>
+        <div class="fig3-caption">${fig.act_note || ""}<br>${fig.caption || ""}</div>
+      `;
+
+      canvas.appendChild(wrap);
+
+      // Click handlers for chips / nodes
+      wrap.querySelectorAll("[data-clickable='1'], .fig3-chip[data-clickable='1'], .fig3-node[data-clickable='1']").forEach((el) => {
+        el.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const nodeId = el.getAttribute("data-node") || "";
+          const mode = el.getAttribute("data-mode") || "";
+          const modeInfo = modes.find((m) => m.mode === mode);
+          openFig3Node(data, nodeId, el.textContent.trim().split("\n")[0], modeInfo
+            ? { mode: modeInfo.mode, kv: modeInfo.kv, color: modeInfo.color }
+            : { node: nodeId });
+        });
+      });
+
+      // Region click → open first matching layer group
+      wrap.querySelectorAll(".fig3-region").forEach((reg) => {
+        reg.addEventListener("dblclick", (ev) => {
+          ev.stopPropagation();
+          const sec = reg.getAttribute("data-section");
+          const hit = (data.blocks || []).find((b) => (b.detail || {}).section === sec || (b.detail || {}).section === (sec === "encoder" ? "encoder-early" : sec));
+          if (hit) openArchDrawer(hit);
+        });
+      });
+    }
+
     function renderArch(data) {
       if (data) archData = data;
       if (!archData) return;
@@ -3716,6 +4137,15 @@
         `<div><b>${meta.release_name || cfg.arch || "-"}</b> · d=${cfg.d_model || "-"} · L=${cfg.n_layers || "-"} · heads=${cfg.n_heads || "-"}</div>` +
         paramLine +
         `<div class="field-hint">${srcHint} · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
+
+      // Dedicated Fig.3 schematic for DeepSeek-V4.1-Flash (CED regions + KV arrows).
+      if (meta.diagram === "fig3" || data.fig3) {
+        renderFig3Arch(data);
+        $("arch-status-text").textContent = "已加载 Fig.3 参考图";
+        $("arch-dot").className = "dot finished";
+        closeArchDrawer();
+        return;
+      }
 
       const blocks = data.blocks || [];
       const tail = data.tail || [];

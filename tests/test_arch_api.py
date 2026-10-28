@@ -48,3 +48,15 @@ def test_arch_inspect_tiny(tmp_path: Path):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["config"]["n_layers"] == 2
+
+
+def test_arch_design_v41_flash():
+    client = TestClient(app)
+    r = client.get("/api/arch/design", params={"arch": "v41-flash"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["meta"]["source"] == "reference"
+    assert body["meta"]["diagram"] == "fig3"
+    assert body["fig3"]["encoder"]["n_layers"] == 20
+    assert body["fig3"]["decoder"]["n_layers"] == 20
+    assert any(f["id"] == "ced" for f in body["kv_flows"])

@@ -795,6 +795,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
         "step": None,
         "loss": None,
         "source": "reference",
+        "diagram": "fig3",
         "release_name": "DeepSeek-V4.1-Flash",
         "paper": "arXiv:2609.19969",
         "backbone_params": backbone,
@@ -803,10 +804,194 @@ def inspect_v41_flash() -> Dict[str, Any]:
         "engram_params": engram_total,
     }
 
+    # Dedicated Fig.3 schematic payload (frontend renders this instead of flat cards).
+    fig3: Dict[str, Any] = {
+        "title": "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash",
+        "caption": (
+            "40-layer Multimodal MoE Transformer = Causal Encoder 20L + Decoder 20L (CED). "
+            "All FFN = DeepSeekMoE. L0–1 SWA; remaining layers CSA2. "
+            "CSA2(ratio, mode): compression ratio + Full / Reuse / Reindex. "
+            "Includes Single-Pass mHC, Engram, DSpark, Hierarchical Sparse Indexer."
+        ),
+        "act_note": "Activated params ≈ 8B prefill / 16B decode because CED (decoder mostly skipped in prefill).",
+        "inputs": [
+            {"id": "vision_enc", "label": "Vision Encoder"},
+            {"id": "vision_emb", "label": "Vision Embedding"},
+            {"id": "text_emb", "label": "Text Embedding"},
+            {"id": "mhc", "label": "Single-Pass mHC"},
+            {"id": "embedding", "label": "Embedding"},
+            {"id": "engram", "label": "Engram @L1 & @L14"},
+        ],
+        "encoder": {
+            "id": "causal_encoder",
+            "label": "Causal Encoder (20L)",
+            "n_layers": 20,
+            "groups": [
+                {
+                    "id": "enc_swa",
+                    "repeat": 2,
+                    "kind": "swa",
+                    "rows": [
+                        {"id": "enc_swa_attn", "type": "swa", "label": "SWA", "mode": "SWA"},
+                        {"id": "enc_swa_moe", "type": "moe", "label": "MoE"},
+                    ],
+                    "note": "L0–1 · n_win=128 · Engram@1",
+                },
+                {
+                    "id": "enc_csa2",
+                    "repeat": 3,
+                    "kind": "csa2-group",
+                    "rows": [
+                        {"id": "enc_full", "type": "csa2-full", "label": "CSA2(2, Full)", "mode": "Full", "m": 2},
+                        {"id": "enc_full_moe", "type": "moe", "label": "MoE"},
+                    ],
+                    "nested": {
+                        "repeat": 5,
+                        "rows": [
+                            {"id": "enc_reuse", "type": "csa2-reuse", "label": "CSA2(2, Reuse)", "mode": "Reuse", "m": 2},
+                            {"id": "enc_reuse_moe", "type": "moe", "label": "MoE"},
+                        ],
+                    },
+                    "note": "L2–19 · three groups of Full + Reuse×5 · Engram@14",
+                },
+            ],
+            "output": {"id": "enc_hidden", "label": "Enc. Hidden States"},
+        },
+        "decoder": {
+            "id": "decoder",
+            "label": "Decoder (20L)",
+            "n_layers": 20,
+            "groups": [
+                {
+                    "id": "dec_full_g",
+                    "repeat": 1,
+                    "kind": "csa2-full",
+                    "rows": [
+                        {"id": "dec_full", "type": "csa2-full", "label": "CSA2(1, Full)", "mode": "Full", "m": 1},
+                        {"id": "dec_full_moe", "type": "moe", "label": "MoE"},
+                    ],
+                    "note": "L20 · builds main KV + indexer K + Top-K + candidate pool",
+                },
+                {
+                    "id": "dec_reuse_early",
+                    "repeat": 3,
+                    "kind": "csa2-reuse",
+                    "rows": [
+                        {"id": "dec_reuse_e", "type": "csa2-reuse", "label": "CSA2(1, Reuse)", "mode": "Reuse", "m": 1},
+                        {"id": "dec_reuse_e_moe", "type": "moe", "label": "MoE"},
+                    ],
+                    "note": "L21–23 · reuse KV + indices",
+                },
+                {
+                    "id": "dec_reindex_g",
+                    "repeat": 4,
+                    "kind": "csa2-reindex-group",
+                    "rows": [
+                        {"id": "dec_reindex", "type": "csa2-reindex", "label": "CSA2(1, Reindex)", "mode": "Reindex", "m": 1},
+                        {"id": "dec_reindex_moe", "type": "moe", "label": "MoE"},
+                    ],
+                    "nested": {
+                        "repeat": 3,
+                        "rows": [
+                            {"id": "dec_reuse_r", "type": "csa2-reuse", "label": "CSA2(1, Reuse)", "mode": "Reuse", "m": 1},
+                            {"id": "dec_reuse_r_moe", "type": "moe", "label": "MoE"},
+                        ],
+                    },
+                    "note": "L24–39 · four groups of Reindex + Reuse×3",
+                },
+            ],
+            "output": {"id": "dspark", "label": "DSpark"},
+        },
+        "side": [
+            {"id": "candidate_pool", "label": "Candidate Pool"},
+        ],
+        "kv_flows": [
+            {
+                "id": "ced",
+                "label": "CED",
+                "from": "enc_hidden",
+                "to": "dec_full",
+                "style": "ced",
+                "note": (
+                    "Prefill: mostly Causal Encoder; Decoder global KV projected from "
+                    "H_{L/2}=Enc.Hidden via W^{KV}/W^Z (shared to Reuse/Reindex). "
+                    "Each layer still keeps own global Q + SWA KV local."
+                ),
+            },
+            {
+                "id": "indexer",
+                "label": "Hierarchical Sparse Indexer",
+                "from": "dec_full",
+                "to": "candidate_pool",
+                "style": "indexer",
+                "note": "Full builds candidate pool (≤2048 blocks × 8 = 16384 tokens).",
+            },
+            {
+                "id": "reindex",
+                "label": "Reindex Top-K",
+                "from": "candidate_pool",
+                "to": "dec_reindex",
+                "style": "reindex",
+                "note": "Reindex reuses KV/indexer K, computes new Top-K from pool (Top-512).",
+            },
+            {
+                "id": "engram_feed",
+                "label": "Engram",
+                "from": "engram",
+                "to": "enc_swa_attn",
+                "style": "engram",
+                "note": "Engram side-injection at early encoder (L1) and mid encoder (L14).",
+            },
+            {
+                "id": "engram_feed_2",
+                "label": "Engram",
+                "from": "engram",
+                "to": "enc_full",
+                "style": "engram",
+                "note": "Engram @L14 into CSA2 Full groups.",
+            },
+        ],
+        "csa2_modes": [
+            {
+                "mode": "Full",
+                "color": "#86efac",
+                "kv": "produce main KV + indexer K + Top-K",
+            },
+            {
+                "mode": "Reuse",
+                "color": "#fde047",
+                "kv": "reuse main KV + indices (no new Top-K)",
+            },
+            {
+                "mode": "Reindex",
+                "color": "#93c5fd",
+                "kv": "reuse KV/indexer K; new Top-K from Candidate Pool",
+            },
+            {
+                "mode": "SWA",
+                "color": "#fda4af",
+                "kv": "local sliding-window KV only (n_win=128); Bounded Replay",
+            },
+        ],
+        "notes": [
+            "CED: Causal Encoder–Decoder split; decoder global KV from encoder final hidden, not each decoder H_l.",
+            "Per CSA2 layer: own global Q + SWA KV local (FP8); main KV FP4 post-train QAT.",
+            "SWA Bounded Replay keeps local window consistent under compression.",
+            "Activated: ~8B (prefill, encoder-heavy) / ~16B (decode).",
+            "Reference only — not a MiniSeek trainable preset.",
+        ],
+    }
+
     return {
         "path": "reference:deepseek-v4.1-flash",
         "config": config,
         "meta": meta,
+        "fig3": fig3,
+        "kv_flows": fig3["kv_flows"],
+        "sections": {
+            "encoder": fig3["encoder"],
+            "decoder": fig3["decoder"],
+        },
         "total_params": backbone,
         "tie_word_embeddings": False,
         "blocks": blocks,
