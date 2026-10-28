@@ -515,7 +515,10 @@
     .cont-out .gen { color: var(--ink); }
     .cont-out.streaming .gen::after { content: "▍"; animation: blink 1s infinite; }
     #btn-cont-run { background: var(--accent); color: white; border-color: var(--accent); }
-    #btn-cont-stop { background: var(--stop); color: white; border-color: var(--stop); display: none; }
+    #btn-cont-stop { background: var(--stop); color: white; border-color: var(--stop); }
+    #btn-cont-run:disabled, #btn-cont-stop:disabled {
+      opacity: 0.45; cursor: not-allowed; filter: grayscale(0.2);
+    }
 
     .chat-shell { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: 100%; }
     .chat-side { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow: auto; }
@@ -1158,7 +1161,7 @@
             </label>
             <div class="row" style="margin-top:8px">
               <button type="button" id="btn-cont-run">生成续写</button>
-              <button type="button" id="btn-cont-stop">停止</button>
+              <button type="button" id="btn-cont-stop" disabled>停止</button>
               <button type="button" id="btn-cont-clear">清空输出</button>
             </div>
           </div>
@@ -3326,8 +3329,8 @@
       contState.gen = "";
       contState.streaming = true;
       renderContOut();
-      $("btn-cont-run").style.display = "none";
-      $("btn-cont-stop").style.display = "";
+      $("btn-cont-run").disabled = true;
+      $("btn-cont-stop").disabled = false;
       const controller = new AbortController();
       contState.abort = controller;
       setContStatus("生成中…", true);
@@ -3383,15 +3386,19 @@
       } finally {
         contState.streaming = false;
         contState.abort = null;
-        $("btn-cont-run").style.display = "";
-        $("btn-cont-stop").style.display = "none";
+        $("btn-cont-run").disabled = false;
+        $("btn-cont-stop").disabled = true;
         $("cont-out").classList.remove("streaming");
       }
     }
     $("btn-cont-load").addEventListener("click", loadContCheckpoint);
     $("btn-cont-refresh-ckpt").addEventListener("click", refreshContCheckpoints);
     $("btn-cont-run").addEventListener("click", runContinue);
-    $("btn-cont-stop").addEventListener("click", () => { if (contState.abort) contState.abort.abort(); });
+    $("btn-cont-stop").addEventListener("click", () => {
+      if (!contState.streaming || !contState.abort) return;
+      $("btn-cont-stop").disabled = true;
+      contState.abort.abort();
+    });
     $("btn-cont-clear").addEventListener("click", () => {
       contState.prefix = "";
       contState.gen = "";
