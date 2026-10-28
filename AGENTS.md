@@ -89,3 +89,16 @@ systemctl --user status miniseek-worker miniseek-api miniseek-web --no-pager
 ss -ltnp | grep -E ':7860|:8000|:8001'
 pgrep -af 'train_pretrain|train_sft' | head
 ```
+
+## 维护约定（固定动作）
+
+本文件是**唯一**跟着 Git 走的项目级 AI 记忆，不另装记忆插件。
+
+以下情况发生后，**同一次改动里**更新本文件并随代码 commit/push：
+
+1. 和用户达成的设计 / 训练 / 数据 / 部署约定  
+2. 当前项目阶段推进（例如新跑通某训练、数据上 HF、目录重组）  
+3. 硬规则变化（安全、勿杀训、默认参数等）
+
+写短、可执行、与现状一致；过时条目直接删或改，不要堆历史流水账（流水账用 git log）。
+
