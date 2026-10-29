@@ -26,7 +26,7 @@ def classify_v41_param(name: str, p: torch.Tensor) -> str:
         return "sinkhorn"
     if name.endswith("norm.weight"):
         return "adamw_wd"
-    if name.endswith(NOWD_SUFFIXES) or p.dim() != 2:
+    if name.endswith(NOWD_SUFFIXES) or p.dim() != 2 or min(p.shape) == 1:
         return "adamw_nowd"
     return "muon"
 

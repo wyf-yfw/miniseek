@@ -197,7 +197,8 @@ class Attention(nn.Module):
         self.n_groups = cfg.o_groups
         self.o_lora_rank = cfg.o_lora_rank
         self.window_size = cfg.window_size
-        self.compress_ratio = cfg.compress_ratios[layer_id]
+        # 主干之后的层（DSpark 草稿头）只有滑窗，与官方 compress_ratios 末尾补 0 一致
+        self.compress_ratio = cfg.compress_ratios[layer_id] if layer_id < cfg.n_layers else 0
         self.softmax_scale = self.head_dim**-0.5
 
         self.attn_sink = nn.Parameter(torch.zeros(self.n_heads))
