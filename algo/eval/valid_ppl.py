@@ -22,8 +22,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from algo.model import load_model_from_blob
-from algo.model.config import ModelConfig
-from algo.model.dense import DenseLM
+from algo.model import load_model_from_blob
 from algo.model.tokenizer import load_tokenizer
 from algo.train_pretrain import JsonlTextDataset, collate_pad, split_samples_by_ratio
 

@@ -8,12 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from algo.model.config import ModelConfig
 from algo.model.miniseek_m.config import FlashConfig
 
 _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
 
-PRESET_ARCHS = ("tiny", "dense", "miniseek-m", "m-ref")
+PRESET_ARCHS = ("miniseek-m", "m-ref")
 
 # Reference-only aliases（DeepSeek-M 论文示意；不可训练）。
 _M_REF_ALIASES = frozenset({
@@ -28,14 +27,10 @@ _M_REF_ALIASES = frozenset({
 
 def preset_config(arch: str):
     a = (arch or "").strip().lower()
-    if a == "tiny":
-        return ModelConfig.tiny()
-    if a == "dense":
-        return ModelConfig()  # D0.1 defaults
     if a in ("miniseek-m", "m", "v41"):
         return FlashConfig()  # MiniSeek-M0.1
     raise ValueError(
-        f"未知架构: {arch}（可选: tiny / dense / m / m-ref）"
+        f"未知架构: {arch}（可选: miniseek-m / m-ref）"
     )
 
 
@@ -54,7 +49,7 @@ def _expert_ffn_params(d: int, moe_intermediate: int) -> int:
 
 
 def _shape(
-    cfg: ModelConfig,
+    cfg: object,
     *,
     vocab: bool = False,
     tokens: bool = False,
@@ -80,7 +75,7 @@ def _w(name: str, dims: List[int] | str, *, note: str = "") -> Dict[str, str]:
     return {"name": name, "shape": shape}
 
 
-def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str, Any]:
+def inspect_from_config(cfg: object, *, source: str = "design") -> Dict[str, Any]:
     """Build viz JSON from ModelConfig (no checkpoint). Param counts are design formulas."""
     c = cfg.to_dict()
     d = int(cfg.d_model)
@@ -317,9 +312,7 @@ def inspect_design(arch: str) -> Dict[str, Any]:
     if a in _M_REF_ALIASES:
         return inspect_v41_flash()
     cfg = preset_config(arch)
-    if isinstance(cfg, FlashConfig):
-        return inspect_v41_model(cfg, source="design")
-    return inspect_from_config(cfg, source="design")
+    return inspect_v41_model(cfg, source="design")
 
 
 # ---------------------------------------------------------------- MiniSeek-M（m，可训练）----
@@ -1265,7 +1258,7 @@ def load_ckpt_blob(path: str | Path) -> Dict[str, Any]:
             cfg_raw: Dict[str, Any] = {}
             if cfg_path and cfg_path.exists():
                 cfg_raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-            allowed = set(ModelConfig.__dataclass_fields__)  # type: ignore[attr-defined]
+            allowed = set(FlashConfig.__dataclass_fields__)  # type: ignore[attr-defined]
             cfg_dict = {k: v for k, v in cfg_raw.items() if k in allowed}
             blob = {
                 "model": sd,
@@ -1301,7 +1294,8 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
     cfg_raw = blob.get("config") or {}
     if not isinstance(cfg_raw, dict):
         cfg_raw = {}
-    if cfg_raw.get("arch") in ("miniseek-m", "m", "v41"):
+    arch = cfg_raw.get("arch")
+    if arch in ("miniseek-m", "m", "v41"):
         return inspect_v41_model(
             FlashConfig.from_dict(cfg_raw),
             source=str(blob.get("source") or "training"),
@@ -1309,180 +1303,10 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
             step=blob.get("step"),
             loss=blob.get("loss"),
         )
-    try:
-        cfg = ModelConfig.from_dict(cfg_raw)
-        cfg_out = cfg.to_dict()
-    except Exception:
-        cfg_out = dict(cfg_raw)
-
-    tie = bool(cfg_out.get("tie_word_embeddings", True))
-    if "tok_emb.weight" in sd and "lm_head.weight" in sd:
-        try:
-            if sd["tok_emb.weight"].data_ptr() == sd["lm_head.weight"].data_ptr():
-                tie = True
-        except Exception:
-            pass
-
-    n_layers = int(cfg_out.get("n_layers") or 0)
-    if not n_layers:
-        idxs = []
-        for k in sd:
-            m = _LAYER_RE.match(k)
-            if m:
-                idxs.append(int(m.group(1)))
-        n_layers = (max(idxs) + 1) if idxs else 0
-
-    blocks: List[Dict[str, Any]] = []
-    embed_params = _sum_prefix(sd, "tok_emb.")
-    blocks.append(
-        {
-            "id": "embed",
-            "kind": "embedding",
-            "label": "Token Embedding",
-            "params": embed_params,
-        }
+    raise ValueError(
+        f"main 只支持 MiniSeek-M checkpoint（arch=miniseek-m），收到 arch={arch!r}；"
+        "Dense / Tiny 见分支 archive/dense-tiny"
     )
-
-    is_moe = bool(
-        (cfg_out.get("arch") == "moe")
-        or cfg_out.get("use_moe")
-        or any(".moe.experts." in k or ".moe.shared." in k for k in sd)
-    )
-
-    for i in range(n_layers):
-        pref = f"layers.{i}."
-        layer_keys = {k: v for k, v in sd.items() if k.startswith(pref)}
-        attn_params = sum(
-            _numel(v)
-            for k, v in layer_keys.items()
-            if k.startswith(pref + "attn")
-        )
-        parts: List[Dict[str, Any]] = [
-            {
-                "id": "attn",
-                "label": "Attention",
-                "params": attn_params,
-                "detail": {
-                    "n_heads": cfg_out.get("n_heads"),
-                    "head_dim": cfg_out.get("head_dim"),
-                },
-            }
-        ]
-        if is_moe:
-            gate_params = _sum_prefix(sd, pref + "moe.router.")
-            shared_params = _sum_prefix(sd, pref + "moe.shared.")
-            routed_params = _sum_prefix(sd, pref + "moe.experts.")
-            ffn_norm = _sum_prefix(sd, pref + "ffn_norm.")
-            parts.append(
-                {
-                    "id": "router",
-                    "label": "Router / Gate",
-                    "params": gate_params + ffn_norm,
-                    "detail": {
-                        "num_experts_per_tok": cfg_out.get("num_experts_per_tok"),
-                    },
-                }
-            )
-            parts.append(
-                {
-                    "id": "shared_experts",
-                    "label": "Shared Experts",
-                    "params": shared_params,
-                    "detail": {
-                        "n_shared_experts": cfg_out.get("n_shared_experts"),
-                        "moe_intermediate_size": cfg_out.get("moe_intermediate_size"),
-                    },
-                }
-            )
-            n_routed = int(cfg_out.get("n_routed_experts") or 0)
-            per = (routed_params // n_routed) if n_routed else routed_params
-            parts.append(
-                {
-                    "id": "routed_experts",
-                    "label": "Routed Experts",
-                    "params": routed_params,
-                    "detail": {
-                        "n_routed_experts": n_routed,
-                        "num_experts_per_tok": cfg_out.get("num_experts_per_tok"),
-                        "params_per_expert": per,
-                        "moe_intermediate_size": cfg_out.get("moe_intermediate_size"),
-                    },
-                }
-            )
-        else:
-            ffn_params = sum(
-                _numel(v)
-                for k, v in layer_keys.items()
-                if k.startswith(pref + "ffn")
-            )
-            parts.append(
-                {
-                    "id": "ffn",
-                    "label": "FFN",
-                    "params": ffn_params,
-                    "detail": {
-                        "intermediate_size": cfg_out.get("intermediate_size"),
-                    },
-                }
-            )
-        layer_params = sum(_numel(v) for v in layer_keys.values())
-        blocks.append(
-            {
-                "id": f"layer-{i}",
-                "kind": "layer",
-                "index": i,
-                "label": f"Layer {i}",
-                "params": layer_params,
-                "parts": parts,
-            }
-        )
-
-    norm_params = _sum_prefix(sd, "norm.")
-    lm_params = _sum_prefix(sd, "lm_head.")
-    tail = [
-        {
-            "id": "norm",
-            "kind": "norm",
-            "label": "Final RMSNorm",
-            "params": norm_params,
-        },
-        {
-            "id": "lm_head",
-            "kind": "lm_head",
-            "label": "LM Head",
-            "params": lm_params,
-            "tied": tie,
-        },
-    ]
-
-    total = 0
-    seen_ptrs: set[int] = set()
-    for k, v in sd.items():
-        if tie and k.startswith("lm_head."):
-            continue
-        try:
-            ptr = v.data_ptr()
-            if ptr in seen_ptrs:
-                continue
-            seen_ptrs.add(ptr)
-        except Exception:
-            pass
-        total += _numel(v)
-
-    meta = {
-        "step": blob.get("step"),
-        "loss": blob.get("loss"),
-        "source": blob.get("source"),
-    }
-    return {
-        "path": path,
-        "config": cfg_out,
-        "meta": meta,
-        "total_params": total,
-        "tie_word_embeddings": tie,
-        "blocks": blocks,
-        "tail": tail,
-    }
 
 
 def inspect_path(path: str | Path) -> Dict[str, Any]:

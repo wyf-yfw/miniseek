@@ -5,26 +5,25 @@ from pathlib import Path
 import torch
 from fastapi.testclient import TestClient
 
-from algo.model.config import ModelConfig
-from algo.model.dense import DenseLM
+from algo.model.miniseek_m import FlashConfig, Transformer
 from api.app import app
 
 
-def test_arch_design_dense():
+def test_arch_design_miniseek_m():
     client = TestClient(app)
-    r = client.get("/api/arch/design", params={"arch": "dense"})
+    r = client.get("/api/arch/design", params={"arch": "miniseek-m"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["config"]["n_layers"] == 8
+    assert body["config"]["arch"] == "miniseek-m"
     assert body["meta"]["source"] == "design"
-    assert len([b for b in body["blocks"] if b["kind"] == "layer"]) == 8
+    assert body["meta"]["diagram"] == "fig3"
 
 
-def test_arch_design_post_tiny():
+def test_arch_design_post_miniseek_m():
     client = TestClient(app)
-    r = client.post("/api/arch/design", json={"arch": "tiny"})
+    r = client.post("/api/arch/design", json={"arch": "miniseek-m"})
     assert r.status_code == 200
-    assert r.json()["config"]["arch"] == "tiny"
+    assert r.json()["config"]["arch"] == "miniseek-m"
 
 
 def test_arch_design_bad():
@@ -38,19 +37,20 @@ def test_arch_inspect_404():
     assert r.status_code == 404
 
 
-def test_arch_inspect_tiny(tmp_path: Path):
-    cfg = ModelConfig.tiny()
-    model = DenseLM(cfg)
-    p = tmp_path / "tiny.pt"
+def test_arch_inspect_miniseek_m(tmp_path: Path):
+    cfg = FlashConfig.tiny()
+    model = Transformer(cfg)
+    p = tmp_path / "m.pt"
     torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": 3, "loss": 1.1}, p)
     client = TestClient(app)
     r = client.post("/api/arch/inspect", json={"ckpt_path": str(p)})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["config"]["n_layers"] == 2
+    assert body["config"]["arch"] == "miniseek-m"
+    assert body["meta"]["diagram"] == "fig3"
 
 
-def test_arch_design_v41_flash():
+def test_arch_design_m_ref():
     client = TestClient(app)
     r = client.get("/api/arch/design", params={"arch": "m-ref"})
     assert r.status_code == 200, r.text

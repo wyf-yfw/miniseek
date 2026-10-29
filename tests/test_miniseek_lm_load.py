@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
 
+import pytest
 import torch
 
-from algo.model.config import ModelConfig
-from algo.model.dense import DenseLM
+from algo.model.miniseek_m import FlashConfig, Transformer
 from algo.eval.miniseek_lm import MiniSeekLM, load_miniseek_blob
 
 
 def test_load_training_blob(tmp_path):
-    cfg = ModelConfig.tiny()
-    model = DenseLM(cfg)
+    cfg = FlashConfig.tiny()
+    model = Transformer(cfg)
     ckpt = tmp_path / "t.pt"
     torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": 1}, ckpt)
     m, tok, cfg2 = load_miniseek_blob(ckpt)
@@ -24,8 +22,8 @@ def test_load_training_blob(tmp_path):
 
 def test_loglikelihood_and_generate(tmp_path):
     pytest.importorskip("lm_eval")
-    cfg = ModelConfig.tiny()
-    model = DenseLM(cfg)
+    cfg = FlashConfig.tiny()
+    model = Transformer(cfg)
     ckpt = tmp_path / "t.pt"
     torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": 1}, ckpt)
     lm = MiniSeekLM(ckpt=str(ckpt), device="cpu")

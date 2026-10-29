@@ -10,8 +10,6 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from algo.model import load_model_from_blob
-from algo.model.config import ModelConfig
-from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
 
 try:

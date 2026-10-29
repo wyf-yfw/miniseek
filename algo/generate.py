@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""固定 seed 采样生成。"""
+"""固定 seed 采样生成（仅 MiniSeek-M）。"""
 
 from __future__ import annotations
 
@@ -12,14 +12,10 @@ if str(_ROOT) not in sys.path:
 
 import argparse
 import random
-from pathlib import Path
 
 import torch
 
-from algo.model import build_model, load_model_from_blob
-from algo.model.attn_backend import configure_attn_backend
-from algo.model.config import ModelConfig
-from algo.model.dense import DenseLM
+from algo.model import load_model_from_blob
 from algo.model.tokenizer import load_tokenizer
 
 
@@ -45,16 +41,11 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tok = load_tokenizer(args.tokenizer, allow_fallback=True)
 
-    if Path(args.ckpt).exists():
-        ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-        # 按 config.arch 建模型：Dense / MoE / v41（MiniSeek-M*）权重都能直接跑
-        model, cfg = load_model_from_blob(ckpt)
-        configure_attn_backend(bool(getattr(cfg, "use_flash_attn", True)))
-        print(f"[generate] loaded {args.ckpt} arch={getattr(cfg, 'arch', 'dense')}")
-    else:
-        print(f"[generate] WARN: 无 checkpoint，使用随机初始化权重")
-        cfg = ModelConfig().with_vocab_size(int(getattr(tok, "vocab_size", 6400)))
-        model = DenseLM(cfg)
+    if not Path(args.ckpt).exists():
+        raise SystemExit(f"缺少 checkpoint: {args.ckpt}（main 不再提供随机 Dense 初始化）")
+    ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+    model, cfg = load_model_from_blob(ckpt)
+    print(f"[generate] loaded {args.ckpt} arch={getattr(cfg, 'arch', 'miniseek-m')}")
 
     model.to(device).eval()
     ids = tok.encode(args.prompt, add_special_tokens=True)

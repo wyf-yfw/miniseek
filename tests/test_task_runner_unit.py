@@ -15,7 +15,7 @@ def tasks_root(tmp_path, monkeypatch):
 
 
 def test_reconcile_dead_pid(tasks_root, monkeypatch):
-    t = ts.create_task(name="x", arch="tiny", mode="pretrain", hparams={"batch_size": 1})
+    t = ts.create_task(name="x", arch="miniseek-m", mode="pretrain", hparams={"batch_size": 1})
     t["status"] = "running"
     t["pid"] = 999999  # almost surely dead
     ts.save_task(t)
@@ -26,8 +26,8 @@ def test_reconcile_dead_pid(tasks_root, monkeypatch):
 
 
 def test_start_refuses_second(tasks_root, monkeypatch):
-    a = ts.create_task(name="a", arch="tiny", mode="pretrain", hparams={"max_steps": 1})
-    b = ts.create_task(name="b", arch="tiny", mode="pretrain", hparams={"max_steps": 1})
+    a = ts.create_task(name="a", arch="miniseek-m", mode="pretrain", hparams={"max_steps": 1})
+    b = ts.create_task(name="b", arch="miniseek-m", mode="pretrain", hparams={"max_steps": 1})
     a["status"] = "running"
     a["pid"] = 1
     ts.save_task(a)
@@ -95,7 +95,7 @@ def test_spawn_training_uses_new_session_on_posix(tasks_root, tmp_path, monkeypa
 def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
     if sys.platform == "win32":
         pytest.skip("POSIX killpg test")
-    t = ts.create_task(name="killpg", arch="tiny", mode="pretrain", hparams={"max_steps": 1})
+    t = ts.create_task(name="killpg", arch="miniseek-m", mode="pretrain", hparams={"max_steps": 1})
     t["status"] = "running"
     t["pid"] = 77701
     ts.save_task(t)
@@ -162,7 +162,7 @@ def test_build_train_cmd_rejects_removed_moe(tasks_root):
 def test_build_train_cmd_sft_requires_init_ckpt(tasks_root):
     t = ts.create_task(
         name="sft-no-init",
-        arch="dense",
+        arch="miniseek-m",
         mode="sft",
         hparams={"max_steps": 2, "init_ckpt": "", "resume": ""},
     )
@@ -178,7 +178,7 @@ def test_build_train_cmd_sft_resume_skips_init(tasks_root, tmp_path):
     resume.write_bytes(b"x")
     t = ts.create_task(
         name="sft-resume",
-        arch="dense",
+        arch="miniseek-m",
         mode="sft",
         hparams={"max_steps": 2, "init_ckpt": "", "resume": str(resume)},
     )
@@ -190,16 +190,14 @@ def test_build_train_cmd_sft_resume_skips_init(tasks_root, tmp_path):
 def test_build_train_cmd_speed_defaults(tasks_root):
     t = ts.create_task(
         name="spd",
-        arch="dense",
+        arch="miniseek-m",
         mode="pretrain",
         hparams={"max_steps": 2, "batch_size": 2},
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
-    assert "--compile" in cmd
-    assert "--no-compile" not in cmd
+    # MiniSeek-M 默认不 compile（MoE/稀疏索引会 graph-break）
+    assert "--no-compile" in cmd
     assert "--fused-adamw" in cmd
-    assert "--flash-attn" in cmd
-    assert "--no-flash-attn" not in cmd
     assert "--batch-mode" in cmd
     assert cmd[cmd.index("--batch-mode") + 1] == "pack"
 
@@ -207,7 +205,7 @@ def test_build_train_cmd_speed_defaults(tasks_root):
 def test_build_train_cmd_speed_opt_out(tasks_root):
     t = ts.create_task(
         name="spd2",
-        arch="dense",
+        arch="miniseek-m",
         mode="pretrain",
         hparams={
             "max_steps": 2,
@@ -229,7 +227,7 @@ def test_build_train_cmd_sft_batch_mode(tasks_root, tmp_path):
     ckpt.write_bytes(b"x")
     t = ts.create_task(
         name="sft-bm",
-        arch="dense",
+        arch="miniseek-m",
         mode="sft",
         hparams={
             "max_steps": 2,

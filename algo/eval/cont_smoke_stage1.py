@@ -17,7 +17,6 @@ from pathlib import Path
 
 import torch
 
-from algo.model.config import ModelConfig
 from algo.model.tokenizer import load_tokenizer
 
 # Explicit continuation stems (not chat Q&A)

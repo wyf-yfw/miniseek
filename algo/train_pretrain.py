@@ -42,10 +42,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from algo import miniseek_m_train as mmt
 from algo.batching import LengthBucketBatchSampler, PackedTextBatchIter
-from algo.model import build_model
-from algo.model.miniseek_m import step_expert_bias
-from algo.model.attn_backend import configure_attn_backend
-from algo.model.config import ModelConfig
+from algo.model.miniseek_m import FlashConfig, step_expert_bias
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
 
 
@@ -59,7 +56,7 @@ def _emit_expert_load_line(
     model: torch.nn.Module,
     step: int,
     window_steps: int,
-    cfg: ModelConfig,
+    cfg: FlashConfig,
 ) -> None:
     """结束本 log 窗口的 usage 记录，打印 expert_load=JSON，再开启下一窗口。"""
     raw = _unwrap_model(model)
@@ -206,10 +203,10 @@ def evaluate_valid(model: torch.nn.Module, loader, device: torch.device) -> Dict
         input_ids = input_ids.to(device)
         labels = labels.to(device)
         out = model(input_ids, labels=labels)
-        if isinstance(out, tuple) and len(out) == 3:
-            _logits, ce, _aux = out
+        if isinstance(out, tuple) and len(out) >= 2:
+            _logits, ce = out[0], out[1]
         else:
-            _logits, ce = out
+            raise TypeError(f"unexpected model output: {type(out)}")
         n = int((labels != -100).sum().item())
         if n <= 0:
             continue
@@ -296,7 +293,7 @@ def parse_loss_thresholds(s: str) -> List[float]:
 def build_ckpt(
     model: torch.nn.Module,
     opt: torch.optim.Optimizer,
-    cfg: ModelConfig,
+    cfg: FlashConfig,
     global_step: int,
     vocab: int,
     loss: Optional[float],
@@ -380,7 +377,7 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/PT/pretrain_mix_12g_clean.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_pretrain")
-    p.add_argument("--arch", choices=["dense", "tiny", "miniseek-m", "m", "v41"], default="dense", help="model architecture")
+    p.add_argument("--arch", choices=["miniseek-m", "m", "v41"], default="miniseek-m", help="MiniSeek-M architecture")
     p.add_argument(
         "--aux-coef",
         type=float,
@@ -532,15 +529,17 @@ def main() -> None:
         help="valid-ratio 划分随机种子（可复现）",
     )
     args = p.parse_args()
-    is_mm = args.arch in ("miniseek-m", "m", "v41")
+    if args.arch in ("m", "v41"):
+        args.arch = "miniseek-m"
+    is_mm = True
     if args.max_seq_len is None:
-        args.max_seq_len = mmt.MM_DEFAULT_SEQ_LEN if is_mm else 512
+        args.max_seq_len = mmt.MM_DEFAULT_SEQ_LEN
     if args.compile is None:
-        args.compile = not is_mm
+        args.compile = False
     if args.lr is None:
-        args.lr = mmt.MM_DEFAULT_LR if is_mm else 5e-5
+        args.lr = mmt.MM_DEFAULT_LR
     if args.min_lr is None:
-        args.min_lr = args.lr * 0.1 if is_mm else 1e-5
+        args.min_lr = args.lr * 0.1
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
     hit_thresholds: Set[float] = set()
@@ -556,29 +555,15 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 权重保持 fp32；CUDA 上用 autocast，避免整模 .to(bfloat16) 弄坏 RoPE complex buffer
     print(f"[train] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
-    attn_name = configure_attn_backend(bool(args.flash_attn))
-    if is_mm:
-        print("[train] flash_attn=n/a（m 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
-    else:
-        print(f"[train] flash_attn={'on' if args.flash_attn else 'off'} backend={attn_name}")
+    print("[train] flash_attn=n/a（MiniSeek-M 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
 
     tok = load_tokenizer(args.tokenizer, allow_fallback=True)
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    if is_mm:
-        cfg, model = mmt.build_miniseek_m(tok, vocab, pad_id, args.max_seq_len, device)
-        mmt.unwrap(model).act_ckpt = bool(args.act_ckpt)
-        print(mmt.describe(cfg, model), flush=True)
-    else:
-        if args.arch == "tiny":
-            cfg = ModelConfig.tiny()
-            cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
-        else:
-            cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
-        cfg = ModelConfig.from_dict({**cfg.to_dict(), "use_flash_attn": bool(args.flash_attn)})
-        cfg = cfg.with_vocab_size(vocab)
-        model = build_model(cfg).to(device)
+    cfg, model = mmt.build_miniseek_m(tok, vocab, pad_id, args.max_seq_len, device)
+    mmt.unwrap(model).act_ckpt = bool(args.act_ckpt)
+    print(mmt.describe(cfg, model), flush=True)
     if args.compile:
         if device.type != "cuda":
             print("[train] WARN: --compile ignored (需要 CUDA)")

@@ -1203,7 +1203,7 @@
   <header>
     <div>
       <h1>MiniSeek</h1>
-      <p>Task 驱动训练 · Tiny / D / MiniSeek-M</p>
+      <p>Task 驱动训练 · MiniSeek-M</p>
     </div>
     <div class="hdr-right">
       <div class="live">
@@ -1248,12 +1248,10 @@
                 <button type="button" id="mode-sft" data-mode="sft">SFT</button>
               </div>
               <div class="mode-row" id="arch-row">
-                <button type="button" id="arch-dense" class="active" data-arch="dense">D</button>
-                <button type="button" id="arch-miniseek-m" data-arch="miniseek-m">MiniSeek-M</button>
-                <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
+                <button type="button" id="arch-miniseek-m" class="active" data-arch="miniseek-m">MiniSeek-M</button>
               </div>
               <p id="mode-hint" class="mode-hint">Pretrain：从零/续训语言模型；数据为每行 text 的 jsonl。</p>
-              <p id="arch-hint" class="mode-hint">D：标准 DenseLM；MiniSeek-M：MiniSeek-M0.1（DeepSeek-M 全架构）；Tiny：d=64 L=2 冒烟档。</p>
+              <p id="arch-hint" class="mode-hint">MiniSeek-M：DeepSeek-M 全架构（CED / CSA2 / mHC / Engram / MoE）。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
 
               <div class="param-group" id="group-data">
@@ -1521,8 +1519,6 @@
           <div class="mode-row" id="arch-preset-row">
             <button type="button" id="arch-preset-miniseek-m" class="active" data-arch-preset="miniseek-m">MiniSeek-M</button>
             <button type="button" id="arch-preset-m-ref" data-arch-preset="m-ref">DeepSeek-M</button>
-            <button type="button" id="arch-preset-dense" data-arch-preset="dense">D</button>
-            <button type="button" id="arch-preset-tiny" data-arch-preset="tiny">Tiny</button>
           </div>
           <p id="arch-preset-hint" class="mode-hint">MiniSeek-M：MiniSeek-M0.1，DeepSeek-M 全架构的可训练小尺寸版。</p>
           <p id="arch-msg" class="arch-msg"></p>
@@ -1542,7 +1538,7 @@
           </div>
           <div class="arch-canvas-wrap">
             <div id="arch-canvas" class="arch-canvas">
-              <span class="chat-empty" id="arch-empty">点左侧 Tiny / D / MiniSeek-M / DeepSeek-M 查看设计或参考架构。</span>
+              <span class="chat-empty" id="arch-empty">点左侧 MiniSeek-M / DeepSeek-M 查看设计或参考架构。</span>
             </div>
             <aside id="arch-drawer" class="arch-drawer" hidden>
               <div class="arch-drawer-head">
@@ -1794,7 +1790,7 @@
     let selectedId = null;
     let currentTask = null;
     let trainMode = "pretrain";
-    let trainArch = "tiny";
+    let trainArch = "miniseek-m";
     let logLines = [];
     let lossPoints = [];
     let validPoints = [];
@@ -2062,9 +2058,7 @@
       });
       $("mode-pretrain").disabled = !editable;
       $("mode-sft").disabled = !editable;
-      $("arch-dense").disabled = !editable;
       $("arch-miniseek-m").disabled = !editable;
-      $("arch-tiny").disabled = !editable;
       $("btn-save").disabled = !editable && currentTask && currentTask.status !== "draft";
       // name always patchable
       $("btn-save").disabled = false;
@@ -2141,13 +2135,9 @@
 
     function applyArchUI(arch) {
       trainArch = arch;
-      $("arch-dense").classList.toggle("active", arch === "dense");
       $("arch-miniseek-m").classList.toggle("active", arch === "miniseek-m");
-      $("arch-tiny").classList.toggle("active", arch === "tiny");
       $("arch-hint").textContent =
-        arch === "tiny" ? "Tiny：DenseLM d=64 L=2，CPU 冒烟。"
-        : arch === "miniseek-m" ? "MiniSeek-M：MiniSeek-M0.1（CED 4+4、SWA/CSA2、Single-Pass mHC、Engram、MoE 1+64 top-6，≈187M；Pretrain/SFT 均可）。"
-        : "D：MiniSeek-D DenseLM。";
+        "MiniSeek-M：MiniSeek-M0.1（CED 4+4、SWA/CSA2、Single-Pass mHC、Engram、MoE 1+64 top-6，≈187M；Pretrain/SFT 均可）。";
       syncParamVisibility();
     }
 
@@ -2857,7 +2847,7 @@
     }
 
     function openNewTaskForm(opts = {}) {
-      const arch = opts.arch || trainArch || "tiny";
+      const arch = opts.arch || trainArch || "miniseek-m";
       const mode = opts.mode || "pretrain";
       const base = modeDefaults(mode, arch);
       selectedId = null;
@@ -2903,7 +2893,7 @@
       if (!opts.keepForm || !formDirty) {
         $("task-name").value = t.name || "";
         applyModeUI(t.mode || "pretrain");
-        applyArchUI(t.arch || "dense");
+        applyArchUI(t.arch || "miniseek-m");
         fillHparams(t.hparams || {});
         formDirty = false;
       }
@@ -3009,7 +2999,7 @@
       openNewTaskForm({ title: "新建 Task（未保存）" });
     });
 
-    ["arch-dense", "arch-miniseek-m", "arch-tiny"].forEach((id) => {
+    ["arch-miniseek-m"].forEach((id) => {
       $(id).addEventListener("click", () => {
         if (currentTask && currentTask.status !== "draft") return;
         const arch = $(id).dataset.arch;
@@ -3154,7 +3144,7 @@
 
     $("btn-new-from-run").addEventListener("click", () => {
       if (!currentTask) return;
-      const arch = currentTask.arch || "tiny";
+      const arch = currentTask.arch || "miniseek-m";
       const mode = currentTask.mode || "pretrain";
       openNewTaskForm({
         arch,
@@ -3646,8 +3636,8 @@
     });
     async function boot() {
       defaultsMap = await (await fetch("/api/defaults")).json();
-      trainArch = "tiny";
-      applyArchUI("tiny");
+      trainArch = "miniseek-m";
+      applyArchUI("miniseek-m");
       applyModeUI("pretrain");
       await refreshTasks();
       await refreshCheckpoints();
@@ -3835,8 +3825,6 @@
     let archPreset = "miniseek-m";
 
     const ARCH_PRESET_HINT = {
-      tiny: "Tiny：冒烟档 DenseLM，d=64 L=2，适合 CPU。",
-      dense: "D：MiniSeek-D0.1，d=512 L=8 FFN=2048。",
       "miniseek-m": "MiniSeek-M：MiniSeek-M0.1，DeepSeek-M 全架构的可训练小尺寸版：CED 编码 4 + 解码 4，SWA / CSA2(Full·Reuse·Reindex)，Single-Pass mHC，Engram@L1·L3，MoE 1+64 top-6，主干+Engram ≈187M。",
       "m-ref": "DeepSeek-M 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
     };
@@ -5063,7 +5051,7 @@
     }
 
     async function loadArchDesign(arch) {
-      archPreset = arch || archPreset || "dense";
+      archPreset = arch || archPreset || "miniseek-m";
       document.querySelectorAll("#arch-preset-row button").forEach((b) => {
         b.classList.toggle("active", b.dataset.archPreset === archPreset);
       });

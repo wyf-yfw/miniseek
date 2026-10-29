@@ -43,10 +43,7 @@ from algo.batching import (
     truncate_keep_head_with_eos,
 )
 from algo import miniseek_m_train as mmt
-from algo.model import build_model
-from algo.model.miniseek_m import step_expert_bias
-from algo.model.attn_backend import configure_attn_backend
-from algo.model.config import ModelConfig
+from algo.model.miniseek_m import FlashConfig, step_expert_bias
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
 from algo.train_pretrain import (
     _emit_expert_load_line,
@@ -195,7 +192,7 @@ def parse_loss_thresholds(s: str) -> List[float]:
 def build_ckpt(
     model: torch.nn.Module,
     opt: torch.optim.Optimizer,
-    cfg: ModelConfig,
+    cfg: FlashConfig,
     global_step: int,
     vocab: int,
     loss: Optional[float],
@@ -260,7 +257,7 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/SFT/sft_miniseek_v5_10g.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
-    p.add_argument("--arch", choices=["dense", "tiny", "miniseek-m", "m", "v41"], default="dense", help="model architecture")
+    p.add_argument("--arch", choices=["miniseek-m", "m", "v41"], default="miniseek-m", help="MiniSeek-M architecture")
     p.add_argument(
         "--aux-coef",
         type=float,
@@ -374,11 +371,13 @@ def main() -> None:
         "bucket=长度分桶；random=随机 pad。pack 不做跨样本 attention mask",
     )
     args = p.parse_args()
-    is_mm = args.arch in ("miniseek-m", "m", "v41")
+    if args.arch in ("m", "v41"):
+        args.arch = "miniseek-m"
+    is_mm = True
     if args.compile is None:
-        args.compile = not is_mm
+        args.compile = False
     if args.min_lr is None:
-        args.min_lr = args.lr * 0.1 if is_mm else 1e-5
+        args.min_lr = args.lr * 0.1
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
     hit_thresholds: Set[float] = set()
@@ -387,34 +386,20 @@ def main() -> None:
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[sft] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
-    attn_name = configure_attn_backend(bool(args.flash_attn))
-    if is_mm:
-        print("[sft] flash_attn=n/a（m 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
-    else:
-        print(f"[sft] flash_attn={'on' if args.flash_attn else 'off'} backend={attn_name}")
+    print("[sft] flash_attn=n/a（MiniSeek-M 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
 
     tok = load_tokenizer(args.tokenizer, allow_fallback=True)
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    if is_mm:
-        cfg, model = mmt.build_miniseek_m(tok, vocab, pad_id, args.max_seq_len, device)
-        mmt.unwrap(model).act_ckpt = bool(args.act_ckpt)
-        print(mmt.describe(cfg, model), flush=True)
-        print(
-            f"[sft] m post-train: candidate_pool={bool(args.candidate_pool)} "
-            f"bounded_replay={bool(args.bounded_replay)}",
-            flush=True,
-        )
-    else:
-        if args.arch == "tiny":
-            cfg = ModelConfig.tiny()
-            cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
-        else:
-            cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
-        cfg = ModelConfig.from_dict({**cfg.to_dict(), "use_flash_attn": bool(args.flash_attn)})
-        cfg = cfg.with_vocab_size(vocab)
-        model = build_model(cfg).to(device)
+    cfg, model = mmt.build_miniseek_m(tok, vocab, pad_id, args.max_seq_len, device)
+    mmt.unwrap(model).act_ckpt = bool(args.act_ckpt)
+    print(mmt.describe(cfg, model), flush=True)
+    print(
+        f"[sft] MiniSeek-M post-train: candidate_pool={bool(args.candidate_pool)} "
+        f"bounded_replay={bool(args.bounded_replay)}",
+        flush=True,
+    )
     if args.compile:
         if device.type != "cuda":
             print("[sft] WARN: --compile ignored (需要 CUDA)")

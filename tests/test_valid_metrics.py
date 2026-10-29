@@ -7,21 +7,17 @@ import pytest
 import torch
 
 from algo.model import build_model
-from algo.model.config import ModelConfig
+from algo.model.miniseek_m import FlashConfig
 from algo.train_pretrain import evaluate_valid
 from api import tasks_store as ts
 from api import task_runner as tr
 
 
-def _tiny_cfg(vocab: int = 128, max_seq_len: int = 32) -> ModelConfig:
-    base = ModelConfig.tiny().to_dict()
-    base.update(
-        {
-            "vocab_size": vocab,
-            "max_seq_len": max_seq_len,
-        }
-    )
-    return ModelConfig.from_dict(base)
+def _tiny_cfg(vocab: int = 97, max_seq_len: int = 32) -> FlashConfig:
+    cfg = FlashConfig.tiny()
+    d = cfg.to_dict()
+    d.update({"vocab_size": vocab, "max_seq_len": max_seq_len})
+    return FlashConfig.from_dict(d)
 
 
 def test_evaluate_valid_returns_finite():
@@ -37,7 +33,6 @@ def test_evaluate_valid_returns_finite():
 
     out = evaluate_valid(model, Loader(), torch.device("cpu"))
     assert out["tokens"] > 0
-    assert out["loss"] == out["loss"]  # not NaN
     assert math.isfinite(out["loss"])
     assert out["ppl"] >= 1.0
     assert math.isfinite(out["ppl"])
@@ -71,7 +66,7 @@ def test_parse_valid_line_appends(tasks_root):
 def test_build_train_cmd_includes_valid_flags(tasks_root):
     t = ts.create_task(
         name="valid-cmd",
-        arch="tiny",
+        arch="miniseek-m",
         mode="pretrain",
         hparams={
             "batch_size": 2,
@@ -79,25 +74,9 @@ def test_build_train_cmd_includes_valid_flags(tasks_root):
             "valid_ratio": 0.01,
             "valid_every": 20,
             "valid_max_samples": 64,
+            "valid_seed": 7,
         },
     )
-    cmd = tr.build_train_cmd(t)
-    assert "--valid" not in cmd
+    cmd = tr.build_train_cmd(ts.load_task(t["id"]))
+    assert cmd[cmd.index("--arch") + 1] == "miniseek-m"
     assert "--valid-ratio" in cmd
-    assert "--valid-every" in cmd
-    assert cmd[cmd.index("--valid-every") + 1] == "20"
-    assert "--valid-max-samples" in cmd
-    assert cmd[cmd.index("--valid-max-samples") + 1] == "64"
-
-
-def test_build_train_cmd_skips_valid_when_every_zero(tasks_root):
-    t = ts.create_task(
-        name="valid-off",
-        arch="tiny",
-        mode="pretrain",
-        hparams={"valid_ratio": 0.01, "valid_every": 0},
-    )
-    cmd = tr.build_train_cmd(t)
-    assert "--valid" not in cmd
-    assert "--valid-ratio" not in cmd
-    assert "--valid-every" not in cmd

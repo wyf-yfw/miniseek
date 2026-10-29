@@ -1,7 +1,6 @@
 import torch
 
-from algo.model import ModelConfig, build_model, config_from_dict
-from algo.model.dense import DenseLM
+from algo.model import build_model, config_from_dict
 from algo.model.miniseek_m import FlashConfig, Transformer, bounded_replay_floor
 from algo.model.miniseek_m.mhc import hc_pre
 
@@ -134,6 +133,9 @@ def test_f01_param_budget():
 
 def test_build_model_dispatch():
     assert isinstance(build_model(FlashConfig.tiny()), Transformer)
-    assert isinstance(build_model(ModelConfig.tiny()), DenseLM)
     assert isinstance(config_from_dict(FlashConfig.tiny().to_dict()), FlashConfig)
-    assert isinstance(config_from_dict(ModelConfig().to_dict()), ModelConfig)
+    try:
+        config_from_dict({"arch": "dense"})
+        assert False, "dense should be rejected on main"
+    except ValueError:
+        pass

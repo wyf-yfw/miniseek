@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 from api import tasks_store as ts
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# 可训练架构：D（DenseLM）/ Tiny / M（MiniSeek-M0.1，DeepSeek-M 全架构）；v41 为旧名
-TRAIN_ARCHS = frozenset({"dense", "tiny", "miniseek-m", "m", "v41"})
+# 可训练架构：仅 MiniSeek-M（arch=miniseek-m；m/v41 为旧名）
+TRAIN_ARCHS = frozenset({"miniseek-m", "m", "v41"})
 
 STEP_RE = re.compile(
     r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?(?:\s+kl=[0-9.eE+-]+)?"
@@ -139,24 +139,16 @@ def validate_sft_init_ckpt(mode: str, hparams: Optional[Dict[str, Any]] = None, 
 
 def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     hp = dict(task.get("hparams") or {})
-    arch = (task.get("arch") or "dense").strip().lower()
+    arch = (task.get("arch") or "miniseek-m").strip().lower()
+    if arch in ("m", "v41"):
+        arch = "miniseek-m"
     mode = (task.get("mode") or "pretrain").strip().lower()
     if mode not in {"pretrain", "sft"}:
         raise ValueError(f"未知训练模式: {mode}")
     if arch not in TRAIN_ARCHS:
-        raise ValueError(f"未知架构: {arch}")
-    # M：MoE 分发与稀疏索引在 torch.compile 下会 graph-break，默认不编译
-    if arch in ("miniseek-m", "m", "v41"):
-        hp.setdefault("compile", False)
-    # Tiny defaults for smoke-friendly CPU runs
-    if arch == "tiny":
-        hp.setdefault("batch_size", 4)
-        hp.setdefault("max_steps", 20)
-        hp.setdefault("epochs", 1)
-        hp.setdefault("max_seq_len", 128)
-        hp.setdefault("warmup_steps", 0)
-        hp.setdefault("log_every", 1)
-        hp.setdefault("plot_every", 1)
+        raise ValueError(f"未知架构: {arch}（main 仅 miniseek-m）")
+    # MiniSeek-M：MoE 分发与稀疏索引在 torch.compile 下会 graph-break，默认不编译
+    hp.setdefault("compile", False)
 
     module = "algo.train_sft" if mode == "sft" else "algo.train_pretrain"
     _default_data = PROJECT_ROOT / "data" / (
