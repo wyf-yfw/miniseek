@@ -42,8 +42,9 @@ from algo.batching import (
     PackedSFTBatchIter,
     truncate_keep_head_with_eos,
 )
+from algo import v41_train as v41t
 from algo.model import build_model
-from algo.model.moe import step_expert_bias
+from algo.model.v41 import step_expert_bias
 from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
@@ -199,9 +200,8 @@ def build_ckpt(
     vocab: int,
     loss: Optional[float],
 ) -> Dict[str, Any]:
-    cpu_state = {k: v.detach().float().cpu() for k, v in model.state_dict().items()}
     return {
-        "model": cpu_state,
+        "model": v41t.state_for_ckpt(model),
         "optimizer": {k: v.cpu() if torch.is_tensor(v) else v for k, v in opt.state_dict().items()},
         "config": cfg.to_dict(),
         "step": global_step,
@@ -260,7 +260,7 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/SFT/sft_miniseek_v5_10g.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
-    p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")
+    p.add_argument("--arch", choices=["dense", "moe", "tiny", "v41"], default="dense", help="model architecture")
     p.add_argument(
         "--aux-coef",
         type=float,
@@ -270,7 +270,25 @@ def main() -> None:
     p.add_argument("--max-seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--lr", type=float, default=5e-5, help="peak LR after warmup (SFT 通常低于预训练)")
-    p.add_argument("--min-lr", type=float, default=1e-5)
+    p.add_argument("--min-lr", type=float, default=None, help="cosine floor LR（默认 v41=lr×0.1，其余 1e-5）")
+    p.add_argument(
+        "--candidate-pool",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="v41：分层稀疏索引候选池（论文在后训练引入，SFT 默认开）",
+    )
+    p.add_argument(
+        "--bounded-replay",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="v41：模拟 Decoder SWA Bounded Replay（回答起点前 window 个位置的滑窗截断，SFT 默认开）",
+    )
+    p.add_argument(
+        "--act-ckpt",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="v41：按层 activation checkpointing（显存不够时开）",
+    )
     p.add_argument("--warmup-steps", type=int, default=100)
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument(
@@ -356,6 +374,9 @@ def main() -> None:
         "bucket=长度分桶；random=随机 pad。pack 不做跨样本 attention mask",
     )
     args = p.parse_args()
+    is_v41 = args.arch == "v41"
+    if args.min_lr is None:
+        args.min_lr = args.lr * 0.1 if is_v41 else 1e-5
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
     hit_thresholds: Set[float] = set()
@@ -365,20 +386,33 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[sft] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
     attn_name = configure_attn_backend(bool(args.flash_attn))
-    print(f"[sft] flash_attn={'on' if args.flash_attn else 'off'} backend={attn_name}")
+    if is_v41:
+        print("[sft] flash_attn=n/a（v41 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
+    else:
+        print(f"[sft] flash_attn={'on' if args.flash_attn else 'off'} backend={attn_name}")
 
     tok = load_tokenizer(args.tokenizer, allow_fallback=True)
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    if args.arch == "tiny":
-        cfg = ModelConfig.tiny()
-        cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
+    if is_v41:
+        cfg, model = v41t.build_v41(tok, vocab, pad_id, args.max_seq_len, device)
+        v41t.unwrap(model).act_ckpt = bool(args.act_ckpt)
+        print(v41t.describe(cfg, model), flush=True)
+        print(
+            f"[sft] v41 post-train: candidate_pool={bool(args.candidate_pool)} "
+            f"bounded_replay={bool(args.bounded_replay)}",
+            flush=True,
+        )
     else:
-        cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
-    cfg = ModelConfig.from_dict({**cfg.to_dict(), "use_flash_attn": bool(args.flash_attn)})
-    cfg = cfg.with_vocab_size(vocab)
-    model = build_model(cfg).to(device)
+        if args.arch == "tiny":
+            cfg = ModelConfig.tiny()
+            cfg = ModelConfig.from_dict({**cfg.to_dict(), "max_seq_len": args.max_seq_len})
+        else:
+            cfg = ModelConfig(arch=args.arch, max_seq_len=args.max_seq_len)
+        cfg = ModelConfig.from_dict({**cfg.to_dict(), "use_flash_attn": bool(args.flash_attn)})
+        cfg = cfg.with_vocab_size(vocab)
+        model = build_model(cfg).to(device)
     if args.compile:
         if device.type != "cuda":
             print("[sft] WARN: --compile ignored (需要 CUDA)")
@@ -388,13 +422,15 @@ def main() -> None:
                 print("[sft] torch.compile enabled")
             except Exception as e:  # noqa: BLE001
                 print(f"[sft] WARN: torch.compile 失败，继续未编译: {e}")
+    has_moe = args.arch in ("moe", "v41")
     print(
         f"[sft] arch={args.arch} release={cfg.release_name} "
-        f"aux_coef={args.aux_coef if args.arch == 'moe' else 'n/a'}"
+        f"aux_coef={args.aux_coef if has_moe else 'n/a'}"
     )
     expert_window_steps = 0
-    if args.arch == "moe":
+    if has_moe:
         _unwrap_model(model).begin_expert_usage()
+    pack_kw = {"doc_align": v41t.doc_align(cfg), "with_doc_ids": True} if is_v41 else {}
 
     if not Path(args.data).exists():
         raise SystemExit(f"[sft] 缺少数据文件: {args.data}")
@@ -424,6 +460,7 @@ def main() -> None:
                 batch_size=args.batch_size,
                 pad_id=pad_id,
                 seed=(shuffle_seed + epoch) % (2**31 - 1),
+                **pack_kw,
             )
 
         loader = None
@@ -434,6 +471,7 @@ def main() -> None:
             batch_size=args.batch_size,
             pad_id=pad_id,
             seed=shuffle_seed,
+            **pack_kw,
         ).estimate_len()
     elif batch_mode == "bucket":
         lengths = [ds.approx_length(i) for i in range(len(ds))]
@@ -473,6 +511,7 @@ def main() -> None:
                     batch_size=args.batch_size,
                     pad_id=pad_id,
                     seed=(shuffle_seed + epoch) % (2**31 - 1),
+                    **pack_kw,
                 )
 
             loader = None
@@ -483,6 +522,7 @@ def main() -> None:
                 batch_size=args.batch_size,
                 pad_id=pad_id,
                 seed=shuffle_seed,
+                **pack_kw,
             ).estimate_len()
         elif batch_mode == "bucket":
             lengths = [ds.approx_length(i) for i in range(len(ds))]
@@ -531,7 +571,10 @@ def main() -> None:
     plan_steps = steps_per_epoch * max(1, args.epochs)
 
     opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
-    if bool(args.fused_adamw) and device.type == "cuda":
+    if is_v41:
+        opt = v41t.build_optimizer(model, args.lr, fused=bool(args.fused_adamw) and device.type == "cuda")
+        print("[sft] optimizer=Muon(矩阵)+AdamW(norm/标量)+Sinkhorn(embedding/head/Engram)", flush=True)
+    elif bool(args.fused_adamw) and device.type == "cuda":
         try:
             opt = torch.optim.AdamW(model.parameters(), fused=True, **opt_kwargs)
             print("[sft] AdamW fused=True", flush=True)
@@ -560,7 +603,7 @@ def main() -> None:
     if args.resume:
         resume_path = Path(args.resume)
         blob = torch.load(resume_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(blob["model"])
+        _unwrap_model(model).load_state_dict(v41t.clean_state_dict(blob["model"]))
         if "optimizer" in blob:
             try:
                 opt.load_state_dict(blob["optimizer"])
@@ -577,7 +620,7 @@ def main() -> None:
     elif args.init_ckpt:
         init_path = Path(args.init_ckpt)
         blob = torch.load(init_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(blob["model"], strict=True)
+        _unwrap_model(model).load_state_dict(v41t.clean_state_dict(blob["model"]), strict=True)
         print(f"[sft] init weights from {init_path} (pretrain step={blob.get('step', '?')})")
 
     total_steps, step_limit = resolve_step_budget(lifetime_base, args.max_steps, plan_steps)
@@ -643,11 +686,10 @@ def main() -> None:
             epoch_iter = packed_iter_factory(epoch)
         else:
             epoch_iter = loader
-        for input_ids, labels in epoch_iter:
+        for batch in epoch_iter:
             if step_limit is not None and global_step >= step_limit:
                 break
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
+            input_ids, labels, doc_ids = v41t.unpack_batch(batch, device)
 
             next_step = global_step + 1
             cur_lr = lr_at_step(
@@ -662,6 +704,17 @@ def main() -> None:
             opt.zero_grad(set_to_none=True)
 
             def _step_forward():
+                if is_v41:
+                    return v41t.forward_loss(
+                        model,
+                        input_ids,
+                        labels,
+                        doc_ids,
+                        aux_coef=args.aux_coef,
+                        use_candidate_pool=bool(args.candidate_pool),
+                        bounded_replay=bool(args.bounded_replay),
+                        window=cfg.window_size,
+                    )
                 out = model(input_ids, labels=labels)
                 if isinstance(out, tuple) and len(out) == 3:
                     _logits, ce, aux = out
@@ -679,15 +732,17 @@ def main() -> None:
             if args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             opt.step()
-            if args.arch == "moe":
+            if has_moe:
                 step_expert_bias(model)
             global_step += 1
             last_loss = float(loss.item())
-            if args.arch == "moe":
+            if has_moe:
                 expert_window_steps += 1
 
             if global_step % args.log_every == 0 or global_step == 1:
-                if aux_loss is not None:
+                if is_v41:
+                    print(v41t.log_line(epoch, global_step, last_loss, ce_loss, aux_loss, cur_lr), flush=True)
+                elif aux_loss is not None:
                     print(
                         f"epoch={epoch} step={global_step} loss={last_loss:.4f} "
                         f"ce={float(ce_loss.item()):.4f} aux={float(aux_loss.item()):.4f} "
@@ -700,7 +755,7 @@ def main() -> None:
                         f"ppl={math.exp(min(last_loss, 20)):.2f} lr={cur_lr:.2e}",
                         flush=True,
                     )
-                if args.arch == "moe":
+                if has_moe:
                     _emit_expert_load_line(
                         model=model,
                         step=global_step,

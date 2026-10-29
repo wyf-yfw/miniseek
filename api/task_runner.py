@@ -20,7 +20,8 @@ from api import tasks_store as ts
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STEP_RE = re.compile(
-    r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
+    r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?(?:\s+kl=[0-9.eE+-]+)?"
+    r"\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
 )
 RESUME_RE = re.compile(r"resumed from .* (?:lifetime_step|step)=(\d+)")
 VALID_RE = re.compile(
