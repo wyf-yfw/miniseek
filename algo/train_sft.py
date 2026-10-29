@@ -350,8 +350,8 @@ def main() -> None:
     p.add_argument(
         "--compile",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="CUDA 上默认 torch.compile；--no-compile 关闭",
+        default=None,
+        help="CUDA 上 torch.compile；默认 v41 关（MoE 分发与稀疏索引会 graph-break），其余开",
     )
     p.add_argument(
         "--fused-adamw",
@@ -375,6 +375,8 @@ def main() -> None:
     )
     args = p.parse_args()
     is_v41 = args.arch == "v41"
+    if args.compile is None:
+        args.compile = not is_v41
     if args.min_lr is None:
         args.min_lr = args.lr * 0.1 if is_v41 else 1e-5
 

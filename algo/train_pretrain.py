@@ -387,7 +387,7 @@ def main() -> None:
         default=0.0001,
         help="MoE 序列级均衡损失权重（V4.1 为 0.0001）。专家 bias 另按负载更新，不靠这个系数",
     )
-    p.add_argument("--max-seq-len", type=int, default=512)
+    p.add_argument("--max-seq-len", type=int, default=None, help="默认 v41=1024，其余 512")
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=None, help="peak LR after warmup（默认 v41=3e-4，其余 5e-5）")
     p.add_argument("--min-lr", type=float, default=None, help="cosine floor LR（默认 v41=lr×0.1，其余 1e-5）")
@@ -478,9 +478,8 @@ def main() -> None:
     p.add_argument(
         "--compile",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="CUDA 上默认 torch.compile（MoE 可能 graph-break，bench 仍约 +4%%）；"
-        "--no-compile 关闭",
+        default=None,
+        help="CUDA 上 torch.compile；默认 v41 关（MoE 分发与稀疏索引会 graph-break），其余开",
     )
     p.add_argument(
         "--batch-mode",
@@ -534,6 +533,10 @@ def main() -> None:
     )
     args = p.parse_args()
     is_v41 = args.arch == "v41"
+    if args.max_seq_len is None:
+        args.max_seq_len = v41t.V41_DEFAULT_SEQ_LEN if is_v41 else 512
+    if args.compile is None:
+        args.compile = not is_v41
     if args.lr is None:
         args.lr = v41t.V41_DEFAULT_LR if is_v41 else 5e-5
     if args.min_lr is None:

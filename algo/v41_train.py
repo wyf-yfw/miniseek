@@ -20,6 +20,7 @@ from algo.model.v41.engram import build_compressed_token_map
 from algo.optim import build_v41_optimizer
 
 V41_DEFAULT_LR = 3e-4
+V41_DEFAULT_SEQ_LEN = 1024
 
 
 def unwrap(model: torch.nn.Module) -> torch.nn.Module:
