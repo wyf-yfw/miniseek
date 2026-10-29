@@ -68,6 +68,19 @@ class Block(nn.Module):
         )
         return hc_mixes(x, fn, scale, base, self.norm_eps, self.hc_mult, self.hc_sinkhorn_iters, self.hc_eps)
 
+    def run(self, x: torch.Tensor, pre_mix: torch.Tensor, attn_call) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """mHC 两个子层；attn_call(h) 给出注意力输出（训练 forward 与带缓存推理共用这一段）。"""
+        residual = x
+        attn_pre, attn_post, attn_comb = self.mixes(x, "attn")
+        h = attn_call(self.attn_norm(hc_pre(x, pre_mix)))
+        x = hc_post(h, residual, attn_post, attn_comb)
+
+        residual = x
+        ffn_pre, ffn_post, ffn_comb = self.mixes(x, "ffn")
+        h, balance = self.ffn(self.ffn_norm(hc_pre(x, attn_pre)))
+        x = hc_post(h, residual, ffn_post, ffn_comb)
+        return x, ffn_pre, balance
+
     def forward(
         self,
         x: torch.Tensor,
@@ -76,16 +89,7 @@ class Block(nn.Module):
         doc_ids: Optional[torch.Tensor] = None,
         swa_floor: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        residual = x
-        attn_pre, attn_post, attn_comb = self.mixes(x, "attn")
-        h = self.attn(self.attn_norm(hc_pre(x, pre_mix)), state, doc_ids=doc_ids, swa_floor=swa_floor)
-        x = hc_post(h, residual, attn_post, attn_comb)
-
-        residual = x
-        ffn_pre, ffn_post, ffn_comb = self.mixes(x, "ffn")
-        h, balance = self.ffn(self.ffn_norm(hc_pre(x, attn_pre)))
-        x = hc_post(h, residual, ffn_post, ffn_comb)
-        return x, ffn_pre, balance
+        return self.run(x, pre_mix, lambda h: self.attn(h, state, doc_ids=doc_ids, swa_floor=swa_floor))
 
 
 class Transformer(nn.Module):
@@ -199,6 +203,80 @@ class Transformer(nn.Module):
 
     def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters())
+
+    # ------------------------------------------------------- 推理（带缓存） ----
+    # 后训练（SFT）过的权重在推理时也用候选池；由加载方按 checkpoint 阶段设置
+    infer_candidate_pool: bool = False
+
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 64,
+        temperature: float = 1.0,
+        top_k: Optional[int] = 50,
+        eos_token_id: Optional[int] = None,
+    ) -> torch.Tensor:
+        from .cache import stream_tokens
+
+        out = [input_ids]
+        for nxt, _ in stream_tokens(
+            self,
+            input_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            eos_token_id=eos_token_id,
+            use_candidates=self.infer_candidate_pool,
+        ):
+            out.append(nxt)
+        return torch.cat(out, dim=1)
+
+    @torch.no_grad()
+    def generate_stream(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 64,
+        temperature: float = 1.0,
+        top_k: Optional[int] = 50,
+        eos_token_id: Optional[int] = None,
+    ):
+        from .cache import stream_tokens
+
+        for nxt, _ in stream_tokens(
+            self,
+            input_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            eos_token_id=eos_token_id,
+            use_candidates=self.infer_candidate_pool,
+        ):
+            yield int(nxt[0, 0].item())
+
+    @torch.no_grad()
+    def generate_stream_debug(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 64,
+        temperature: float = 1.0,
+        top_k: Optional[int] = 50,
+        eos_token_id: Optional[int] = None,
+        candidates_k: int = 10,
+    ):
+        from .cache import stream_tokens
+
+        for nxt, info in stream_tokens(
+            self,
+            input_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            eos_token_id=eos_token_id,
+            use_candidates=self.infer_candidate_pool,
+            debug_k=max(1, int(candidates_k)),
+        ):
+            yield int(nxt[0, 0].item()), info
 
 
 def step_expert_bias(model: nn.Module) -> None:
