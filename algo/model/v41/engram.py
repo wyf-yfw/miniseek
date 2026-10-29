@@ -199,10 +199,9 @@ class Engram(nn.Module):
 
     @torch.no_grad()
     def reset_parameters(self) -> None:
-        """value 投影置 0：开局时模块是恒等映射（原版 Engram 把卷积置 0，V4.1 没有卷积）。"""
+        # 原版只把短卷积置 0（卷积分支恒等，门控值照常写入）；V4.1 去掉了卷积，因此不置零
         nn.init.normal_(self.embed.weight, std=0.02)
         nn.init.normal_(self.wkv.weight, std=0.02)
-        self.wkv.weight[self.hc_mult * self.dim :].zero_()
         self.q_weight.fill_(1.0)
         self.k_weight.fill_(1.0)
 

@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .ckpt import recomputing
 from .config import FlashConfig
 from .rope import layer_freqs, rotate_tail
 
@@ -42,6 +43,19 @@ class AttnState:
     candidates: Optional[torch.Tensor] = None  # [B,T,Tc] bool
     use_candidates: bool = False
     kl: List[torch.Tensor] = field(default_factory=list)
+
+    def fork(self) -> "AttnState":
+        """给下一层一份浅拷贝。activation checkpointing 重算某层时，它看到的仍是当初的输入状态
+        （任何一层读取的字段都不会被它自己改写）。kl 列表共享。"""
+        return AttnState(
+            compress_kv=self.compress_kv,
+            compress_doc=self.compress_doc,
+            index_k=self.index_k,
+            topk=self.topk,
+            candidates=self.candidates,
+            use_candidates=self.use_candidates,
+            kl=self.kl,
+        )
 
 
 def window_indices(seqlen: int, window: int, device=None) -> torch.Tensor:
@@ -248,8 +262,10 @@ class Attention(nn.Module):
 
         o, probs = sparse_attention(q, kv_all, idx_all, self.attn_sink, self.softmax_scale)
         if kl_ctx is not None:
-            sel, valid = kl_ctx
-            state.kl.append(indexer_kl(probs[..., win.size(-1):], sel, valid))
+            # 重算时也要算（保存的张量数须与首次 forward 一致），只是不再记一次
+            kl = indexer_kl(probs[..., win.size(-1):], *kl_ctx)
+            if not recomputing():
+                state.kl.append(kl)
         return self.output(o, freqs)
 
     def _compressed(

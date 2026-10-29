@@ -191,7 +191,7 @@ BF16 autocast。以下保持 fp32（与官方一致）：路由打分、mHC 系�
 - 压缩 token 表（官方 `build_compressed_token_map`）：逐 token 解码，`NFKC → NFD → StripAccents → Lowercase → 合并空白 → 单空格哨兵 → Strip`；规范化结果相同者共用 id；含 `\ufffd` 的半字节 token 用原始 token 字符串作 key。压缩词表大小写入配置并在加载时断言。
 - 哈希（官方 `NgramHashState`）：每位置取当前及前 3 个压缩 id；回看遇序列开头或文档边界停止，空位填 tokenizer pad token 的压缩 id；每层乘子由 `np.random.default_rng(10007·layer_id)` 生成、奇数、受 int64 溢出上界约束；逐次异或得到 2/3/4-gram 哈希；每个（阶，头）用互不重复的质数取模并加偏移；每层 24 个桶区间拼成一张表。质数从 `engram_vocab_size − 1` 往上依次取（F0.1 取 16000），自写判质函数，不依赖 sympy。
 - 写入（官方 `Engram.forward`，在 block 之前，作用于 4 条流）：查表 `[B,T,24,32]` → 展平 768 → `wkv` 投影出 4 个 key（每流一个）+ 1 个共享 value；`weight = q_weight ⊙ k_weight`；`dot_m = Σ(h_m ⊙ weight_m ⊙ key_m) · rsqrt(mean h_m²+eps) · rsqrt(mean key_m²+eps) / √d`；`gate_m = σ(sign(dot)·√max(|dot|, 1e-6))`；`X_m += gate_m·value`（fp32）。无短卷积（V4.1 去掉）。
-- 初始化（推断）：表 N(0, 0.02)；`wkv` 的 value 部分为 0（模块开局为恒等）；key 部分 N(0, 0.02)；`q_weight`、`k_weight` 为 1。
+- 初始化（推断）：表与 `wkv` 均 N(0, 0.02)，`q_weight`、`k_weight` 为 1，不做任何置零。原版 Engram 只把短卷积置 0（卷积分支恒等，门控值从第一步就写入残差）；V4.1 去掉了卷积，所以没有对应的置零项。
 - 尺寸：两层合计约 29M（表约 25M）。
 
 ## 9. 训练配方
@@ -222,7 +222,7 @@ Muon「逻辑独立矩阵」拆分：`wq_b` 按 16 头拆、indexer `wq_b` 按 8
 
 ### 9.5 初始化
 
-线性层 N(0, 0.02)，残差出口投影（`wo_b`、专家 `w2`）再乘 1/√(2L)（沿用仓库习惯）；mHC `scale`=0.01、`base`=0；`attn_sink`=0（推断）；Engram value 投影 0；专家 bias 0；norm 权重 1。
+线性层 N(0, 0.02)，残差出口投影（`wo_b`、专家 `w2`）再乘 1/√(2L)（沿用仓库习惯）；mHC `scale`=0.01、`base`=0；`attn_sink`=0（推断）；Engram 见 §8；专家 bias 0；norm 权重 1。
 
 ### 9.6 3090 默认
 
@@ -304,7 +304,7 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 | CED | 解码器仅第 4 层有压缩器且输入为编码器输出 |
 | mHC | 与官方 `hc_split_sinkhorn` 一致；行列和≈1；单遍错位生效；`scale=0, base=0` 时等价 Pre-Norm |
 | MoE | 与官方 `Gate`/`Expert`/`MoE` 一致；bias 只影响选择；均衡损失手算；bias 更新方向 |
-| Engram | 哈希 id 与官方一致；压缩表合并大小写与重音；门控一致；初始化为恒等 |
+| Engram | 哈希 id 与官方一致；压缩表合并大小写与重音；门控一致；开局即写入残差且表能拿到梯度 |
 | 优化器 | NS 系数与轮数；head-wise 拆分等价逐头计算；Sinkhorn 更新与 Algorithm 1 直译一致、屏蔽行不更新；每个参数恰属一组 |
 | 打包 | 文档段都从偶数位置开始；`doc_ids` 掩码正确 |
 | 推理 | P ≤ 128 时缓存生成与全量 forward 逐 token 一致；P > 128 时与带重放掩码的训练 forward 一致；环形缓存绕回正确；m=2 跨组正确；前缀缓存命中不重算全局 KV |
@@ -324,7 +324,7 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 
 1. indexer KL 的目标取来源层自己的主注意力；token 平均；三层平均；权重 1。
 2. mHC `base` 初值 0、`fn` ~ N(0, 0.02)。
-3. Engram value 投影零初始化、表 N(0, 0.02)；Muon 中 `wkv` 拆成 4 key + 1 value。
+3. Engram 表与 `wkv` 均 N(0, 0.02)、不置零；Muon 中 `wkv` 拆成 4 key + 1 value。
 4. `attn_sink` 初值 0。
 5. 序列均衡损失跨层求和。
 6. 多轮 SFT 每个回答起点各做一次 Decoder Bounded Replay 截断。

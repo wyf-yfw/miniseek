@@ -85,11 +85,14 @@ def test_engram_forward_matches_official():
     torch.testing.assert_close(eng(x, hash_ids), expect, atol=1e-5, rtol=1e-5)
 
 
-def test_engram_identity_at_init():
+def test_engram_writes_and_trains_from_init():
     cfg, layout, eng = _engram(1)
     x = torch.randn(2, 9, cfg.hc_mult, cfg.dim)
     hash_ids = torch.randint(0, layout.num_embeddings[0], (2, 9, layout.n_cols))
-    assert torch.equal(eng(x, hash_ids), x)
+    out = eng(x, hash_ids)
+    assert not torch.equal(out, x)
+    out.square().mean().backward()
+    assert eng.embed.weight.grad.abs().sum() > 0 and eng.q_weight.grad.abs().sum() > 0
 
 
 def test_hasher_rejects_wrong_compressed_size():

@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .ckpt import recomputing
 from .config import FlashConfig
 
 
@@ -135,6 +136,8 @@ class MoE(nn.Module):
 
     @torch.compiler.disable
     def _remember(self, counts: torch.Tensor) -> None:
+        if recomputing():
+            return
         counts = counts.detach()
         if self.training:
             self._step_counts = counts if self._step_counts is None else self._step_counts + counts
