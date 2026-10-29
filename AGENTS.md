@@ -4,7 +4,7 @@
 
 ## 项目是什么
 
-- **目标**：做一套**层实现对齐 DeepSeek-M**（arXiv:2609.19969）的超小可训语言模型。`d`、层数、专家个数、top-k、中间维、总参可以小于论文；**层内算子不能换成另一种算法**；不清楚的以论文和官方推理代码（HF `deepseek-ai/DeepSeek-V4.1-Flash/inference`）为准。
+- **目标**：做一套**层实现对齐 DeepSeek-V4.1-Flash**（arXiv:2609.19969）的超小可训语言模型。`d`、层数、专家个数、top-k、中间维、总参可以小于论文；**层内算子不能换成另一种算法**；不清楚的以论文和官方推理代码（HF `deepseek-ai/DeepSeek-V4.1-Flash/inference`）为准。
 - **主线 MiniSeek-M0.1**（`--arch miniseek-m`，包 `algo/model/miniseek_m/`，训练辅助 `algo/miniseek_m_train.py`，spec `docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`）：CED 编码 4 + 解码 4，层模式 `SWA,SWA,Full,Reuse | Full,Reuse,Reindex,Reuse`（编码 m=2、解码 m=1，L4 建候选池）；Single-Pass mHC（4 流、Sinkhorn 20）；MoE 1 共享 + 64 路由 top-6、中间维 176（sqrt-softplus 打分，分数 + bias 选专家，选中分数归一后 ×1.5 加权，clamp SwiGLU 阈值 10，bias 每步 ±0.001，序列级 aux 1e-4）；Engram@L1·L3；DSpark 3 block 另训。主干 + Engram 186,933,744（每 token 激活约 33M），DSpark 19,256,850；预算是主干 + Engram ≤200M。全程 BF16（不做论文的 FP4/FP8 KV），暂无视觉。
 - 产品名写全称 **MiniSeek-M**（不要单独叫 `m`）；Python 包用下划线 `miniseek_m`。CLI `--arch miniseek-m`（旧别名 `m` / `v41` 加载时归一）。带 Dense / Tiny 的完整代码在分支 `archive/dense-tiny`；`main` 只保留 MiniSeek-M。旧独立 `MoELM` 已移除。MiniMind 仅作 tokenizer / README 版式参考。对外文案不要写 V4.1 / F0.1；HF 官方路径可保留原名。
 - **作者署名**：`wyf-yfw`（勿写真实姓名）。
@@ -90,7 +90,7 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 
 1. 公仓安全：无私钥、无隧道、无机器内网细节进 commit；文档里若必须提 VPS，仅运维说明且提醒勿提交配置文件。
 2. 改部署/重启服务前确认 worker 与训练隔离仍在；优先热更 API/前端，勿连带停训。
-3. 层实现对齐 DeepSeek-M。宽度和专家数量可以缩小，算子不换。MoE 用 sqrt-softplus 打分 + bias 选专家、选中分数归一 ×route_scale 加权、clamp SwiGLU。Tiny / Dense 是普通因果注意力 + Pre-Norm，不要画成 SWA / CSA2 / CED / mHC；只有 M0.1 画 M 结构。不把 MiniMind 当学习目标。
+3. 层实现对齐 DeepSeek-V4.1-Flash。宽度和专家数量可以缩小，算子不换。MoE 用 sqrt-softplus 打分 + bias 选专家、选中分数归一 ×route_scale 加权、clamp SwiGLU。Tiny / Dense 是普通因果注意力 + Pre-Norm，不要画成 SWA / CSA2 / CED / mHC；只有 M0.1 画 M 结构。不把 MiniMind 当学习目标。
 4. 用户未要求时不要新建无关大文件、不要擅自删正在训练引用的数据路径。
 5. 中文沟通可默认；代码/commit 信息保持清晰英文或中英均可，与现有风格一致。
 
@@ -111,7 +111,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 - **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 主文件 `pretrain_mix_12g_clean.jsonl`；SFT **默认与 HF 已切 v5 10G**（`sft_miniseek_v5_10g.jsonl`；5G 对照包保留；见 `SOURCES_v5.md`）。**可行性快跑推荐 short256**（已推 HF `sft_short256`；见 `SOURCES_v5_short256.md`）。训练用 `--valid-ratio`，Hub 无独立 valid。v1 与 `_raw_sft_v5` 已清。
 - **代码**：公仓 `main` 以 MiniSeek-M（`--arch miniseek-m`，`algo/model/miniseek_m/`）为主；Dense / Tiny 完整快照在 `archive/dense-tiny`。旧 `MoELM` 已删；产品名写 MiniSeek-M，不写 V4.1 / 单独的 m。
 - **README**：按 MiniMind 版式直接介绍仓库（M0.1 全架构复现 + 训练 / 推理流程），**不写**逐阶段推进叙事；阶段规划只留在 `docs/STAGE_PLAN.md`（历史记录）。
-- **架构页**：默认预设 **M0.1**（可训练）；参考预设 **DeepSeek-M**（`m-ref`，不可训练）。抽屉说明走 `archMModuleInfo`。Tiny / D 按 `DenseLM` 画，不画 SWA / CSA2 / CED / mHC。
+- **架构页**：默认预设 **MiniSeek-M**（可训练）；参考预设 **DeepSeek-V4.1-Flash**（`m-ref` / `v41-flash`，不可训练，论文原名不要改成 DeepSeek-M）。抽屉说明走 `archMModuleInfo`。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。
 - **Loss 图**：取点间隔可在 UI 调节（从 train.log 按 `plot_every` 重采样），不绑死训练启动时的 plot_every。

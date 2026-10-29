@@ -1,4 +1,4 @@
-"""MiniSeek-M 配置。字段名与 DeepSeek-M 官方 inference/model.py 的 ModelArgs 一致。
+"""MiniSeek-M 配置。字段名与 DeepSeek-V4.1-Flash 官方 inference/model.py 的 ModelArgs 一致。
 
 默认值即 MiniSeek-M0.1：8 层（编码 0–3 / 解码 4–7），d=512，1+64 专家 top-6。
 产品线 arch 代号是 miniseek-m；旧 checkpoint / CLI 里的 m、v41 加载时归一成 miniseek-m。

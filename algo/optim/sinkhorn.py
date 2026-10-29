@@ -1,4 +1,4 @@
-"""Sinkhorn 均衡的动量更新（DeepSeek-M §2.5 Algorithm 1），用于 embedding、head 与 Engram 表。
+"""Sinkhorn 均衡的动量更新（DeepSeek-V4.1-Flash §2.5 Algorithm 1），用于 embedding、head 与 Engram 表。
 
 M ← βM + (1−β)G；Ĝ = βM + (1−β)G；‖Ĝ_i‖ ≤ τ·mean 的行置零；奇数步行 ℓ2 归一、偶数步列 ℓ2 归一，
 共 K 次（K 为奇数）；Δ = √n·U；W ← W − γηΔ。不做权重衰减。

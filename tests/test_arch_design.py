@@ -20,4 +20,4 @@ def test_design_miniseek_m_fig3():
 def test_design_m_ref():
     out = inspect_design("m-ref")
     assert out["meta"]["source"] == "reference"
-    assert out["meta"]["release_name"] == "DeepSeek-M"
+    assert out["meta"]["release_name"] == "DeepSeek-V4.1-Flash"

@@ -14,10 +14,10 @@ _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
 
 PRESET_ARCHS = ("miniseek-m", "m-ref")
 
-# Reference-only aliases（DeepSeek-M 论文示意；不可训练）。
+# Reference-only aliases（DeepSeek-V4.1-Flash 论文示意；不可训练）。
 _M_REF_ALIASES = frozenset({
     "m-ref",
-    "deepseek-m",
+    "deepseek-v4.1-flash",
     "v41-flash",
     "v4.1-flash",
     "deepseek-v4.1-flash",
@@ -424,7 +424,7 @@ def inspect_v41_model(
     step: Any = None,
     loss: Any = None,
 ) -> Dict[str, Any]:
-    """MiniSeek-M（DeepSeek-M 全架构的小尺寸版）：Fig.3 风格示意 + 逐层参数。"""
+    """MiniSeek-M（DeepSeek-V4.1-Flash 全架构的小尺寸版）：Fig.3 风格示意 + 逐层参数。"""
     named, dspark_params = _v41_param_counts(cfg)
     d, V, E = cfg.dim, cfg.vocab_size, cfg.n_encoder_layers
     btd, bt = f"[b,t,{d}]", "[b,t]"
@@ -501,7 +501,7 @@ def inspect_v41_model(
     tgt = sorted(cfg.dspark_target_layer_ids)
     tgt_text = f"L{tgt[0]}–L{tgt[-1]}" if tgt == list(range(tgt[0], tgt[-1] + 1)) else "、".join(f"L{i}" for i in tgt)
     fig3 = {
-        "title": f"{cfg.release_name} | DeepSeek-M 架构（{cfg.n_layers} 层：编码 {E} + 解码 {cfg.n_layers - E}）",
+        "title": f"{cfg.release_name} | DeepSeek-V4.1-Flash 架构（{cfg.n_layers} 层：编码 {E} + 解码 {cfg.n_layers - E}）",
         "encoder": {"id": "causal_encoder", "label": f"Causal Encoder ({E}L)", "n_layers": E,
                     "groups": _v41_groups(cfg, 0, E, "enc"), "output": {"id": "enc_hidden", "label": "Enc. Hidden States"}},
         "decoder": {"id": "decoder", "label": f"Decoder ({cfg.n_layers - E}L)", "n_layers": cfg.n_layers - E,
@@ -554,7 +554,7 @@ def inspect_v41_model(
 
 
 def inspect_v41_flash() -> Dict[str, Any]:
-    """DeepSeek-M reference architecture (arXiv:2609.19969 §2.1 / Fig.3 / §4.2.1).
+    """DeepSeek-V4.1-Flash reference architecture (arXiv:2609.19969 §2.1 / Fig.3 / §4.2.1).
 
     Reference-only design diagram — not a trainable MiniSeek ModelConfig.
     Layer blocks are *group-level* (matching Fig.3 readability), not 40 expanded stacks.
@@ -1007,8 +1007,8 @@ def inspect_v41_flash() -> Dict[str, Any]:
     ]
 
     config: Dict[str, Any] = {
-        "arch": "deepseek-m",
-        "release_name": "DeepSeek-M",
+        "arch": "deepseek-v4.1-flash",
+        "release_name": "DeepSeek-V4.1-Flash",
         "d_model": d,
         "n_layers": n_layers,
         "n_heads": n_heads,
@@ -1036,7 +1036,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
         "loss": None,
         "source": "reference",
         "diagram": "fig3",
-        "release_name": "DeepSeek-M",
+        "release_name": "DeepSeek-V4.1-Flash",
         "paper": "arXiv:2609.19969",
         "backbone_params": backbone,
         "act_prefill": 8_000_000_000,
@@ -1046,7 +1046,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
 
     # Dedicated Fig.3 schematic payload (frontend renders this instead of flat cards).
     fig3: Dict[str, Any] = {
-        "title": "Figure 3 | Overall architecture of DeepSeek-M",
+        "title": "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash",
         "caption": (
             "40-layer Multimodal MoE Transformer = Causal Encoder 20L + Decoder 20L (CED). "
             "All FFN = DeepSeekMoE. L0–1 SWA; remaining layers CSA2. "
@@ -1219,7 +1219,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
     }
 
     return {
-        "path": "reference:deepseek-m",
+        "path": "reference:deepseek-v4.1-flash",
         "config": config,
         "meta": meta,
         "fig3": fig3,

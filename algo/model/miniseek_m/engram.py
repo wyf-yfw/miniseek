@@ -1,7 +1,7 @@
 """Engram：n-gram 哈希查表，按残差流分支做上下文门控后写回残差流。
 
 对应官方 inference/engram.py（tokenizer 压缩、质数桶布局、乘子、XOR 滚动哈希）与 model.py 的 Engram
-（每条流一个 key、共享 value、带符号平方根后 sigmoid 门控）。DeepSeek-M 去掉了原版的短因果卷积。
+（每条流一个 key、共享 value、带符号平方根后 sigmoid 门控）。DeepSeek-V4.1-Flash 去掉了原版的短因果卷积。
 """
 
 from __future__ import annotations
@@ -201,7 +201,7 @@ class Engram(nn.Module):
 
     @torch.no_grad()
     def reset_parameters(self) -> None:
-        # 原版只把短卷积置 0（卷积分支恒等，门控值照常写入）；DeepSeek-M 去掉了卷积，因此不置零
+        # 原版只把短卷积置 0（卷积分支恒等，门控值照常写入）；DeepSeek-V4.1-Flash 去掉了卷积，因此不置零
         nn.init.normal_(self.embed.weight, std=0.02)
         nn.init.normal_(self.wkv.weight, std=0.02)
         self.q_weight.fill_(1.0)

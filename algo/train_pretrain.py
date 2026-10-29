@@ -382,7 +382,7 @@ def main() -> None:
         "--aux-coef",
         type=float,
         default=0.0001,
-        help="MoE 序列级均衡损失权重（DeepSeek-M 为 0.0001）。专家 bias 另按负载更新，不靠这个系数",
+        help="MoE 序列级均衡损失权重（DeepSeek-V4.1-Flash 为 0.0001）。专家 bias 另按负载更新，不靠这个系数",
     )
     p.add_argument("--max-seq-len", type=int, default=None, help="默认 m=1024，其余 512")
     p.add_argument("--batch-size", type=int, default=32)

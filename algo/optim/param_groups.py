@@ -1,4 +1,4 @@
-"""M 参数分组（DeepSeek-M §2.5、§4.2.2）与组合优化器。
+"""M 参数分组（DeepSeek-V4.1-Flash §2.5、§4.2.2）与组合优化器。
 
 - Muon：所有线性层权重矩阵（注意力、压缩器、indexer、路由器、专家、mHC fn、Engram wkv）
 - AdamW：RMSNorm 权重（wd 0.1）；attn sink、mHC base/scale、Engram q/k 权重（wd 0）

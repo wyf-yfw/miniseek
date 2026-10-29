@@ -1,4 +1,4 @@
-"""MiniSeek 模型包：仅 MiniSeek-M（DeepSeek-M 全架构）。
+"""MiniSeek 模型包：仅 MiniSeek-M（DeepSeek-V4.1-Flash 全架构）。
 
 Dense / Tiny 完整快照见分支 `archive/dense-tiny`。
 """

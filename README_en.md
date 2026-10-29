@@ -2,7 +2,7 @@
 
 # MiniSeek
 
-**A tiny DeepSeek-M, full architecture, trained from scratch on one RTX 3090**
+**A tiny DeepSeek-V4.1-Flash, full architecture, trained from scratch on one RTX 3090**
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/wyf-yfw/miniseek?style=social)](https://github.com/wyf-yfw/miniseek/stargazers)
 [![GitHub Code License](https://img.shields.io/github/license/wyf-yfw/miniseek)](LICENSE)
@@ -14,7 +14,7 @@
 
 </div>
 
-* This project trains **MiniSeek-M0.1** from scratch on a single RTX 3090 in native PyTorch: a tiny language model whose layers match [DeepSeek-M](https://arxiv.org/abs/2609.19969). Backbone + Engram total **187M** parameters, with about **33M** active per token.
+* This project trains **MiniSeek-M0.1** from scratch on a single RTX 3090 in native PyTorch: a tiny language model whose layers match [DeepSeek-V4.1-Flash](https://arxiv.org/abs/2609.19969). Backbone + Engram total **187M** parameters, with about **33M** active per token.
 * Depth, width and expert count are scaled down to fit a 3090; no operator inside a layer is swapped for something else: CED causal encoder–decoder, SWA + CSA2 (Full / Reuse / Reindex) compressed sparse attention with the hierarchical sparse indexer, Single-Pass mHC multi-stream residuals, sqrt-softplus routed MoE, Engram n-gram memory, and the DSpark speculative-decoding drafter.
 * The training recipe follows the paper too: grouped Muon (hybrid Newton–Schulz) + AdamW + Sinkhorn momentum, sample-level attention masking, the indexer KL loss, and auxiliary-loss-free expert-bias balancing.
 * Inference implements KV caches, CED prefill, a prefix cache with bounded replay, and confidence-scheduled DSpark speculative decoding whose output distribution matches the backbone.
@@ -35,7 +35,7 @@
 
 # 📌 Overview
 
-DeepSeek-M adds a whole set of new parts to the Transformer: a global KV computed once by the encoder and reused by every decoder layer (CED), compressed sparse attention that alternates between three modes, four residual streams with mHC, hashed Engram memory, and DSpark, which drafts several tokens at once. The paper and the official code target hundreds of GPUs, FP4 / FP8 kernels and hundreds of billions of parameters, which makes them hard to read, run or modify on a personal GPU.
+DeepSeek-V4.1-Flash adds a whole set of new parts to the Transformer: a global KV computed once by the encoder and reused by every decoder layer (CED), compressed sparse attention that alternates between three modes, four residual streams with mHC, hashed Engram memory, and DSpark, which drafts several tokens at once. The paper and the official code target hundreds of GPUs, FP4 / FP8 kernels and hundreds of billions of parameters, which makes them hard to read, run or modify on a personal GPU.
 
 MiniSeek shrinks the same architecture to a size a 3090 can train. Depth, width and expert count are smaller, but every operator follows the paper and the official code instead of a common stand-in. On one machine you can walk the whole path (data cleaning → pretraining → SFT → drafter training → inference with speculative decoding → evaluation) and use the code and tests to see what each part does.
 
@@ -52,7 +52,7 @@ MiniSeek shrinks the same architecture to a size a 3090 can train. Depth, width 
 
 | Model | Params | Notes | Release |
 |-------|--------|-------|---------|
-| MiniSeek-M0.1 | 187M-A33M (+19M DSpark) | Full DeepSeek-M architecture | coming |
+| MiniSeek-M0.1 | 187M-A33M (+19M DSpark) | Full DeepSeek-V4.1-Flash architecture | coming |
 | [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense SFT / chat | 2026-10 |
 | [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense pretrained base | 2026-10 |
 
@@ -151,7 +151,7 @@ MINISEEK_MONOLITH=1 python -m uvicorn api.app:app --host 127.0.0.1 --port 7860
 |------|--------------|
 | Train | Create Tasks, pick M / Dense / Tiny, start and stop runs, follow logs and loss curves; artifacts go to `tasks/<id>/` |
 | Chat / Continue | Load a checkpoint to chat or continue text; M0.1 multi-turn chat reuses the prefix cache, and a `dspark.pt` next to the checkpoint switches to DSpark speculative decoding |
-| Architecture | The M0.1 diagram (open any layer for operators, formulas, parameters), the DeepSeek-M paper reference, Dense / Tiny |
+| Architecture | The M0.1 diagram (open any layer for operators, formulas, parameters), the DeepSeek-V4.1-Flash paper reference, Dense / Tiny |
 | Bench | C-Eval / CMMLU / GSM8K (lm-eval) |
 | Data cleaning | Length / language / repetition / dedup / sensitive-word filters for pretraining jsonl |
 | Expert load | Runs a routing probe on training data and shows how often each of the 64 routed experts is picked |
@@ -248,7 +248,7 @@ Hub: [`MiniSeek-Pretrain`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-Pret
 
 ## Structure
 
-MiniSeek-M0.1 has 8 layers: the first 4 form the causal encoder and the last 4 the decoder. Every operator matches DeepSeek-M.
+MiniSeek-M0.1 has 8 layers: the first 4 form the causal encoder and the last 4 the decoder. Every operator matches DeepSeek-V4.1-Flash.
 
 * **Attention**: Q goes through a low-rank path (512→128→16×128); K and V are one shared 128-dim latent used by all heads; RoPE covers only the last 32 dims and is rotated back on the output; softmax has a learnable per-head sink; the output uses a grouped low-rank projection with 2 groups. Every layer has its own 128-token sliding window.
 * **CSA2 modes**: a Full layer compresses the sequence into a global KV (m=2 pairwise pooling in the encoder, m=1 in the decoder) and the indexer picks the top-64 entries; a Reuse layer reuses the source layer's global KV and top-k; a Reindex layer reuses the global KV and re-selects top-k inside the candidate pool.
@@ -278,14 +278,14 @@ Full hyperparameters are in [`algo/model/miniseek_m/config.py`](algo/model/minis
 
 | Model Name | params | vocab | max_seq | d_model | n_layers | heads × head_dim | MoE | note |
 |------------|--------|-------|---------|---------|----------|------------------|-----|------|
-| MiniSeek-M0.1 | 187M-A33M | 6400 | 1024 | 512 | 8 (4+4) | 16 × 128 (shared KV) | 1+64, top-6, h=176 | full DeepSeek-M architecture |
+| MiniSeek-M0.1 | 187M-A33M | 6400 | 1024 | 512 | 8 (4+4) | 16 × 128 (shared KV) | 1+64, top-6, h=176 | full DeepSeek-V4.1-Flash architecture |
 | MiniSeek-D0.1 | 28M | 6400 | 512 | 512 | 8 | 8 × 64 | — | dense |
 
 187M = 158M backbone + 29M Engram tables; A33M counts the backbone parameters each token actually uses (only the 6 selected routed experts, no Engram tables). The DSpark drafter adds another 19M.
 
-## Differences from DeepSeek-M
+## Differences from DeepSeek-V4.1-Flash
 
-| Item | DeepSeek-M | MiniSeek-M0.1 |
+| Item | DeepSeek-V4.1-Flash | MiniSeek-M0.1 |
 |------|---------------------|---------------|
 | Layers | 40 (20 encoder + 20 decoder) | 8 (4 encoder + 4 decoder) |
 | MoE | 1 shared + 384 routed, top-6 | 1 shared + 64 routed, top-6 |
@@ -345,7 +345,7 @@ tasks/                  # training outputs (not in Git)
 
 # 📌 Acknowledgements
 
-- Architecture and reference implementation: the [DeepSeek-M paper](https://arxiv.org/abs/2609.19969) and the official inference code in [deepseek-ai/DeepSeek-M](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) (MIT)
+- Architecture and reference implementation: the [DeepSeek-V4.1-Flash paper](https://arxiv.org/abs/2609.19969) and the official inference code in [deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) (MIT)
 - Tokenizer and README layout: [jingyaogong/minimind](https://github.com/jingyaogong/minimind)
 - Benchmarks: [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness), C-Eval, CMMLU
 
@@ -359,7 +359,7 @@ If this project helps you, please cite the repository or link to it:
 
 ```bibtex
 @misc{miniseek2026,
-  title        = {MiniSeek: A Tiny Trainable Reproduction of the DeepSeek-M Architecture},
+  title        = {MiniSeek: A Tiny Trainable Reproduction of the DeepSeek-V4.1-Flash Architecture},
   author       = {wyf-yfw},
   year         = {2026},
   howpublished = {\url{https://github.com/wyf-yfw/miniseek}}

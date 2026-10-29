@@ -1,4 +1,4 @@
-"""DSpark 草稿头：半自回归起草 + 置信度调度验证（arXiv:2607.05147；DeepSeek-M §2.4.3）。
+"""DSpark 草稿头：半自回归起草 + 置信度调度验证（arXiv:2607.05147；DeepSeek-V4.1-Flash §2.4.3）。
 
 结构对应官方 inference/model.py 的 DSparkBlock / DSparkAttention / DSparkMarkovHead /
 DSparkConfidenceHead：

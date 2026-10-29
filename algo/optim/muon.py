@@ -1,4 +1,4 @@
-"""Muon（DeepSeek-M Algorithm 1）：Nesterov 动量 + 混合 Newton–Schulz 正交化 + RMS 重标定。
+"""Muon（DeepSeek-V4 Algorithm 1）：Nesterov 动量 + 混合 Newton–Schulz 正交化 + RMS 重标定。
 
 M ← μM + G；O′ = HybridNS(μM + G)；O = O′·√max(n,m)·γ；W ← W(1 − ηλ) − ηO。
 参数可带属性 ``_muon_splits = k``：按行切成 k 个逻辑独立矩阵分别正交化（head-wise Muon 等）。

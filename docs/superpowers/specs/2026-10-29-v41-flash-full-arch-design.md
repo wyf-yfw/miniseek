@@ -1,4 +1,4 @@
-# MiniSeek-M0.1：完整复现 DeepSeek-M 架构（3090 可训）
+# MiniSeek-M0.1：完整复现 DeepSeek-V4.1-Flash 架构（3090 可训）
 
 - 日期：2026-10-29
 - 状态：第 1–8 部分已逐段经用户确认；第 9–10 部分及所有未决细节按用户指示「全部按推荐来」定稿
@@ -8,7 +8,7 @@
 
 | 项 | 决定 |
 |----|------|
-| 目标 | 层内算子与整体框架完整对齐 DeepSeek-M（arXiv:2609.19969）；宽度、层数、专家数、表大小可缩小 |
+| 目标 | 层内算子与整体框架完整对齐 DeepSeek-V4.1-Flash（arXiv:2609.19969）；宽度、层数、专家数、表大小可缩小 |
 | 范围（做） | 文本主干（CED + SWA/CSA2 三模式 + 分层稀疏索引 + Single-Pass mHC + MoE + Engram）、训练配方、推理侧（KV cache、CED 预填充、Bounded Replay、前缀缓存）、DSpark |
 | 范围（不做，后续阶段） | 多模态（DeepSeek-ViT + Aligner + 图文分开的路由 bias） |
 | 硬件 | 单卡 RTX 3090（Ampere，24GB）。全部 BF16；KV / indexer 的 FP4、FP8 与 QAT **不做**（用户确认保留此差异） |
@@ -19,7 +19,7 @@
 
 ## 1. 依据与优先级
 
-1. 官方参考实现（MIT）：HF `deepseek-ai/DeepSeek-M` 的 `inference/model.py`、`engram.py`、`kernel.py`、`config.json`。**逐算子以此为准。**
+1. 官方参考实现（MIT）：HF `deepseek-ai/DeepSeek-V4.1-Flash` 的 `inference/model.py`、`engram.py`、`kernel.py`、`config.json`。**逐算子以此为准。**
 2. M 论文 arXiv:2609.19969（§2 架构、§2.5 优化、§3.2.2 Bounded Replay、§4.2 配置）。
 3. M 声明沿用或引用的原文：V4 arXiv:2606.19348（CSA、mHC 参数化、Muon 算法）、V3.2 arXiv:2512.02556（DSA indexer 的 KL 训练）、mHC arXiv:2512.24880（α 初值 0.01）、Engram arXiv:2601.07372、DSpark arXiv:2607.05147、DeepSeek-V3（序列均衡损失公式）。
 4. 以上都没写的，由本设计决定，统一标「推断」，汇总在 §13。
@@ -57,7 +57,7 @@
 
 ### 3.2 配置取值（`FlashConfig` 默认值 = MiniSeek-M0.1）
 
-| 字段 | M0.1 | 官方 DeepSeek-M |
+| 字段 | M0.1 | 官方 DeepSeek-V4.1-Flash |
 |------|------|-----------------|
 | `vocab_size` | 6400（MiniMind tokenizer） | 129280 |
 | `dim` / `n_layers` | 512 / 8（编码 0–3，解码 4–7） | 5120 / 40 |

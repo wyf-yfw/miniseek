@@ -2,7 +2,7 @@
 
 # MiniSeek
 
-**单卡 3090 从零训练的 DeepSeek-M 全架构超小模型**
+**单卡 3090 从零训练的 DeepSeek-V4.1-Flash 全架构超小模型**
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/wyf-yfw/miniseek?style=social)](https://github.com/wyf-yfw/miniseek/stargazers)
 [![GitHub Code License](https://img.shields.io/github/license/wyf-yfw/miniseek)](LICENSE)
@@ -14,7 +14,7 @@
 
 </div>
 
-* 此开源项目用 PyTorch 原生代码，在单张 RTX 3090 上从 0 训练 **MiniSeek-M0.1**：层实现对齐 [DeepSeek-M](https://arxiv.org/abs/2609.19969) 的超小语言模型，主干 + Engram 共 **187M** 参数，每个 token 只激活约 **33M**。
+* 此开源项目用 PyTorch 原生代码，在单张 RTX 3090 上从 0 训练 **MiniSeek-M0.1**：层实现对齐 [DeepSeek-V4.1-Flash](https://arxiv.org/abs/2609.19969) 的超小语言模型，主干 + Engram 共 **187M** 参数，每个 token 只激活约 **33M**。
 * 层数、宽度、专家个数按 3090 的预算缩小，层内算子一个不换：CED 因果编码-解码、SWA + CSA2（Full / Reuse / Reindex）压缩稀疏注意力与分层稀疏索引、Single-Pass mHC 多流残差、sqrt-softplus 路由的 MoE、Engram n-gram 记忆、DSpark 投机解码草稿头。
 * 训练配方也按论文来：Muon（混合 Newton–Schulz）+ AdamW + Sinkhorn 动量的分组优化、样本级注意力掩码、indexer KL 损失、无辅助损失的专家 bias 均衡。
 * 推理侧实现了 KV 缓存、CED 预填充、前缀缓存与有界重放，以及按置信度调度、输出分布与主干一致的 DSpark 投机解码。
@@ -35,7 +35,7 @@
 
 # 📌 项目介绍
 
-DeepSeek-M 在 Transformer 上加了一整套新部件：编码器算一次、解码器各层复用的全局 KV（CED），三种模式交替的压缩稀疏注意力，4 条残差流的 mHC，哈希查表的 Engram 记忆，一次起草多个 token 的 DSpark。论文和官方代码面向的是数百张卡、FP4 / FP8 内核和数千亿参数，在个人显卡上很难读懂、跑通，更谈不上动手改。
+DeepSeek-V4.1-Flash 在 Transformer 上加了一整套新部件：编码器算一次、解码器各层复用的全局 KV（CED），三种模式交替的压缩稀疏注意力，4 条残差流的 mHC，哈希查表的 Engram 记忆，一次起草多个 token 的 DSpark。论文和官方代码面向的是数百张卡、FP4 / FP8 内核和数千亿参数，在个人显卡上很难读懂、跑通，更谈不上动手改。
 
 MiniSeek 把这套架构原样缩到一张 3090 能训的尺寸：层数、宽度、专家个数可以小，层内每个算子都按论文和官方代码实现，不拿常见的替代品顶替。在一台机器上就能完整走一遍「数据清洗 → 预训练 → SFT → 草稿头训练 → 推理与投机解码 → 评测」，对照代码和单测看清每个部件在做什么。
 
@@ -52,7 +52,7 @@ MiniSeek 把这套架构原样缩到一张 3090 能训的尺寸：层数、宽�
 
 | 模型 | 参数量 | 说明 | Release |
 |------|--------|------|---------|
-| MiniSeek-M0.1 | 187M-A33M（DSpark 另 19M） | DeepSeek-M 全架构 | 待发布 |
+| MiniSeek-M0.1 | 187M-A33M（DSpark 另 19M） | DeepSeek-V4.1-Flash 全架构 | 待发布 |
 | [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense SFT / 对话 | 2026-10 |
 | [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense 预训练基座 | 2026-10 |
 
@@ -151,7 +151,7 @@ MINISEEK_MONOLITH=1 python -m uvicorn api.app:app --host 127.0.0.1 --port 7860
 |------|------|
 | 训练 | 建 Task，选 M / Dense / Tiny，启停、看日志和 Loss 曲线；产物在 `tasks/<id>/` |
 | 对话 / 续写 | 加载 checkpoint 对话或续写；M0.1 多轮对话复用前缀缓存，同目录有 `dspark.pt` 时改走 DSpark 投机解码 |
-| 架构 | M0.1 架构图（点开每一层看算子、公式、参数）、DeepSeek-M 论文参考图、Dense / Tiny |
+| 架构 | M0.1 架构图（点开每一层看算子、公式、参数）、DeepSeek-V4.1-Flash 论文参考图、Dense / Tiny |
 | 评测 | C-Eval / CMMLU / GSM8K（lm-eval） |
 | 数据清洗 | 预训练 jsonl 的长度 / 语言 / 重复 / 去重 / 敏感词过滤 |
 | 专家负载 | 在训练数据上跑路由探针，看 64 个路由专家各被选中多少 |
@@ -248,7 +248,7 @@ Hub：[`MiniSeek-Pretrain`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-Pre
 
 ## 结构
 
-MiniSeek-M0.1 共 8 层：前 4 层是因果编码器，后 4 层是解码器，层内算子与 DeepSeek-M 一致。
+MiniSeek-M0.1 共 8 层：前 4 层是因果编码器，后 4 层是解码器，层内算子与 DeepSeek-V4.1-Flash 一致。
 
 * **注意力**：Q 走低秩（512→128→16×128）；K、V 是同一份 128 维潜向量，所有头共享；只在最后 32 维加 RoPE，输出端再反向旋转；softmax 带每头可学习的 sink；输出分 2 组做低秩投影。每层都有窗口 128 的本层滑窗。
 * **CSA2 三种模式**：Full 层用压缩器把序列压成全局 KV（编码器 m=2 两两池化，解码器 m=1），由 indexer 打分选 top-64；Reuse 层复用来源层的全局 KV 和 top-k；Reindex 层复用全局 KV，在候选池里重选 top-k。
@@ -278,14 +278,14 @@ MiniSeek-M0.1 共 8 层：前 4 层是因果编码器，后 4 层是解码器，
 
 | Model Name | params | vocab | max_seq | d_model | n_layers | heads × head_dim | MoE | note |
 |------------|--------|-------|---------|---------|----------|------------------|-----|------|
-| MiniSeek-M0.1 | 187M-A33M | 6400 | 1024 | 512 | 8（4+4） | 16 × 128（KV 共享） | 1+64，top-6，h=176 | DeepSeek-M 全架构 |
+| MiniSeek-M0.1 | 187M-A33M | 6400 | 1024 | 512 | 8（4+4） | 16 × 128（KV 共享） | 1+64，top-6，h=176 | DeepSeek-V4.1-Flash 全架构 |
 | MiniSeek-D0.1 | 28M | 6400 | 512 | 512 | 8 | 8 × 64 | — | Dense |
 
 187M = 主干 158M + Engram 表 29M；A33M 是每个 token 实际参与计算的主干参数（只算被选中的 6 个路由专家，不含 Engram 表）。DSpark 草稿头另有 19M。
 
-## 与 DeepSeek-M 的差异
+## 与 DeepSeek-V4.1-Flash 的差异
 
-| 项 | DeepSeek-M | MiniSeek-M0.1 |
+| 项 | DeepSeek-V4.1-Flash | MiniSeek-M0.1 |
 |----|---------------------|---------------|
 | 层数 | 40（编码 20 + 解码 20） | 8（编码 4 + 解码 4） |
 | MoE | 1 共享 + 384 路由，top-6 | 1 共享 + 64 路由，top-6 |
@@ -345,7 +345,7 @@ tasks/                  # 训练产物（不进 Git）
 
 # 📌 致谢
 
-- 架构与参考实现：[DeepSeek-M 论文](https://arxiv.org/abs/2609.19969) 与 [deepseek-ai/DeepSeek-M](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) 的官方推理代码（MIT）
+- 架构与参考实现：[DeepSeek-V4.1-Flash 论文](https://arxiv.org/abs/2609.19969) 与 [deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) 的官方推理代码（MIT）
 - 词表与 README 版式：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)
 - 客观评测：[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)、C-Eval、CMMLU
 
@@ -359,7 +359,7 @@ tasks/                  # 训练产物（不进 Git）
 
 ```bibtex
 @misc{miniseek2026,
-  title        = {MiniSeek: A Tiny Trainable Reproduction of the DeepSeek-M Architecture},
+  title        = {MiniSeek: A Tiny Trainable Reproduction of the DeepSeek-V4.1-Flash Architecture},
   author       = {wyf-yfw},
   year         = {2026},
   howpublished = {\url{https://github.com/wyf-yfw/miniseek}}

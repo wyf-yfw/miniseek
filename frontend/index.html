@@ -712,7 +712,7 @@
       font-weight: 500;
     }
 
-    /* DeepSeek-M Fig.3: bottom-up stacks, right-side repeats, wires on the blocks */
+    /* DeepSeek-V4.1-Flash Fig.3: bottom-up stacks, right-side repeats, wires on the blocks */
     .fig3-wrap {
       width: 100%;
       max-width: 1080px;
@@ -1251,7 +1251,7 @@
                 <button type="button" id="arch-miniseek-m" class="active" data-arch="miniseek-m">MiniSeek-M</button>
               </div>
               <p id="mode-hint" class="mode-hint">Pretrain：从零/续训语言模型；数据为每行 text 的 jsonl。</p>
-              <p id="arch-hint" class="mode-hint">MiniSeek-M：DeepSeek-M 全架构（CED / CSA2 / mHC / Engram / MoE）。</p>
+              <p id="arch-hint" class="mode-hint">MiniSeek-M：DeepSeek-V4.1-Flash 全架构（CED / CSA2 / mHC / Engram / MoE）。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
 
               <div class="param-group" id="group-data">
@@ -1518,9 +1518,9 @@
           <p class="field-hint" style="margin:0 0 10px">按本仓库设计直接出图，无需加载 checkpoint。</p>
           <div class="mode-row" id="arch-preset-row">
             <button type="button" id="arch-preset-miniseek-m" class="active" data-arch-preset="miniseek-m">MiniSeek-M</button>
-            <button type="button" id="arch-preset-m-ref" data-arch-preset="m-ref">DeepSeek-M</button>
+            <button type="button" id="arch-preset-m-ref" data-arch-preset="m-ref">DeepSeek-V4.1-Flash</button>
           </div>
-          <p id="arch-preset-hint" class="mode-hint">MiniSeek-M：MiniSeek-M0.1，DeepSeek-M 全架构的可训练小尺寸版。</p>
+          <p id="arch-preset-hint" class="mode-hint">MiniSeek-M：MiniSeek-M0.1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版。</p>
           <p id="arch-msg" class="arch-msg"></p>
           <div id="arch-summary" class="arch-summary" style="display:none"></div>
         </aside>
@@ -1538,7 +1538,7 @@
           </div>
           <div class="arch-canvas-wrap">
             <div id="arch-canvas" class="arch-canvas">
-              <span class="chat-empty" id="arch-empty">点左侧 MiniSeek-M / DeepSeek-M 查看设计或参考架构。</span>
+              <span class="chat-empty" id="arch-empty">点左侧 MiniSeek-M / DeepSeek-V4.1-Flash 查看设计或参考架构。</span>
             </div>
             <aside id="arch-drawer" class="arch-drawer" hidden>
               <div class="arch-drawer-head">
@@ -3825,8 +3825,8 @@
     let archPreset = "miniseek-m";
 
     const ARCH_PRESET_HINT = {
-      "miniseek-m": "MiniSeek-M：MiniSeek-M0.1，DeepSeek-M 全架构的可训练小尺寸版：CED 编码 4 + 解码 4，SWA / CSA2(Full·Reuse·Reindex)，Single-Pass mHC，Engram@L1·L3，MoE 1+64 top-6，主干+Engram ≈187M。",
-      "m-ref": "DeepSeek-M 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
+      "miniseek-m": "MiniSeek-M：MiniSeek-M0.1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版：CED 编码 4 + 解码 4，SWA / CSA2(Full·Reuse·Reindex)，Single-Pass mHC，Engram@L1·L3，MoE 1+64 top-6，主干+Engram ≈187M。",
+      "m-ref": "DeepSeek-V4.1-Flash 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
     };
 
     function fmtParams(n) {
@@ -3918,7 +3918,7 @@
           formula: rms,
         },
         attn: {
-          role: `DeepSeek-M 注意力，同一套算子覆盖 SWA 与 CSA2 的三种模式。Q 走低秩；K 和 V 是同一份 ${hd} 维潜向量，所有头共享；只在最后 ${rd} 维加 RoPE，输出端再反向旋转；softmax 分母多一个每头可学习的 sink；输出先分 ${og} 组做低秩投影再合并。每层都看本层最近 ${win} 个位置的滑窗 KV。SWA 层只有滑窗；Full 层另外看本层压缩出的全局 KV 里 indexer 选中的 top-${itk}；Reuse 层直接复用来源层的全局 KV 和 top-k；Reindex 层复用全局 KV，在候选池里重选 top-k。`,
+          role: `DeepSeek-V4.1-Flash 注意力，同一套算子覆盖 SWA 与 CSA2 的三种模式。Q 走低秩；K 和 V 是同一份 ${hd} 维潜向量，所有头共享；只在最后 ${rd} 维加 RoPE，输出端再反向旋转；softmax 分母多一个每头可学习的 sink；输出先分 ${og} 组做低秩投影再合并。每层都看本层最近 ${win} 个位置的滑窗 KV。SWA 层只有滑窗；Full 层另外看本层压缩出的全局 KV 里 indexer 选中的 top-${itk}；Reuse 层直接复用来源层的全局 KV 和 top-k；Reindex 层复用全局 KV，在候选池里重选 top-k。`,
           formula: `c_q = RMSNorm(W_qa · x)，W_qa: ${d}→${qr}\nq = W_qb · c_q，W_qb: ${qr}→${H}×${hd}\nkv = RMSNorm(W_kv · x)，W_kv: ${d}→${hd}（K = V，各头共享）\nq、kv 的后 ${rd} 维加 RoPE\nS_t = 滑窗 ${win} 个位置 ∪ top-k 全局压缩位置\na = softmax([q·k_s / √${hd}]_{s∈S_t} 加上 sink_h)，sink 那一项丢掉\no = Σ_s a_s · v_s，后 ${rd} 维反向 RoPE\nout = W_ob · [W_oa,g · o_g]_{g=1..${og}}\nW_oa,g: ${(H / og) * hd}→${orank}，W_ob: ${og * orank}→${d}`,
         },
         compressor: {
@@ -4474,7 +4474,7 @@
         id: nodeId || "fig3-node",
         label: label || nodeId || "Fig.3",
         params: 0,
-        parts: parts.length ? parts : [{ id: "note", label: label || "Fig.3", params: 0, detail: extraDetail || { note: "DeepSeek-M reference" } }],
+        parts: parts.length ? parts : [{ id: "note", label: label || "Fig.3", params: 0, detail: extraDetail || { note: "DeepSeek-V4.1-Flash reference" } }],
       });
     }
 
@@ -4518,7 +4518,7 @@
       const decStack = [dsparkHtml, headHtml, joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
 
       wrap.innerHTML = `
-        <div class="fig3-title">${fig3Esc(fig.title || "Figure 3 | Overall architecture of DeepSeek-M")}</div>
+        <div class="fig3-title">${fig3Esc(fig.title || "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash")}</div>
         <div class="fig3-legend">${legend}</div>
         <div class="fig3-board">
           <div class="fig3-stage">
@@ -4905,7 +4905,7 @@
         paramLine +
         `<div class="field-hint">${srcHint} · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
 
-      // Dedicated Fig.3 schematic for DeepSeek-M (CED regions + KV arrows).
+      // Dedicated Fig.3 schematic for DeepSeek-V4.1-Flash (CED regions + KV arrows).
       if (meta.diagram === "fig3" || data.fig3) {
         renderFig3Arch(data);
         $("arch-status-text").textContent = meta.trainable ? "已加载 MiniSeek-M 架构图（可训练）" : "已加载 Fig.3 参考图";
