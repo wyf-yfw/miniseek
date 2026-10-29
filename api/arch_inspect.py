@@ -359,8 +359,8 @@ def _v41_groups(cfg: FlashConfig, lo: int, hi: int, prefix: str) -> List[Dict[st
     groups: List[Dict[str, Any]] = []
     i = lo
 
-    def moe_row(rid: str) -> Dict[str, Any]:
-        return {"id": rid, "type": "moe", "label": "MoE"}
+    def moe_row(rid: str, layers: List[int]) -> Dict[str, Any]:
+        return {"id": rid, "type": "moe", "label": "MoE", "layers": layers}
 
     while i < hi:
         m = modes[i]
@@ -369,11 +369,13 @@ def _v41_groups(cfg: FlashConfig, lo: int, hi: int, prefix: str) -> List[Dict[st
             j = i
             while j < hi and modes[j] == "SWA":
                 j += 1
+            span = list(range(i, j))
             groups.append({
                 "id": f"{prefix}_swa",
                 "repeat": j - i,
                 "kind": "swa",
-                "rows": [{"id": f"{prefix}_swa_attn", "type": "swa", "label": "SWA", "mode": "SWA"}, moe_row(f"{prefix}_swa_moe")],
+                "rows": [{"id": f"{prefix}_swa_attn", "type": "swa", "label": "SWA", "mode": "SWA", "layers": span},
+                         moe_row(f"{prefix}_swa_moe", span)],
                 "note": f"L{i}–L{j - 1} 只有滑窗（窗口 {cfg.window_size}）",
             })
             i = j
@@ -383,11 +385,13 @@ def _v41_groups(cfg: FlashConfig, lo: int, hi: int, prefix: str) -> List[Dict[st
             j += 1
         n_reuse = j - i - 1
         if m == "Reuse":
+            span = list(range(i, j))
             groups.append({
                 "id": f"{prefix}_reuse_g{i}",
                 "repeat": max(1, n_reuse + 1),
                 "kind": "csa2-reuse",
-                "rows": [{"id": f"{prefix}_reuse", "type": "csa2-reuse", "label": f"CSA2({r}, Reuse)", "mode": "Reuse", "m": r}, moe_row(f"{prefix}_reuse_moe")],
+                "rows": [{"id": f"{prefix}_reuse", "type": "csa2-reuse", "label": f"CSA2({r}, Reuse)", "mode": "Reuse", "m": r,
+                          "layers": span}, moe_row(f"{prefix}_reuse_moe", span)],
                 "note": f"L{i}–L{j - 1} 复用主 KV 与 top-k",
             })
             i = j
@@ -397,14 +401,17 @@ def _v41_groups(cfg: FlashConfig, lo: int, hi: int, prefix: str) -> List[Dict[st
             "id": f"{rid}_g{i}",
             "repeat": 1,
             "kind": f"csa2-{m.lower()}",
-            "rows": [{"id": rid, "type": f"csa2-{m.lower()}", "label": f"CSA2({r}, {m})", "mode": m, "m": r}, moe_row(f"{rid}_moe")],
+            "rows": [{"id": rid, "type": f"csa2-{m.lower()}", "label": f"CSA2({r}, {m})", "mode": m, "m": r, "layers": [i]},
+                     moe_row(f"{rid}_moe", [i])],
             "note": f"L{i}",
         }
         decoder_full = prefix == "dec" and m == "Full"
         if n_reuse and not decoder_full:
+            span = list(range(i + 1, j))
             head["nested"] = {
                 "repeat": n_reuse,
-                "rows": [{"id": f"{prefix}_reuse", "type": "csa2-reuse", "label": f"CSA2({r}, Reuse)", "mode": "Reuse", "m": r}, moe_row(f"{prefix}_reuse_moe")],
+                "rows": [{"id": f"{prefix}_reuse", "type": "csa2-reuse", "label": f"CSA2({r}, Reuse)", "mode": "Reuse", "m": r,
+                          "layers": span}, moe_row(f"{prefix}_reuse_moe", span)],
             }
             head["note"] = f"L{i} {m} + L{i + 1}–L{j - 1} Reuse"
             i = j
@@ -496,6 +503,8 @@ def inspect_v41_model(
     total = sum(v[0] for v in named.values())
     eng_layers = " · ".join(f"@L{i}" for i in cfg.engram_layer_ids)
     reuse_target = next((i for i in cfg.engram_layer_ids if modes[i] == "Reuse"), None)
+    tgt = sorted(cfg.dspark_target_layer_ids)
+    tgt_text = f"L{tgt[0]}–L{tgt[-1]}" if tgt == list(range(tgt[0], tgt[-1] + 1)) else "、".join(f"L{i}" for i in tgt)
     fig3 = {
         "title": f"{cfg.release_name} | DeepSeek-V4.1-Flash 架构（{cfg.n_layers} 层：编码 {E} + 解码 {cfg.n_layers - E}）",
         "encoder": {"id": "causal_encoder", "label": f"Causal Encoder ({E}L)", "n_layers": E,
@@ -520,13 +529,15 @@ def inspect_v41_model(
         ],
         "engram_sub": eng_layers,
         "engram_targets": ["enc_swa_attn", "enc_reuse" if reuse_target is not None else "enc_full"],
-        "dspark_sub": f"投机解码草稿头：{cfg.n_mtp_layers} 个 block，另训，不计入 {cfg.n_layers} 层",
+        "head": {"id": "lm_head", "label": "LM Head", "sub": f"mHC 合流 → Final RMSNorm → {d}→{V}"},
+        "dspark_sub": f"投机解码草稿头：{cfg.n_mtp_layers} 个 block，读 {tgt_text} 隐状态，共用 Embedding 与 LM Head；另训，不计入 {cfg.n_layers} 层",
         "show_vision": False,
         "notes_list": [
-            "自下而上计算。注意力在下，MoE 在上；括号右侧 ×N 是这一括号重复的次数。",
+            "自下而上计算。注意力在下，MoE 在上；色块左侧 Lx 是层号（从 0 起），括号右侧 ×N 是重复次数。点任一色块看该层的算子与参数。",
             f"CED：编码器输出 H_{{L/2}} 只在解码器最底下的 CSA2(1, Full)（L{E}）投影成全局 KV，之后的 Reuse / Reindex 复用；每层仍有自己的 Q 与本层滑窗 KV。",
             f"候选池：L{cfg.candidate_source_layer} 建池（{cfg.candidate_topk_blocks} 块 × {cfg.candidate_block_size}），Reindex 只在池内重选 top-{cfg.index_topk}；论文在后训练才开，SFT 默认启用。",
             f"Engram 在 {eng_layers} 的 block 之前按流门控写入；Single-Pass mHC 为 {cfg.hc_mult} 条残差流、Sinkhorn {cfg.hc_sinkhorn_iters} 次。",
+            f"输出端：最后一个 MoE 子层给出的 pre 系数把 {cfg.hc_mult} 条流合成一条，经 Final RMSNorm 进 LM Head（不与 Embedding 共享）。",
             "与论文的有意差异：KV / indexer 全部 BF16（论文主 KV 为 FP4、滑窗 KV 为 FP8，3090 不支持）；没有视觉分支；尺寸缩小。",
         ],
     }

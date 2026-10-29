@@ -81,6 +81,15 @@ def test_design_v41_fig3():
         for r in g["rows"] + (g.get("nested") or {}).get("rows", [])
     ]
     assert {"enc_swa_attn", "enc_full", "enc_reuse", "dec_full", "dec_reindex"} <= set(rows)
+    attn_layers = sorted(
+        i
+        for g in fig["encoder"]["groups"] + fig["decoder"]["groups"]
+        for r in g["rows"] + (g.get("nested") or {}).get("rows", [])
+        if r["type"] != "moe"
+        for i in r["layers"]
+    )
+    assert attn_layers == list(range(out["config"]["n_layers"]))
+    assert fig["head"]["id"] == "lm_head"
     assert fig["engram_targets"] == ["enc_swa_attn", "enc_reuse"] and fig["show_vision"] is False
     assert {f["id"] for f in fig["kv_flows"]} >= {"ced", "indexer", "reindex"}
     layer4 = next(b for b in out["blocks"] if b["id"] == "layer-4")

@@ -825,6 +825,17 @@
     .fig3-chip.csa2-reuse { background: #fde047; border-color: #a16207; }
     .fig3-chip.csa2-reindex { background: #93c5fd; border-color: #1d4ed8; }
     .fig3-chip.moe { background: #fff; border-color: #334155; font-weight: 700; }
+    .fig3-chip[data-layers] { position: relative; padding-left: 44px; padding-right: 44px; }
+    .fig3-ltag {
+      position: absolute;
+      left: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 11px;
+      font-weight: 800;
+      color: rgba(15, 23, 42, 0.62);
+      letter-spacing: 0.02em;
+    }
     .fig3-node {
       border: 1.5px solid #334155;
       border-radius: 10px;
@@ -849,6 +860,7 @@
       border-style: dashed;
     }
     .fig3-node.embed { background: #fff; }
+    .fig3-node.head { background: #f1f5f9; border-color: #0f172a; }
     .fig3-pool {
       grid-area: pool;
       align-self: end;
@@ -1507,12 +1519,12 @@
           <h2>模型规格</h2>
           <p class="field-hint" style="margin:0 0 10px">按本仓库设计直接出图，无需加载 checkpoint。</p>
           <div class="mode-row" id="arch-preset-row">
-            <button type="button" id="arch-preset-tiny" data-arch-preset="tiny">Tiny</button>
-            <button type="button" id="arch-preset-dense" class="active" data-arch-preset="dense">Dense</button>
-            <button type="button" id="arch-preset-v41" data-arch-preset="v41">V4.1 (F0.1)</button>
+            <button type="button" id="arch-preset-v41" class="active" data-arch-preset="v41">V4.1 (F0.1)</button>
             <button type="button" id="arch-preset-v41-flash" data-arch-preset="v41-flash">V4.1-Flash</button>
+            <button type="button" id="arch-preset-dense" data-arch-preset="dense">Dense</button>
+            <button type="button" id="arch-preset-tiny" data-arch-preset="tiny">Tiny</button>
           </div>
-          <p id="arch-preset-hint" class="mode-hint">Dense：MiniSeek-D0.1（d=512 L=8）。</p>
+          <p id="arch-preset-hint" class="mode-hint">V4.1 (F0.1)：MiniSeek-F0.1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版。</p>
           <p id="arch-msg" class="arch-msg"></p>
           <div id="arch-summary" class="arch-summary" style="display:none"></div>
         </aside>
@@ -3820,7 +3832,7 @@
     let archData = null;
     let archSelectedLayer = null;
     let archViewMode = "standard";
-    let archPreset = "dense";
+    let archPreset = "v41";
 
     const ARCH_PRESET_HINT = {
       tiny: "Tiny：冒烟档 DenseLM，d=64 L=2，适合 CPU。",
@@ -3855,26 +3867,126 @@
 
     function archNums() {
       const c = (archData && archData.config) || {};
+      const v41 = c.arch === "v41";
       const theta = c.rope_theta === 1000000 || c.rope_theta === 1e6 ? "1e6" : (c.rope_theta != null ? String(c.rope_theta) : "1e6");
-      const eps = c.rms_norm_eps === 1e-5 || c.rms_norm_eps == null ? "1e-5" : String(c.rms_norm_eps);
+      const eps = v41
+        ? String(c.norm_eps)
+        : (c.rms_norm_eps === 1e-5 || c.rms_norm_eps == null ? "1e-5" : String(c.rms_norm_eps));
+      const moeMid = c.moe_intermediate_size != null ? c.moe_intermediate_size : c.moe_inter_dim;
+      const isMoe = c.arch === "moe" || !!c.use_moe || v41;
       return {
-        d: c.d_model,
+        d: c.d_model != null ? c.d_model : c.dim,
         heads: c.n_heads,
         hd: c.head_dim,
-        mid: (c.arch === "moe" || c.use_moe) ? c.moe_intermediate_size : c.intermediate_size,
-        moeMid: c.moe_intermediate_size,
+        mid: isMoe ? moeMid : c.intermediate_size,
+        moeMid,
         ffnMid: c.intermediate_size,
         nRouted: c.n_routed_experts,
-        topk: c.num_experts_per_tok,
+        topk: c.num_experts_per_tok != null ? c.num_experts_per_tok : c.n_activated_experts,
         vocab: c.vocab_size,
         eps,
         theta,
-        isMoe: c.arch === "moe" || !!c.use_moe,
+        isMoe,
+        v41,
       };
     }
 
     function archShape(a, b) {
       return (a != null && b != null) ? `[${a}, ${b}]` : "";
+    }
+
+    // MiniSeek-F（arch=v41）各算子的作用与公式；数字取自当前 config。
+    function archV41ModuleInfo(id, n, rms) {
+      const c = (archData && archData.config) || {};
+      const d = n.d, V = n.vocab, H = c.n_heads, hd = c.head_dim, hc = c.hc_mult;
+      const qr = c.q_lora_rank, rd = c.rope_head_dim, og = c.o_groups, orank = c.o_lora_rank, win = c.window_size;
+      const ih = c.index_n_heads, ihd = c.index_head_dim, itk = c.index_topk;
+      const cb = c.candidate_topk_blocks, cbs = c.candidate_block_size, csl = c.candidate_source_layer;
+      const nR = c.n_routed_experts, k = c.n_activated_experts, inter = c.moe_inter_dim, rs = c.route_scale;
+      const lim = c.swiglu_limit, bs = c.expert_bias_speed, G = c.dspark_block_size;
+      const E = Math.floor((c.n_layers || 0) / 2);
+      const layerList = (ids) => (ids || []).map((i) => `L${i}`).join("、");
+      const tgt = c.dspark_target_layer_ids || [];
+      const hcInfo = (name, fn, preFrom) => ({
+        role: `Single-Pass mHC 的系数（${name}子层）。残差不是单路相加，而是 ${hc} 条流：pre 把多条流加权合成子层输入，post 把子层输出写回各条流，comb 是 ${hc}×${hc} 的流间混合矩阵（Sinkhorn 归一成近似双随机）。子层输入用的 pre 由${preFrom}算好，一遍前向即可。`,
+        formula: `x̂ = flatten(X)，形状 [${hc}·${d}]\nm = (W_fn · x̂) · rsqrt(mean(x̂²) + ε)，W_fn: [${(2 + hc) * hc}, ${hc * d}]\npre  = σ(α₁·m_pre + b_pre) + ε\npost = 2·σ(α₂·m_post + b_post)\ncomb = Sinkhorn(α₃·m_comb + b_comb)，行列交替归一 ${c.hc_sinkhorn_iters} 次\nh = Σ_j p_j · X_j（p 来自${preFrom}）\nX_k ← post_k · ${fn}(RMSNorm(h)) + Σ_j comb_jk · X_j`,
+      });
+      const embed = {
+        role: `把 token id 查成向量，再复制成 ${hc} 条残差流，作为 mHC 堆栈的输入。不与 LM Head 共享权重；DSpark 草稿头也用这张表。`,
+        formula: `h = E[token_id]，E: [${V}, ${d}]\nX_j = h，j = 1..${hc}，X 形状 [b, t, ${hc}, ${d}]`,
+      };
+      const table = {
+        embed,
+        text_emb: embed,
+        embedding: embed,
+        hc_attn: hcInfo("注意力", "Attn", "上一个子层（L0 用恒等）"),
+        hc_ffn: hcInfo("MoE", "MoE", "本层注意力子层"),
+        attn_norm: {
+          role: `注意力前的 RMSNorm，作用在 mHC 合成出的单路输入 h 上，不作用在 ${hc} 条流上。`,
+          formula: rms,
+        },
+        ffn_norm: {
+          role: "MoE 前的 RMSNorm，同样作用在 mHC 合成出的单路输入上。",
+          formula: rms,
+        },
+        attn: {
+          role: `DeepSeek-V4.1 注意力，同一套算子覆盖 SWA 与 CSA2 的三种模式。Q 走低秩；K 和 V 是同一份 ${hd} 维潜向量，所有头共享；只在最后 ${rd} 维加 RoPE，输出端再反向旋转；softmax 分母多一个每头可学习的 sink；输出先分 ${og} 组做低秩投影再合并。每层都看本层最近 ${win} 个位置的滑窗 KV。SWA 层只有滑窗；Full 层另外看本层压缩出的全局 KV 里 indexer 选中的 top-${itk}；Reuse 层直接复用来源层的全局 KV 和 top-k；Reindex 层复用全局 KV，在候选池里重选 top-k。`,
+          formula: `c_q = RMSNorm(W_qa · x)，W_qa: ${d}→${qr}\nq = W_qb · c_q，W_qb: ${qr}→${H}×${hd}\nkv = RMSNorm(W_kv · x)，W_kv: ${d}→${hd}（K = V，各头共享）\nq、kv 的后 ${rd} 维加 RoPE\nS_t = 滑窗 ${win} 个位置 ∪ top-k 全局压缩位置\na = softmax([q·k_s / √${hd}]_{s∈S_t} 加上 sink_h)，sink 那一项丢掉\no = Σ_s a_s · v_s，后 ${rd} 维反向 RoPE\nout = W_ob · [W_oa,g · o_g]_{g=1..${og}}\nW_oa,g: ${(H / og) * hd}→${orank}，W_ob: ${og * orank}→${d}`,
+        },
+        compressor: {
+          role: `Full 层的压缩器，把序列压成全局 KV 潜向量。m=2（编码器）：每 2 个位置一块，按通道用门控 softmax 加权池化，在 fp32 里算；m=1（解码器）：逐位置投影。解码器 L${E} 的输入就是编码器输出（CED），全局 KV 只在这里算一次，之后的解码器层复用。查询只看已经结束的压缩块。`,
+          formula: `m=2：kv_c = RMSNorm(Σ_{i∈块} softmax_i(W_gate·x_i) ⊙ (W_kv·x_i))\nm=1：kv_c = RMSNorm(W_kv · x)\nW_kv、W_gate: ${d}→${hd}\n之后后 ${rd} 维加 RoPE`,
+        },
+        indexer: {
+          role: `稀疏索引器：给全局压缩 KV 的每个位置打分，选 top-${itk}。分数是 ${ih} 个头的 ReLU 点积按查询相关的权重相加。只有 KV 来源层（Full）持有 indexer K，Reindex 层复用它重新打分；L${csl} 另外按块建候选池。训练时用 KL 让 indexer 分布贴近主注意力分布，输入 detach，不回传主干。`,
+          formula: `q_I = W_qb^I · c_q，${qr}→${ih}×${ihd}，后 ${rd} 维加 RoPE\nk_I = RMSNorm(W_k^I · kv_c)，${hd}→${ihd}\nw = W_w · x / √(${ihd}·${ih})，${d}→${ih}\nscore(t, s) = Σ_h w_h · ReLU(q_I[t,h] · k_I[s])\nS_t = top-${itk}_s score(t, s)\nL_KL = KL(sg(p_attn) ‖ softmax(score))`,
+        },
+        router: {
+          role: `给每个 token 对 ${nR} 个路由专家打分，s = sqrt(softplus(·))。选专家看 s 加一组不训练的 bias；加权只用选中的 s，归一化后乘 ${rs}。bias 每个优化步按整步负载调整：高于平均减 ${bs}，低于平均加 ${bs}。另有很小的序列级均衡损失。共享专家不经过这里。`,
+          formula: `s = sqrt(softplus(W_g · x))，W_g: ${d}→${nR}\n选 top-${k}：看 s + b（b 不进梯度）\np_i = ${rs} · s_i / Σ_{j∈top} s_j\nb_i ← b_i + ${bs} · sign(平均负载 − 负载_i)\nL_bal = Σ_i f_i · P_i\nf_i = 选中率 × ${nR}/${k}，P_i = 序列内 s_i / Σ_j s_j 的均值`,
+        },
+        shared_experts: {
+          role: `共享专家。每个 token 都算，不经过 Router。clamp SwiGLU：gate 上限 ${lim}，up 截到 ±${lim}。`,
+          formula: `g = min(W1 · x, ${lim})\nu = clamp(W3 · x, −${lim}, ${lim})\ny_s = W2 · (SiLU(g) ⊙ u)\nW1、W3: ${d}→${inter}，W2: ${inter}→${d}`,
+        },
+        routed_experts: {
+          role: `路由专家共 ${nR} 个，每个 token 只算 Router 选中的 ${k} 个，结构与共享专家相同（clamp SwiGLU）。`,
+          formula: `y = y_s + Σ_{i∈top-${k}} p_i · Expert_i(x)\nExpert_i: ${d}→${inter}→${d}`,
+        },
+        moe: {
+          role: `MoE：1 个共享专家常开，${nR} 个路由专家里取 top-${k}，两边相加。`,
+          formula: `s = sqrt(softplus(W_g · x))\n选 top-${k} 看 s + b，权重 ${rs}·s 归一\ny = Shared(x) + Σ p_i · Expert_i(x)`,
+        },
+        engram: {
+          role: `Engram n-gram 记忆。对以当前位置结尾的 2~${c.engram_max_ngram_size}-gram（token 先做大小写、全半角等归一化合并）做 ${c.engram_n_heads} 头哈希，查表拼接后投影出 ${hc} 个 key（每条流一个）和 1 个共享 value；每条流用自己的门控决定写入多少。只在 ${layerList(c.engram_layer_ids)} 的 block 之前写入。`,
+          formula: `e = concat_c T[hash_c(最近 n 个 token)]，每列 ${c.engram_head_dim} 维\n[k_1..k_${hc}, v] = W_kv · e\nd_j = ⟨X_j ⊙ w, k_j⟩ · rsqrt(mean X_j²) · rsqrt(mean k_j²) / √${d}\ng_j = σ(sign(d_j) · √|d_j|)\nX_j ← X_j + g_j · v`,
+        },
+        hc_merge: {
+          role: `输出端合流：用最后一个 MoE 子层算好的 pre 把 ${hc} 条流加权合成一条。没有额外参数。`,
+          formula: "h = Σ_j pre_j · X_j\nlogits = W_head · RMSNorm(h)",
+        },
+        norm: {
+          role: "合流之后的 Final RMSNorm，然后进 LM Head。",
+          formula: rms,
+        },
+        lm_head: {
+          role: "把最后的隐状态投回词表，得到下一个 token 的 logits。独立权重，不与 Embedding 共享；logits 在 fp32 里算。DSpark 草稿头共用这一层。",
+          formula: `logits = W · RMSNorm(h)，W: ${d}→${V}`,
+        },
+        dspark: {
+          role: `DSpark 投机解码草稿头，主干训完后另训，不计入主干参数。读主干进入 ${layerList(tgt)} 的隐状态（${hc} 条流取均值）拼接投影成上下文；${c.n_mtp_layers} 个 block（滑窗注意力 + 1+${c.dspark_n_routed_experts} top-${c.dspark_n_activated_experts} 小 MoE，同样走 mHC）一次起草 ${G} 个 token；Markov 低秩头（rank ${c.dspark_markov_rank}）补相邻 token 的依赖，置信度头决定提前停在哪。共用主干的 Embedding 与 LM Head。主干一次前向验证整块，接受 / 重采样规则保证输出分布与主干一致。`,
+          formula: `ctx = RMSNorm(W_main · [${tgt.map((i) => `h_L${i}`).join("; ")}])\nz = Blocks(Embed([x_t, ⟨noise⟩ × ${G - 1}]), ctx)\nlogits_k = W_head · RMSNorm(z_k) + W2 · W1[x_{k−1}]\nconf_k = σ(w · [z_k; W1[x_{k−1}]] / T_k)，T_k 由 STS 校准\n训练：0.1·CE + 0.9·TV + 1.0·BCE，第 k 位权重 e^(−k/${G})`,
+        },
+        candidate_pool: {
+          role: `分层稀疏索引的候选池。L${csl}（解码器 Full）算完 indexer 分数后，把压缩位置按 ${cbs} 个一块取块内最高分，保留 ${cb} 块（含最新条目的块一定保留）；之后的 Reindex 层只在这些位置里重选 top-${itk}。论文在后训练才启用：预训练默认关，SFT 默认开。`,
+          formula: `B_t(b) = max_{s∈块 b} score(t, s)\nC_t = top-${cb} 块（最新块固定保留）\nReindex：S_t = top-${itk}_{s∈C_t} score'(t, s)`,
+        },
+        enc_hidden: {
+          role: `编码器 ${E} 层跑完后的隐状态 H：进入 L${E} 的 ${hc} 条流经 mHC 合流和 RMSNorm。CED：它只在解码器第一层 L${E}（Full）被压缩器投影成全局 KV，之后的解码器层复用；每层自己的 Q 和滑窗 KV 照常计算。推理命中前缀缓存后，只需对最后 ${win} 个 token 做有界重放。`,
+          formula: `H = RMSNorm(Σ_j p_j · X_j)，X 为进入 L${E} 的残差流\nkv_global = Compressor_L${E}(H)，m = 1\nL${E + 1}…L${(c.n_layers || 1) - 1} 复用 kv_global`,
+        },
+      };
+      return table[id] || null;
     }
 
     function archModuleInfo(id) {
@@ -3889,6 +4001,7 @@
       const nExp = n.nRouted != null ? n.nRouted : "N";
       const k = n.topk != null ? n.topk : "k";
       const rms = `RMSNorm(x) = x * rsqrt(mean(x^2) + ε) * w\nε = ${n.eps}\nw 可学习，形状 [${d}]`;
+      if (n.v41) return archV41ModuleInfo(id, n, rms);
       const gelu = "GELU(z) = 0.5 * z * (1 + erf(z / sqrt(2)))";
       const table = {
         embed: {
@@ -3969,7 +4082,10 @@
       const body = $("arch-drawer-body");
       const parts = (block.parts || []).filter((p) => p.kind !== "add" && !(p.id || "").startsWith("add_"));
       const isLayer = block.kind === "layer" || String(block.id || "").indexOf("layer-") === 0;
-      const layerInfo = isLayer ? {
+      const layerInfo = isLayer && archNums().v41 ? {
+        role: "先做注意力（SWA 或 CSA2），再做 MoE。残差是 Single-Pass mHC：多条残差流先按 pre 合成子层输入，子层输出按 post 写回各流，流之间再按 comb 混合。Engram 层在整个 block 之前先往各条流里写入。",
+        formula: "(pre_a, post_a, comb_a) = mHC_attn(X)\nh = Σ_j p_j · X_j        p：上一子层给的 pre（L0 用恒等）\nX_k ← post_a,k · Attn(RMSNorm(h)) + Σ_j comb_a,jk · X_j\n(pre_f, post_f, comb_f) = mHC_ffn(X)\nh = Σ_j pre_a,j · X_j\nX_k ← post_f,k · MoE(RMSNorm(h)) + Σ_j comb_f,jk · X_j\npre_f 留给下一层注意力（最后一层留给输出端合流）",
+      } : isLayer ? {
         role: archNums().isMoe
           ? "先做因果注意力，再做 MoE。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。"
           : "先做因果注意力，再做 FFN。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。",
@@ -4151,9 +4267,16 @@
       return chunks.filter(Boolean).join(fig3Arrow());
     }
 
+    function fig3LayerText(layers) {
+      return layers.length > 1 ? `L${layers[0]}–L${layers[layers.length - 1]}` : `L${layers[0]}`;
+    }
+
     function fig3ChipHtml(r) {
       if (!r) return "";
-      return `<div class="fig3-chip ${fig3ChipClass(r.type)}" data-node="${fig3Esc(r.id || "")}" data-mode="${fig3Esc(r.mode || "")}" data-clickable="1">${fig3Esc(r.label)}</div>`;
+      const layers = Array.isArray(r.layers) ? r.layers : [];
+      const layerAttr = layers.length ? ` data-layers="${layers.join(",")}"` : "";
+      const tag = layers.length && r.type !== "moe" ? `<span class="fig3-ltag">${fig3LayerText(layers)}</span>` : "";
+      return `<div class="fig3-chip ${fig3ChipClass(r.type)}" data-node="${fig3Esc(r.id || "")}" data-mode="${fig3Esc(r.mode || "")}" data-label="${fig3Esc(r.label)}"${layerAttr} data-clickable="1">${tag}${fig3Esc(r.label)}</div>`;
     }
 
     function fig3PairHtml(rows) {
@@ -4273,6 +4396,70 @@
         </defs>${parts.join("")}`;
     }
 
+    // Trainable MiniSeek-F: a Fig.3 node opens the real per-layer / tail blocks instead of guessing by label.
+    function fig3OwnBlock(data, nodeId, layersAttr) {
+      const all = (data.blocks || []).concat(data.tail || []);
+      const byId = (id) => all.find((b) => b.id === id);
+      const asPart = (b) => b && {
+        id: b.id, label: b.label, params: b.params, detail: b.detail,
+        weight_shapes: b.weight_shapes, shape_in: b.shape_in, shape_out: b.shape_out,
+      };
+      const flowParts = ((data.fig3 && data.fig3.kv_flows) || data.kv_flows || [])
+        .filter((f) => f.from === nodeId || f.to === nodeId)
+        .map((f) => ({ id: `flow-${f.id}`, label: `连线 · ${f.label}`, params: 0, detail: { 说明: f.note || "" } }));
+      if (layersAttr) {
+        const picked = layersAttr.split(",").map((s) => byId(`layer-${s.trim()}`)).filter(Boolean);
+        if (!picked.length) return null;
+        const base = picked[0];
+        const parts = (base.parts || []).slice();
+        const seen = new Set(parts.map((p) => p.id));
+        picked.slice(1).forEach((b) => (b.parts || []).forEach((p) => {
+          if (seen.has(p.id)) return;
+          seen.add(p.id);
+          parts.push({ ...p, label: `${p.label}（仅 L${b.index}）` });
+        }));
+        if (picked.length === 1) return { ...base, parts: parts.concat(flowParts) };
+        const last = picked[picked.length - 1];
+        return {
+          ...base,
+          id: `layers-${base.index}-${last.index}`,
+          label: `L${base.index}–L${last.index} · ${(base.detail || {}).mode || ""}（${picked.length} 层同构，参数按单层列）`,
+          parts: parts.concat(flowParts),
+        };
+      }
+      if (nodeId === "embedding" || nodeId === "text_emb") {
+        const b = byId("embed");
+        return b ? { ...b, parts: [asPart(b)] } : null;
+      }
+      if (nodeId === "lm_head") {
+        const norm = byId("norm");
+        const head = byId("lm_head");
+        return {
+          id: "output",
+          label: "输出端：mHC 合流 → Final RMSNorm → LM Head",
+          params: (norm ? norm.params : 0) + (head ? head.params : 0),
+          parts: [{ id: "hc_merge", label: "mHC 合流", params: 0 }, asPart(norm), asPart(head)].filter(Boolean),
+        };
+      }
+      if (nodeId === "dspark") {
+        const b = byId("dspark");
+        return b ? { ...b, parts: [asPart(b)] } : null;
+      }
+      if (nodeId === "engram") {
+        const parts = [{ id: "engram", label: "Engram", params: 0 }];
+        (data.blocks || []).forEach((b) => (b.parts || []).forEach((p) => {
+          if (p.id === "engram") parts.push({ ...p, id: `engram-L${b.index}`, label: `L${b.index} 的 Engram 表与投影` });
+        }));
+        const params = parts.reduce((s, p) => s + (p.params || 0), 0);
+        return { id: "engram", label: "Engram", params, parts: parts.concat(flowParts) };
+      }
+      if (nodeId === "enc_hidden" || nodeId === "candidate_pool") {
+        const label = nodeId === "enc_hidden" ? "Enc. Hidden States（CED）" : "Candidate Pool（分层稀疏索引）";
+        return { id: nodeId, label, params: 0, parts: [{ id: nodeId, label, params: 0 }].concat(flowParts) };
+      }
+      return null;
+    }
+
     function openFig3Node(data, nodeId, label, extraDetail) {
       const flows = (data.kv_flows || data.fig3 && data.fig3.kv_flows) || [];
       const related = flows.filter((f) => f.from === nodeId || f.to === nodeId || (Array.isArray(f.to) && f.to.includes(nodeId)));
@@ -4336,8 +4523,11 @@
       const fullG = decGroups.find((g) => (g.rows || []).some((r) => r.id === "dec_full")) || null;
       const upper = decGroups.filter((g) => g !== fullG).reverse().map(fig3GroupVisualHtml);
       const dsparkHtml = `<div class="fig3-node dspark" data-node="dspark" data-clickable="1">DSpark<div class="fig3-sub">${fig3Esc(fig.dspark_sub || "推测解码，不计入 20 层")}</div></div>`;
+      const headHtml = fig.head
+        ? `<div class="fig3-node head" data-node="${fig3Esc(fig.head.id || "lm_head")}" data-clickable="1">${fig3Esc(fig.head.label || "LM Head")}<div class="fig3-sub">${fig3Esc(fig.head.sub || "")}</div></div>`
+        : "";
       const exitHtml = fullG ? fig3PairHtml(fullG.rows) : "";
-      const decStack = [dsparkHtml, joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
+      const decStack = [dsparkHtml, headHtml, joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
 
       wrap.innerHTML = `
         <div class="fig3-title">${fig3Esc(fig.title || "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash")}</div>
@@ -4389,13 +4579,19 @@
       scheduleFig3Wires(board);
 
       // Click handlers for chips / nodes
+      const trainable = !!(data.meta && data.meta.trainable);
       wrap.querySelectorAll("[data-clickable='1'], .fig3-chip[data-clickable='1'], .fig3-node[data-clickable='1']").forEach((el) => {
         el.addEventListener("click", (ev) => {
           ev.stopPropagation();
           const nodeId = el.getAttribute("data-node") || "";
+          const ownBlock = trainable ? fig3OwnBlock(data, nodeId, el.getAttribute("data-layers")) : null;
+          if (ownBlock) {
+            openArchDrawer(ownBlock);
+            return;
+          }
           const mode = el.getAttribute("data-mode") || "";
           const modeInfo = modes.find((m) => m.mode === mode);
-          openFig3Node(data, nodeId, el.textContent.trim().split("\n")[0], modeInfo
+          openFig3Node(data, nodeId, el.getAttribute("data-label") || el.textContent.trim().split("\n")[0], modeInfo
             ? { mode: modeInfo.mode, kv: modeInfo.kv, color: modeInfo.color }
             : { node: nodeId });
         });
