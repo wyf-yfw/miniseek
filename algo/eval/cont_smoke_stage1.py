@@ -46,18 +46,10 @@ def set_seed(seed: int) -> None:
 
 def load_model(ckpt_path: str, device: torch.device):
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    cfg = ModelConfig.from_dict(ckpt["config"])
-    if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
-        from algo.model.moe import MoELM
+    from algo.model import load_model_from_blob
 
-        model = MoELM(cfg)
-        arch = "moe"
-    else:
-        from algo.model.dense import DenseLM
-
-        model = DenseLM(cfg)
-        arch = "dense"
-    model.load_state_dict(ckpt["model"], strict=True)
+    model, cfg = load_model_from_blob(ckpt)
+    arch = getattr(cfg, "arch", "dense")
     model.to(device).eval()
     meta = {
         "ckpt": ckpt_path,

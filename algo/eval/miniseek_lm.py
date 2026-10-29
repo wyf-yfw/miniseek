@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
+from algo.model import load_model_from_blob
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
@@ -68,19 +69,10 @@ def load_miniseek_blob(path: Union[str, Path]):
                 if cfg_path and cfg_path.exists()
                 else {}
             )
-            allowed = set(ModelConfig.__annotations__)
-            cfg_dict = {k: v for k, v in cfg_raw.items() if k in allowed}
-            blob = {"model": sd, "config": cfg_dict}
+            blob = {"model": sd, "config": cfg_raw}
     else:
         blob = torch.load(path, map_location="cpu", weights_only=False)
-    cfg = ModelConfig.from_dict(blob["config"])
-    if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
-        from algo.model.moe import MoELM
-
-        model = MoELM(cfg)
-    else:
-        model = DenseLM(cfg)
-    model.load_state_dict(blob["model"], strict=True)
+    model, cfg = load_model_from_blob(blob)
     model.eval()
     tok = load_tokenizer(allow_fallback=True)
     return model, tok, cfg
@@ -190,7 +182,7 @@ class MiniSeekLM(TemplateLM):
                 cont_len = max(1, len(inp) - 1)
             input_ids = torch.tensor([inp], dtype=torch.long, device=self._device)
             with torch.no_grad():
-                logits, _ = self.model(input_ids)
+                logits = self.model(input_ids)[0]
             # logits at position i predict token i+1
             # score continuation tokens: last cont_len tokens of inp
             logits = logits[0, -cont_len - 1 : -1, :]
@@ -227,7 +219,7 @@ class MiniSeekLM(TemplateLM):
                 window = ids[-self.max_length :]
                 input_ids = torch.tensor([window], dtype=torch.long, device=self._device)
                 with torch.no_grad():
-                    logits, _ = self.model(input_ids)
+                    logits = self.model(input_ids)[0]
                 next_id = int(logits[0, -1, :].argmax().item())
                 ids.append(next_id)
                 text = self.tok_decode(ids[len(ctx_ids) :])

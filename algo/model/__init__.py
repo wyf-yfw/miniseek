@@ -10,7 +10,15 @@ from .config import ModelConfig
 from .dense import DenseLM, count_parameters
 from .v41.config import FlashConfig
 
-__all__ = ["ModelConfig", "FlashConfig", "DenseLM", "count_parameters", "build_model", "config_from_dict"]
+__all__ = [
+    "ModelConfig",
+    "FlashConfig",
+    "DenseLM",
+    "count_parameters",
+    "build_model",
+    "config_from_dict",
+    "load_model_from_blob",
+]
 
 AnyConfig = Union[ModelConfig, FlashConfig]
 
@@ -33,3 +41,19 @@ def build_model(cfg: AnyConfig, token_map: Optional[Sequence[int]] = None):
 
         return MoELM(cfg)
     return DenseLM(cfg)
+
+
+def load_model_from_blob(blob: Dict[str, Any]):
+    """训练 checkpoint（{"model", "config", ...}）→ (model, cfg)，留在 CPU、未切 eval。
+
+    兼容 torch.compile 留下的 `_orig_mod.` 前缀；SFT 阶段的 v41 权重推理时启用候选池
+    （论文：分层稀疏索引在后训练引入，训练与推理用同样的候选限制）。
+    """
+    cfg = config_from_dict(blob.get("config") or {})
+    model = build_model(cfg)
+    prefix = "_orig_mod."
+    state = {(k[len(prefix):] if k.startswith(prefix) else k): v for k, v in blob["model"].items()}
+    model.load_state_dict(state, strict=True)
+    if isinstance(cfg, FlashConfig):
+        model.infer_candidate_pool = blob.get("stage") == "sft"
+    return model, cfg

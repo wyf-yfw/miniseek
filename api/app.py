@@ -28,10 +28,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from algo.model import load_model_from_blob
 from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
+from algo.model.v41.cache import PrefixCache
 from api import tasks_store as ts
 from api import bench_store as bs
 from api import clean_store as cs
@@ -265,6 +267,7 @@ class InferenceEngine:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._gen_lock = threading.Lock()
         self._cancel = threading.Event()
+        self.prefix_cache = None
 
     def stop_generation(self) -> None:
         """Signal the active stream_chat / stream_continue loop to break ASAP."""
@@ -293,24 +296,18 @@ class InferenceEngine:
                 blob = sd
             else:
                 cfg_raw = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path and cfg_path.exists() else {}
-                allowed = set(ModelConfig.__annotations__)
-                cfg_dict = {k: v for k, v in cfg_raw.items() if k in allowed}
                 blob = {
                     "model": sd,
-                    "config": cfg_dict,
+                    "config": cfg_raw,
                     "step": cfg_raw.get("train_step", "?"),
                     "loss": cfg_raw.get("train_loss", "?"),
                 }
         else:
             blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        cfg = ModelConfig.from_dict(blob["config"])
+        model, cfg = load_model_from_blob(blob)
         configure_attn_backend(bool(getattr(cfg, "use_flash_attn", True)))
-        if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
-            from algo.model.moe import MoELM
-            model = MoELM(cfg)
-        else:
-            model = DenseLM(cfg)
-        model.load_state_dict(blob["model"], strict=True)
+        # v41：多轮对话复用上一轮的全局 KV（单槽前缀缓存）；换权重时清空
+        self.prefix_cache = PrefixCache() if getattr(model, "supports_prefix_cache", False) else None
         device = torch.device("cpu")
         if torch.cuda.is_available():
             train_busy = _any_training_running()
@@ -544,6 +541,7 @@ class InferenceEngine:
         prev_text = ""
         n = 0
         cancelled = False
+        extra = {"prefix_cache": self.prefix_cache} if self.prefix_cache is not None else {}
         with self._gen_lock:
             self._cancel.clear()
             for token in self.model.generate_stream(
@@ -552,6 +550,7 @@ class InferenceEngine:
                 temperature=float(temperature),
                 top_k=int(top_k),
                 eos_token_id=eos_id,
+                **extra,
             ):
                 if self._cancel.is_set():
                     cancelled = True

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import torch
 
+from algo.model import load_model_from_blob
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
@@ -70,8 +71,7 @@ def main() -> None:
 
     if Path(args.ckpt).exists():
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-        model = DenseLM(ModelConfig.from_dict(ckpt["config"]))
-        model.load_state_dict(ckpt["model"])
+        model, _cfg = load_model_from_blob(ckpt)
     else:
         print("[gen_smoke] WARN: 无 ckpt，随机权重")
         model = DenseLM(ModelConfig().with_vocab_size(int(tok.vocab_size)))

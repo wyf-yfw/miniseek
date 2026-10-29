@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -314,6 +315,52 @@ def candidates_info(logits: torch.Tensor, temperature: float, k: int) -> dict:
     }
 
 
+class PrefixCache:
+    """单槽前缀缓存（多轮对话）：保留全局 KV、indexer K、压缩器状态与 Engram 历史，不保留滑窗 KV。
+
+    命中时按最长公共前缀复用，长度向下对齐到压缩比的公倍数（未满组的中间状态因此可以清空）；
+    编码器滑窗由 Encoder SWA Bounded Replay 重建。
+    """
+
+    def __init__(self) -> None:
+        self.tokens: Optional[List[int]] = None
+        self.cache: Optional[InferenceCache] = None
+        self.hits = 0
+
+    def take(self, model, ids: torch.Tensor) -> Tuple[InferenceCache, int]:
+        fresh = (InferenceCache.create(model, ids.size(0), model.cfg.max_seq_len), 0)
+        cache, old = self.cache, self.tokens
+        self.cache, self.tokens = None, None
+        if cache is None or old is None or ids.size(0) != 1 or cache.max_len != model.cfg.max_seq_len:
+            return fresh
+        lcp = 0
+        for a, b in zip(old, ids[0].tolist()):
+            if a != b:
+                break
+            lcp += 1
+        align = 1
+        for r in model.cfg.compress_ratios:
+            if r:
+                align = align * r // math.gcd(align, r)
+        lcp -= lcp % align
+        if lcp <= 0:
+            return fresh
+        cache.drop_window()
+        for lc in cache.layers:
+            if lc.kv_state is not None:
+                lc.kv_state.zero_()
+                lc.score_state.fill_(float("-inf"))
+        cache.pos = lcp
+        self.hits += 1
+        return cache, lcp
+
+    def put(self, cache: InferenceCache, tokens: torch.Tensor) -> None:
+        if tokens.size(0) != 1:
+            return
+        self.cache = cache
+        self.tokens = tokens[0, : cache.pos].tolist()
+
+
 @torch.no_grad()
 def stream_tokens(
     model,
@@ -325,25 +372,33 @@ def stream_tokens(
     eos_token_id: Optional[int] = None,
     use_candidates: bool = False,
     debug_k: int = 0,
+    prefix_cache: Optional[PrefixCache] = None,
 ) -> Iterator[Tuple[torch.Tensor, Optional[dict]]]:
     """逐 token 产出 (next_id [B,1], 调试信息)。缓存写满时用后半段上下文重新预填充。"""
     model.eval()
     max_len = model.cfg.max_seq_len
     ids = input_ids[:, -max_len:]
-    cache = InferenceCache.create(model, ids.size(0), max_len)
-    logits = ced_prefill(model, ids, cache, use_candidates=use_candidates)
-    for step in range(max_new_tokens):
-        info = candidates_info(logits, temperature, debug_k) if debug_k else None
-        nxt = sample(logits, temperature, top_k)
-        yield nxt, info
-        if eos_token_id is not None and bool((nxt == int(eos_token_id)).all()):
-            return
-        if step == max_new_tokens - 1:
-            return
-        ids = torch.cat([ids, nxt], dim=1)
-        if cache.pos >= max_len:
-            ids = ids[:, -(max_len // 2) :]
-            cache = InferenceCache.create(model, ids.size(0), max_len)
-            logits = ced_prefill(model, ids, cache, use_candidates=use_candidates)
-        else:
-            logits = decode_chunk(model, nxt, cache, use_candidates=use_candidates)[:, -1]
+    if prefix_cache is not None:
+        cache, prefix_len = prefix_cache.take(model, ids)
+    else:
+        cache, prefix_len = InferenceCache.create(model, ids.size(0), max_len), 0
+    try:
+        logits = ced_prefill(model, ids, cache, prefix_len=prefix_len, use_candidates=use_candidates)
+        for step in range(max_new_tokens):
+            info = candidates_info(logits, temperature, debug_k) if debug_k else None
+            nxt = sample(logits, temperature, top_k)
+            yield nxt, info
+            if eos_token_id is not None and bool((nxt == int(eos_token_id)).all()):
+                return
+            if step == max_new_tokens - 1:
+                return
+            ids = torch.cat([ids, nxt], dim=1)
+            if cache.pos >= max_len:
+                ids = ids[:, -(max_len // 2) :]
+                cache = InferenceCache.create(model, ids.size(0), max_len)
+                logits = ced_prefill(model, ids, cache, use_candidates=use_candidates)
+            else:
+                logits = decode_chunk(model, nxt, cache, use_candidates=use_candidates)[:, -1]
+    finally:
+        if prefix_cache is not None:
+            prefix_cache.put(cache, ids)

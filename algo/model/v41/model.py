@@ -232,6 +232,8 @@ class Transformer(nn.Module):
             out.append(nxt)
         return torch.cat(out, dim=1)
 
+    supports_prefix_cache = True
+
     @torch.no_grad()
     def generate_stream(
         self,
@@ -240,6 +242,7 @@ class Transformer(nn.Module):
         temperature: float = 1.0,
         top_k: Optional[int] = 50,
         eos_token_id: Optional[int] = None,
+        prefix_cache=None,
     ):
         from .cache import stream_tokens
 
@@ -251,6 +254,7 @@ class Transformer(nn.Module):
             top_k=top_k,
             eos_token_id=eos_token_id,
             use_candidates=self.infer_candidate_pool,
+            prefix_cache=prefix_cache,
         ):
             yield int(nxt[0, 0].item())
 

@@ -139,15 +139,17 @@ class NgramHasher(nn.Module):
         super().__init__()
         self.layout = layout
         self.pad_token_id = int(cfg.engram_pad_id)
+        compressed = int(cfg.engram_compressed_vocab_size or 0)
         if token_map is None:
-            token_map = list(range(cfg.vocab_size))
-            vocab = cfg.vocab_size
+            if compressed and compressed != cfg.vocab_size:
+                # 从 checkpoint 加载：压缩表由 load_state_dict 填入，乘子按配置里的压缩词表大小算
+                token_map, vocab = [0] * cfg.vocab_size, compressed
+            else:
+                token_map, vocab = list(range(cfg.vocab_size)), cfg.vocab_size
         else:
             vocab = int(max(token_map)) + 1
-        if cfg.engram_compressed_vocab_size and cfg.engram_compressed_vocab_size != vocab:
-            raise ValueError(
-                f"压缩词表大小 {vocab} 与配置 {cfg.engram_compressed_vocab_size} 不一致，哈希会整体变掉"
-            )
+            if compressed and compressed != vocab:
+                raise ValueError(f"压缩词表大小 {vocab} 与配置 {compressed} 不一致，哈希会整体变掉")
         flat = [[p for order in layer for p in order] for layer in layout.primes]
         offsets = [np.cumsum([0, *sizes[:-1]]) for sizes in flat]
         self.register_buffer("token_map", torch.tensor(list(token_map), dtype=torch.long))

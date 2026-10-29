@@ -21,6 +21,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
+from algo.model import load_model_from_blob
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
@@ -55,9 +56,7 @@ def main() -> None:
         raise SystemExit(f"缺少训练数据: {args.data}")
 
     ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-    cfg = ModelConfig.from_dict(ckpt["config"])
-    model = DenseLM(cfg)
-    model.load_state_dict(ckpt["model"])
+    model, cfg = load_model_from_blob(ckpt)
     model.to(device).eval()
 
     ds = JsonlTextDataset(args.data, tok, args.max_seq_len)
@@ -78,7 +77,7 @@ def main() -> None:
     for input_ids, labels in loader:
         input_ids = input_ids.to(device)
         labels = labels.to(device)
-        _, loss = model(input_ids, labels=labels)
+        loss = model(input_ids, labels=labels)[1]
         n = (labels != -100).sum().item()
         total_loss += loss.item() * n
         total_tokens += n
