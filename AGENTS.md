@@ -68,6 +68,7 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 - SFT：新开才需要 Init Ckpt；填了 Resume 则不必再填 Init。
 - **可行性 SFT 流程（推荐写入 README 的那套）**：数据 `sft_miniseek_v5_short256.jsonl`；`max_seq_len=256`；`--arch moe` + 最近 PT `last.pt`/`best.pt`；Flash 默认开。超 `max_seq_len` 时 SFT **keep-head**（从尾截，优先留问题）。正式长训仍用 10G。
 - 验证集：没有独立 valid 文件，也没有 `--valid` 路径。Pretrain / SFT / `valid_ppl` 都只用 `--valid-ratio` 从训练集内存抽样（Pretrain 默认约 `0.01`），不改源 jsonl。`hparams.valid_path` 忽略。
+- **PT pack（默认 `batch_mode=pack`）**：整篇文档先 tokenize，文档间加 eos 拼成 token 流，再按训练配置的 `max_seq_len`（256/512/1024…）做**非重叠**切块组 batch；**不再**在 pack 前把单篇截到 `max_seq_len`（长文尾巴进后续块，不是滑动窗口）。random/bucket 仍按样本截断；SFT 超长仍是 keep-head，与此无关。
 - **FlashAttention**：PT / SFT 默认开（`--flash-attn` / UI「FlashAttention」）。优先 `flash_attn` 包；未安装则用 torch SDPA flash（bf16/fp16 + CUDA）。`--no-flash-attn` 可关。日志有 `flash_attn=on backend=...`。
 - Checkpoint：默认滚动 `last.pt`（`--save-last-every=5000`）+ 覆盖 `best.pt`；勿默认按 loss 阈值狂存，除非用户显式开 `--save-loss-thresholds`。
 - 清洗：走 Web「数据清洗」；PT 默认倾向保留中英混合（语言过滤常关），中间产物尽量不落盘。

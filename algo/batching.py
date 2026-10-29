@@ -2,8 +2,10 @@
 
 Bench measured (effective tok/s vs random pad):
   bucket ~+30% (pad ~1%), pack ~+40% (pad ~0%).
-Packing joins docs with eos and does NOT add cross-document attention masks
-(same as the speed bench). Causal attention still sees across doc boundaries.
+Packing joins full docs with eos (no per-doc pre-truncate) and cuts the stream
+into non-overlapping max_seq_len chunks; does NOT add cross-document attention
+masks (same as the speed bench). Causal attention still sees across doc
+boundaries. Model context remains the configured max_seq_len.
 """
 
 from __future__ import annotations
@@ -182,7 +184,9 @@ def estimate_pack_steps(
 class PackedTextBatchIter:
     """Online packer over a list of raw texts (one epoch).
 
-    Encodes on the fly, appends eos between docs, emits [B, S] batches.
+    Encodes on the fly (full docs, no per-doc truncate), appends eos between
+    docs, cuts the stream into non-overlapping max_seq_len chunks, emits [B, S]
+    batches. Model context is still max_seq_len; long tails appear in later chunks.
     """
 
     def __init__(
@@ -219,12 +223,9 @@ class PackedTextBatchIter:
             ids = self.tokenizer.encode(text, add_special_tokens=True)
             if not ids:
                 continue
-            # Match JsonlTextDataset truncation (keep trailing eos when present)
-            if len(ids) > self.max_seq_len:
-                if ids[-1] == self.eos_id:
-                    ids = ids[: self.max_seq_len - 1] + [self.eos_id]
-                else:
-                    ids = ids[: self.max_seq_len]
+            # Keep the full document; the pack cutter below emits non-overlapping
+            # max_seq_len chunks so long-doc tails land in later windows instead
+            # of being dropped. (random/bucket still truncate per sample.)
             stream.extend(ids)
             stream.append(self.eos_id)
             while len(stream) >= self.max_seq_len:
@@ -250,10 +251,9 @@ class PackedTextBatchIter:
     def estimate_len(self) -> int:
         if not self.texts:
             return 1
-        # char≈token for this Chinese BPE; good enough for LR horizon
-        avg = sum(min(self.max_seq_len, max(2, len(t))) for t in self.texts) / len(
-            self.texts
-        )
+        # char≈token for this Chinese BPE; count full docs (pack no longer
+        # drops tails), so LR/horizon matches real token volume.
+        avg = sum(max(2, len(t)) for t in self.texts) / len(self.texts)
         return estimate_pack_steps(
             len(self.texts), avg, self.batch_size, self.max_seq_len
         )
