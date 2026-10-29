@@ -4,15 +4,16 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
 from algo.model.config import ModelConfig
+from algo.model.v41.config import FlashConfig
 
 _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
 
-PRESET_ARCHS = ("tiny", "dense", "moe", "v41-flash")
+PRESET_ARCHS = ("tiny", "dense", "v41", "v41-flash")
 
 # Reference-only aliases (DeepSeek-V4.1-Flash paper diagram; not ModelConfig.preset).
 _V41_FLASH_ALIASES = frozenset({
@@ -23,16 +24,16 @@ _V41_FLASH_ALIASES = frozenset({
 })
 
 
-def preset_config(arch: str) -> ModelConfig:
+def preset_config(arch: str):
     a = (arch or "").strip().lower()
     if a == "tiny":
         return ModelConfig.tiny()
     if a == "dense":
         return ModelConfig()  # D0.1 defaults
-    if a == "moe":
-        return ModelConfig(arch="moe")
+    if a == "v41":
+        return FlashConfig()  # MiniSeek-F0.1
     raise ValueError(
-        f"未知架构: {arch}（可选: tiny / dense / moe / v41-flash）"
+        f"未知架构: {arch}（可选: tiny / dense / v41 / v41-flash）"
     )
 
 
@@ -313,7 +314,237 @@ def inspect_design(arch: str) -> Dict[str, Any]:
     a = (arch or "").strip().lower()
     if a in _V41_FLASH_ALIASES:
         return inspect_v41_flash()
-    return inspect_from_config(preset_config(arch), source="design")
+    cfg = preset_config(arch)
+    if isinstance(cfg, FlashConfig):
+        return inspect_v41_model(cfg, source="design")
+    return inspect_from_config(cfg, source="design")
+
+
+# ---------------------------------------------------------------- MiniSeek-F（v41，可训练）----
+
+_MODE_COLORS = {"Full": "#86efac", "Reuse": "#fde047", "Reindex": "#93c5fd", "SWA": "#fda4af"}
+
+
+def _v41_param_counts(cfg: FlashConfig) -> Tuple[Dict[str, Tuple[int, Tuple[int, ...]]], int]:
+    """在 meta device 上构建主干与 DSpark，返回 {参数名: (numel, shape)} 与草稿头总参。"""
+    from algo.model.v41.dspark import DSparkDrafter
+    from algo.model.v41.model import Transformer
+
+    with torch.device("meta"):
+        model = Transformer(cfg)
+        drafter = DSparkDrafter(cfg)
+    named = {n: (int(p.numel()), tuple(p.shape)) for n, p in model.named_parameters()}
+    return named, int(sum(p.numel() for p in drafter.parameters()))
+
+
+def _sum(named: Dict[str, Tuple[int, Tuple[int, ...]]], prefix: str) -> int:
+    return sum(v[0] for k, v in named.items() if k.startswith(prefix))
+
+
+def _shapes(named, prefix: str, keys: List[str]) -> List[Dict[str, str]]:
+    out = []
+    for k in keys:
+        hit = named.get(prefix + k)
+        if hit:
+            out.append(_w(k, list(hit[1])))
+    return out
+
+
+def _v41_groups(cfg: FlashConfig, lo: int, hi: int, prefix: str) -> List[Dict[str, Any]]:
+    """把 [lo, hi) 层按模式归组（自下而上）：连续 SWA 一组；Full/Reindex 带上其后的 Reuse。
+
+    解码器的 Full 单独成组（渲染器把它画在解码器最底部、接 CED 箭头），其后的 Reuse 另成一组。
+    """
+    modes = cfg.layer_modes()
+    groups: List[Dict[str, Any]] = []
+    i = lo
+
+    def moe_row(rid: str) -> Dict[str, Any]:
+        return {"id": rid, "type": "moe", "label": "MoE"}
+
+    while i < hi:
+        m = modes[i]
+        r = cfg.compress_ratios[i]
+        if m == "SWA":
+            j = i
+            while j < hi and modes[j] == "SWA":
+                j += 1
+            groups.append({
+                "id": f"{prefix}_swa",
+                "repeat": j - i,
+                "kind": "swa",
+                "rows": [{"id": f"{prefix}_swa_attn", "type": "swa", "label": "SWA", "mode": "SWA"}, moe_row(f"{prefix}_swa_moe")],
+                "note": f"L{i}–L{j - 1} 只有滑窗（窗口 {cfg.window_size}）",
+            })
+            i = j
+            continue
+        j = i + 1
+        while j < hi and modes[j] == "Reuse":
+            j += 1
+        n_reuse = j - i - 1
+        if m == "Reuse":
+            groups.append({
+                "id": f"{prefix}_reuse_g{i}",
+                "repeat": max(1, n_reuse + 1),
+                "kind": "csa2-reuse",
+                "rows": [{"id": f"{prefix}_reuse", "type": "csa2-reuse", "label": f"CSA2({r}, Reuse)", "mode": "Reuse", "m": r}, moe_row(f"{prefix}_reuse_moe")],
+                "note": f"L{i}–L{j - 1} 复用主 KV 与 top-k",
+            })
+            i = j
+            continue
+        rid = f"{prefix}_{'full' if m == 'Full' else 'reindex'}"
+        head = {
+            "id": f"{rid}_g{i}",
+            "repeat": 1,
+            "kind": f"csa2-{m.lower()}",
+            "rows": [{"id": rid, "type": f"csa2-{m.lower()}", "label": f"CSA2({r}, {m})", "mode": m, "m": r}, moe_row(f"{rid}_moe")],
+            "note": f"L{i}",
+        }
+        decoder_full = prefix == "dec" and m == "Full"
+        if n_reuse and not decoder_full:
+            head["nested"] = {
+                "repeat": n_reuse,
+                "rows": [{"id": f"{prefix}_reuse", "type": "csa2-reuse", "label": f"CSA2({r}, Reuse)", "mode": "Reuse", "m": r}, moe_row(f"{prefix}_reuse_moe")],
+            }
+            head["note"] = f"L{i} {m} + L{i + 1}–L{j - 1} Reuse"
+            i = j
+        else:
+            i += 1
+        groups.append(head)
+    return groups
+
+
+def inspect_v41_model(
+    cfg: FlashConfig,
+    *,
+    source: str = "design",
+    path: str = "",
+    step: Any = None,
+    loss: Any = None,
+) -> Dict[str, Any]:
+    """MiniSeek-F（DeepSeek-V4.1-Flash 全架构的小尺寸版）：Fig.3 风格示意 + 逐层参数。"""
+    named, dspark_params = _v41_param_counts(cfg)
+    d, V, E = cfg.dim, cfg.vocab_size, cfg.n_encoder_layers
+    btd, bt = f"[b,t,{d}]", "[b,t]"
+    modes = cfg.layer_modes()
+
+    blocks: List[Dict[str, Any]] = [{
+        "id": "embed",
+        "kind": "embedding",
+        "label": "Token Embedding",
+        "params": _sum(named, "embed."),
+        "shape_in": bt,
+        "shape_out": btd,
+        "weight_shapes": _shapes(named, "", ["embed.weight"]),
+    }]
+    for i in range(cfg.n_layers):
+        pre = f"layers.{i}."
+        mode = modes[i]
+        attn_total = _sum(named, pre + "attn.")
+        comp = _sum(named, pre + "attn.compressor.")
+        idx = _sum(named, pre + "attn.indexer.")
+        parts: List[Dict[str, Any]] = [
+            {"id": "hc_attn", "label": "Single-Pass mHC（注意力子层系数）", "params": _sum(named, pre + "hc_attn_"),
+             "detail": {"hc_mult": cfg.hc_mult, "sinkhorn_iters": cfg.hc_sinkhorn_iters}},
+            {"id": "attn_norm", "label": "RMSNorm (pre-Attn)", "params": _sum(named, pre + "attn_norm.")},
+            {"id": "attn", "label": f"{'SWA' if mode == 'SWA' else 'CSA2(' + str(cfg.compress_ratios[i]) + ', ' + mode + ')'} 注意力",
+             "params": attn_total - comp - idx,
+             "weight_shapes": _shapes(named, pre + "attn.", ["wq_a.weight", "wq_b.weight", "wkv.weight", "wo_a.weight", "wo_b.weight", "attn_sink"]),
+             "detail": {"mode": mode, "n_heads": cfg.n_heads, "head_dim(shared KV)": cfg.head_dim,
+                        "rope_head_dim": cfg.rope_head_dim, "window": cfg.window_size,
+                        "kv_source": cfg.kv_source_for(i), "o_groups": cfg.o_groups}},
+        ]
+        if comp:
+            parts.append({"id": "compressor", "label": f"Compressor (m={cfg.compress_ratios[i]})", "params": comp,
+                          "weight_shapes": _shapes(named, pre + "attn.compressor.", ["wkv.weight", "wgate.weight"])})
+        if idx:
+            parts.append({"id": "indexer", "label": "Indexer", "params": idx,
+                          "detail": {"heads": cfg.index_n_heads, "head_dim": cfg.index_head_dim, "topk": cfg.index_topk,
+                                     "candidate_source": i == cfg.candidate_source_layer}})
+        parts += [
+            {"id": "hc_ffn", "label": "Single-Pass mHC（MoE 子层系数）", "params": _sum(named, pre + "hc_ffn_")},
+            {"id": "ffn_norm", "label": "RMSNorm (pre-MoE)", "params": _sum(named, pre + "ffn_norm.")},
+            {"id": "router", "label": "Router (sqrt-softplus + bias)", "params": _sum(named, pre + "ffn.gate."),
+             "detail": {"n_routed_experts": cfg.n_routed_experts, "top_k": cfg.n_activated_experts, "route_scale": cfg.route_scale}},
+            {"id": "shared_experts", "label": "Shared Expert ×1", "params": _sum(named, pre + "ffn.shared_experts."),
+             "detail": {"inter_dim": cfg.moe_inter_dim, "swiglu_limit": cfg.swiglu_limit}},
+            {"id": "routed_experts", "label": f"Routed Experts ×{cfg.n_routed_experts}", "params": _sum(named, pre + "ffn.experts.")},
+        ]
+        eng = _sum(named, pre + "engram.")
+        if eng:
+            parts.append({"id": "engram", "label": "Engram（block 之前写入 4 条流）", "params": eng,
+                          "detail": {"ngram": f"2..{cfg.engram_max_ngram_size}", "heads": cfg.engram_n_heads, "head_dim": cfg.engram_head_dim}})
+        blocks.append({
+            "id": f"layer-{i}",
+            "kind": "layer",
+            "index": i,
+            "label": f"L{i} · {mode}" + (" · Engram" if eng else ""),
+            "params": _sum(named, pre),
+            "parts": parts,
+            "detail": {"section": "decoder" if cfg.is_decoder(i) else "encoder", "mode": mode,
+                       "compress_ratio": cfg.compress_ratios[i]},
+        })
+
+    tail = [
+        {"id": "norm", "kind": "norm", "label": "Final RMSNorm", "params": _sum(named, "norm."), "shape_in": btd, "shape_out": btd},
+        {"id": "lm_head", "kind": "lm_head", "label": "LM Head（不与 embedding 共享）", "params": _sum(named, "head."), "tied": False,
+         "shape_in": btd, "shape_out": f"[b,t,{V}]", "weight_shapes": _shapes(named, "", ["head.weight"])},
+        {"id": "dspark", "kind": "dspark", "label": "DSpark 草稿头（另训，不计入主干）", "params": dspark_params,
+         "detail": {"blocks": cfg.n_mtp_layers, "gamma": cfg.dspark_block_size, "markov_rank": cfg.dspark_markov_rank,
+                    "experts": f"1+{cfg.dspark_n_routed_experts} top-{cfg.dspark_n_activated_experts}"}},
+    ]
+    total = sum(v[0] for v in named.values())
+    eng_layers = " · ".join(f"@L{i}" for i in cfg.engram_layer_ids)
+    reuse_target = next((i for i in cfg.engram_layer_ids if modes[i] == "Reuse"), None)
+    fig3 = {
+        "title": f"{cfg.release_name} | DeepSeek-V4.1-Flash 架构（{cfg.n_layers} 层：编码 {E} + 解码 {cfg.n_layers - E}）",
+        "encoder": {"id": "causal_encoder", "label": f"Causal Encoder ({E}L)", "n_layers": E,
+                    "groups": _v41_groups(cfg, 0, E, "enc"), "output": {"id": "enc_hidden", "label": "Enc. Hidden States"}},
+        "decoder": {"id": "decoder", "label": f"Decoder ({cfg.n_layers - E}L)", "n_layers": cfg.n_layers - E,
+                    "groups": _v41_groups(cfg, E, cfg.n_layers, "dec"), "output": {"id": "dspark", "label": "DSpark"}},
+        "csa2_modes": [
+            {"mode": "Full", "color": _MODE_COLORS["Full"], "kv": "本层压缩器产出主 KV、indexer K 与 top-k（编码器 m=2，解码器 m=1）"},
+            {"mode": "Reuse", "color": _MODE_COLORS["Reuse"], "kv": "复用最近来源层的主 KV 与 top-k，不跑 indexer"},
+            {"mode": "Reindex", "color": _MODE_COLORS["Reindex"], "kv": "复用主 KV 与 indexer K，在候选池里重选 top-k"},
+            {"mode": "SWA", "color": _MODE_COLORS["SWA"], "kv": f"只有滑窗（窗口 {cfg.window_size}）；其余层也都带本层滑窗"},
+        ],
+        "kv_flows": [
+            {"id": "ced", "label": "CED", "from": "enc_hidden", "to": "dec_full", "style": "ced",
+             "note": f"编码器输出只在 L{E}（解码器 Full）投影成全局 KV；之后的解码器层复用。每层仍有自己的 Q 与滑窗 KV。"},
+            {"id": "indexer", "label": "Hierarchical Sparse Indexer", "from": "dec_full", "to": "candidate_pool", "style": "indexer",
+             "note": f"L{cfg.candidate_source_layer} 按 {cfg.candidate_block_size} 个条目一块取最大分，保留 {cfg.candidate_topk_blocks} 块（后训练启用）。"},
+            {"id": "reindex", "label": "Reindex Top-K", "from": "candidate_pool", "to": "dec_reindex", "style": "reindex",
+             "note": f"Reindex 层只在候选池里重选 top-{cfg.index_topk}。"},
+            {"id": "engram_feed", "label": "Engram", "from": "engram", "to": "enc_swa_attn", "style": "engram",
+             "note": f"Engram 写入 {eng_layers} 之前的 {cfg.hc_mult} 条残差流。"},
+        ],
+        "engram_sub": eng_layers,
+        "engram_targets": ["enc_swa_attn", "enc_reuse" if reuse_target is not None else "enc_full"],
+        "dspark_sub": f"投机解码草稿头：{cfg.n_mtp_layers} 个 block，另训，不计入 {cfg.n_layers} 层",
+        "show_vision": False,
+        "notes_list": [
+            "自下而上计算。注意力在下，MoE 在上；括号右侧 ×N 是这一括号重复的次数。",
+            f"CED：编码器输出 H_{{L/2}} 只在解码器最底下的 CSA2(1, Full)（L{E}）投影成全局 KV，之后的 Reuse / Reindex 复用；每层仍有自己的 Q 与本层滑窗 KV。",
+            f"候选池：L{cfg.candidate_source_layer} 建池（{cfg.candidate_topk_blocks} 块 × {cfg.candidate_block_size}），Reindex 只在池内重选 top-{cfg.index_topk}；论文在后训练才开，SFT 默认启用。",
+            f"Engram 在 {eng_layers} 的 block 之前按流门控写入；Single-Pass mHC 为 {cfg.hc_mult} 条残差流、Sinkhorn {cfg.hc_sinkhorn_iters} 次。",
+            "与论文的有意差异：KV / indexer 全部 BF16（论文主 KV 为 FP4、滑窗 KV 为 FP8，3090 不支持）；没有视觉分支；尺寸缩小。",
+        ],
+    }
+    config = cfg.to_dict()
+    meta = {"step": step, "loss": loss, "source": source, "diagram": "fig3", "release_name": cfg.release_name,
+            "trainable": True, "dspark_params": dspark_params}
+    return {
+        "path": path or f"design:{cfg.arch}",
+        "config": config,
+        "meta": meta,
+        "fig3": fig3,
+        "kv_flows": fig3["kv_flows"],
+        "sections": {"encoder": fig3["encoder"], "decoder": fig3["decoder"]},
+        "total_params": total,
+        "tie_word_embeddings": False,
+        "blocks": blocks,
+        "tail": tail,
+    }
 
 
 def inspect_v41_flash() -> Dict[str, Any]:
@@ -1057,6 +1288,14 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
     cfg_raw = blob.get("config") or {}
     if not isinstance(cfg_raw, dict):
         cfg_raw = {}
+    if cfg_raw.get("arch") == "v41":
+        return inspect_v41_model(
+            FlashConfig.from_dict(cfg_raw),
+            source=str(blob.get("source") or "training"),
+            path=path,
+            step=blob.get("step"),
+            loss=blob.get("loss"),
+        )
     try:
         cfg = ModelConfig.from_dict(cfg_raw)
         cfg_out = cfg.to_dict()

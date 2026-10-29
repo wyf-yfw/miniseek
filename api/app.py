@@ -37,7 +37,15 @@ from algo.model.v41.cache import PrefixCache
 from api import tasks_store as ts
 from api import bench_store as bs
 from api import clean_store as cs
-from api.task_runner import pid_alive, reconcile_task, rebuild_metrics_from_log, start_task, stop_task, validate_sft_init_ckpt
+from api.task_runner import (
+    TRAIN_ARCHS,
+    pid_alive,
+    reconcile_task,
+    rebuild_metrics_from_log,
+    start_task,
+    stop_task,
+    validate_sft_init_ckpt,
+)
 from api.bench_runner import (
     reconcile_run,
     start_run as bench_start_run,
@@ -61,7 +69,7 @@ DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "PT" / "pretrain_mix_12g_cle
 DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "SFT" / "sft_miniseek_v5_10g.jsonl")
 DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "tasks" / "_default_pretrain")
 DEFAULT_SFT_OUT = str(PROJECT_ROOT / "tasks" / "_default_sft")
-DEFAULT_MOE_OUT = str(PROJECT_ROOT / "tasks" / "_default_moe")
+DEFAULT_V41_OUT = str(PROJECT_ROOT / "tasks" / "_default_v41")
 
 
 def _gpu_text() -> str:
@@ -420,8 +428,8 @@ class InferenceEngine:
 
         cfg = getattr(self.model, "cfg", None)
         arch = getattr(cfg, "arch", "dense") if cfg is not None else "dense"
-        use_moe = bool(getattr(cfg, "use_moe", False)) if cfg is not None else False
-        if arch != "moe" and not use_moe:
+        use_moe = arch == "v41" or bool(getattr(cfg, "use_moe", False))
+        if not use_moe:
             return {
                 "arch": "dense",
                 "ok": False,
@@ -440,7 +448,7 @@ class InferenceEngine:
         max_seq_len = max(8, int(max_seq_len))
         batch_size = max(1, min(int(batch_size), 16))
         n_routed = int(getattr(cfg, "n_routed_experts", 0))
-        top_k = int(getattr(cfg, "num_experts_per_tok", 2))
+        top_k = int(getattr(cfg, "num_experts_per_tok", None) or getattr(cfg, "n_activated_experts", 2))
         n_layers = int(getattr(cfg, "n_layers", 0))
         n_shared = int(getattr(cfg, "n_shared_experts", 1))
 
@@ -501,7 +509,7 @@ class InferenceEngine:
         uniform = math.log(max(n_routed, 1), 2)
         cost = time.time() - t0
         return {
-            "arch": "moe",
+            "arch": arch,
             "ok": True,
             "ckpt": self.loaded_ckpt,
             "data_path": str(data_p),
@@ -901,7 +909,7 @@ class ArchInspectRequest(BaseModel):
 
 
 class ArchDesignRequest(BaseModel):
-    arch: str = "dense"  # tiny | dense | moe | v41-flash (reference)
+    arch: str = "dense"  # tiny | dense | v41 | v41-flash (reference)
 
 
 class BenchCreate(BaseModel):
@@ -1209,14 +1217,14 @@ def defaults() -> dict:
             "resume": "",
             "aux_coef": 0.0001,
         },
-        "moe": {
-            "arch": "moe",
+        "v41": {
+            "arch": "v41",
             "mode": "pretrain",
             "data_path": DEFAULT_PRETRAIN_DATA,
-            "batch_size": 32,
-            "max_seq_len": 512,
-            "lr": 5e-5,
-            "min_lr": 1e-5,
+            "batch_size": 8,
+            "max_seq_len": 1024,
+            "lr": 3e-4,
+            "min_lr": 3e-5,
             "warmup_steps": 200,
             "epochs": 1,
             "max_steps": 0,
@@ -1226,9 +1234,9 @@ def defaults() -> dict:
             "save_every": 0,
             "log_every": 1,
             "batch_mode": "pack",
-            "compile": True,
+            "compile": False,
             "fused_adamw": True,
-            "flash_attn": True,
+            "flash_attn": False,
             "plot_every": 500,
             "valid_every": 500,
             "valid_max_samples": 512,
@@ -1286,13 +1294,13 @@ def defaults() -> dict:
             "resume": "",
             "aux_coef": 0.0001,
         },
-        "pretrain_moe": {
-            "arch": "moe",
+        "pretrain_v41": {
+            "arch": "v41",
             "data_path": DEFAULT_PRETRAIN_DATA,
-            "out_dir": DEFAULT_MOE_OUT,
-            "batch_size": 32,
-            "lr": 5e-5,
-            "min_lr": 1e-5,
+            "out_dir": DEFAULT_V41_OUT,
+            "batch_size": 8,
+            "lr": 3e-4,
+            "min_lr": 3e-5,
             "warmup_steps": 200,
             "stable_steps": 50,
             "plot_every": 500,
@@ -1368,7 +1376,7 @@ def api_list_tasks() -> dict:
 def api_create_task(body: TaskCreate) -> dict:
     arch = (body.arch or "dense").strip().lower()
     mode = (body.mode or "pretrain").strip().lower()
-    if arch not in {"dense", "moe", "tiny"}:
+    if arch not in TRAIN_ARCHS:
         raise HTTPException(status_code=400, detail=f"未知架构: {arch}")
     if mode not in {"pretrain", "sft"}:
         raise HTTPException(status_code=400, detail=f"未知模式: {mode}")
@@ -1405,7 +1413,7 @@ def api_patch_task(task_id: str, body: TaskPatch) -> dict:
     if task.get("status") == "draft":
         if body.arch is not None:
             arch = body.arch.strip().lower()
-            if arch not in {"dense", "moe", "tiny"}:
+            if arch not in TRAIN_ARCHS:
                 raise HTTPException(status_code=400, detail=f"未知架构: {arch}")
             task["arch"] = arch
         if body.mode is not None:

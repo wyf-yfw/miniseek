@@ -1,6 +1,6 @@
 """MiniSeek-D：稠密 Decoder-only Transformer LM（RoPE + RMSNorm + FFN）.
 
-产品线 MiniSeek-D*（当前 D0.1）。MoE 见 model/moe.py（MiniSeek-M*）。
+产品线 MiniSeek-D*（当前 D0.1）。DeepSeek-V4.1-Flash 全架构见 model/v41/（MiniSeek-F*）。
 """
 
 from __future__ import annotations

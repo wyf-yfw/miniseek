@@ -37,9 +37,7 @@ def build_model(cfg: AnyConfig, token_map: Optional[Sequence[int]] = None):
 
         return Transformer(cfg, token_map=token_map)
     if getattr(cfg, "arch", "dense") == "moe" or getattr(cfg, "use_moe", False):
-        from .moe import MoELM
-
-        return MoELM(cfg)
+        raise ValueError("M0.1 MoE（MoELM）已移除，请改用 arch=v41（MiniSeek-F，DeepSeek-V4.1-Flash 全架构）")
     return DenseLM(cfg)
 
 

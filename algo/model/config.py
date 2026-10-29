@@ -2,9 +2,9 @@
 
 架构线：
 - dense → MiniSeek-D*（稠密 Decoder-only）
-- moe   → MiniSeek-M*（混合专家，实现见 model/moe.py）
 - tiny  → MiniSeek-D 冒烟档（同 DenseLM，极小超参）
-版本号写在 model_family / model_version（如 D0.1 / M0.1）。
+- v41   → MiniSeek-F*（DeepSeek-V4.1-Flash 全架构），配置见 model/v41/config.py 的 FlashConfig
+版本号写在 model_family / model_version（如 D0.1）。旧的 M0.1 MoE 已移除。
 """
 
 from __future__ import annotations

@@ -124,29 +124,39 @@ def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
 
 
 
-def test_build_train_cmd_sft_moe_allowed(tasks_root, tmp_path):
-    """SFT + MoE must build a cmd (no ValueError) and pass --arch moe."""
+def test_build_train_cmd_sft_v41(tasks_root, tmp_path):
+    """SFT + v41 builds a cmd with --arch v41, aux coef and post-train switches."""
     ckpt = tmp_path / "pretrain.pt"
     ckpt.write_bytes(b"x")
     t = ts.create_task(
-        name="sft-moe",
-        arch="moe",
+        name="sft-v41",
+        arch="v41",
         mode="sft",
         hparams={
             "max_steps": 2,
             "batch_size": 2,
             "aux_coef": 0.02,
             "init_ckpt": str(ckpt),
+            "candidate_pool": False,
+            "act_ckpt": True,
         },
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
     assert "algo.train_sft" in cmd
-    assert "--arch" in cmd
-    assert cmd[cmd.index("--arch") + 1] == "moe"
-    assert "--aux-coef" in cmd
+    assert cmd[cmd.index("--arch") + 1] == "v41"
     assert cmd[cmd.index("--aux-coef") + 1] == "0.02"
-    assert "--init-ckpt" in cmd
     assert cmd[cmd.index("--init-ckpt") + 1] == str(ckpt)
+    assert "--no-candidate-pool" in cmd and "--act-ckpt" in cmd
+    assert "--no-compile" in cmd  # v41 默认不编译
+
+
+def test_build_train_cmd_rejects_removed_moe(tasks_root):
+    t = ts.create_task(name="old-moe", arch="moe", mode="pretrain", hparams={"max_steps": 2})
+    try:
+        tr.build_train_cmd(ts.load_task(t["id"]))
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
 
 
 def test_build_train_cmd_sft_requires_init_ckpt(tasks_root):
@@ -180,7 +190,7 @@ def test_build_train_cmd_sft_resume_skips_init(tasks_root, tmp_path):
 def test_build_train_cmd_speed_defaults(tasks_root):
     t = ts.create_task(
         name="spd",
-        arch="moe",
+        arch="dense",
         mode="pretrain",
         hparams={"max_steps": 2, "batch_size": 2},
     )

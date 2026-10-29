@@ -63,29 +63,31 @@ def test_design_dense_matches_denselm():
     assert lm["weight_shapes"] == [{"name": "lm_head.weight", "shape": "[6400,512] (tied)"}]
 
 
-def test_design_moe_has_experts():
-    out = inspect_design("moe")
-    assert out["config"]["arch"] == "moe"
-    layer = next(b for b in out["blocks"] if b["kind"] == "layer")
-    ids = {p["id"] for p in layer["parts"]}
-    assert "router" in ids and "shared_experts" in ids and "routed_experts" in ids
-    assert "residual_attn" not in ids
-    assert "add_attn" in ids and "add_ffn" in ids
-    assert out["total_params"] > inspect_design("dense")["total_params"]
-    by_id = {p["id"]: p for p in layer["parts"]}
-    # moe: d=512, moe_intermediate=256, n_routed=64, n_shared=1, top-3
-    assert by_id["router"]["weight_shapes"] == [{"name": "gate.weight", "shape": "[64,512]"}]
-    assert by_id["shared_experts"]["weight_shapes"] == [
-        {"name": "gate_proj.weight", "shape": "[256,512] ×1"},
-        {"name": "up_proj.weight", "shape": "[256,512] ×1"},
-        {"name": "down_proj.weight", "shape": "[512,256] ×1"},
+def test_design_v41_fig3():
+    out = inspect_design("v41")
+    assert out["config"]["arch"] == "v41"
+    assert out["meta"]["diagram"] == "fig3" and out["meta"]["trainable"] is True
+    assert out["total_params"] <= 200_000_000
+    fig = out["fig3"]
+
+    def sig(groups):
+        return [(g["rows"][0]["mode"], g["repeat"], (g.get("nested") or {}).get("repeat")) for g in groups]
+
+    assert sig(fig["encoder"]["groups"]) == [("SWA", 2, None), ("Full", 1, 1)]
+    assert sig(fig["decoder"]["groups"]) == [("Full", 1, None), ("Reuse", 1, None), ("Reindex", 1, 1)]
+    rows = [
+        r["id"]
+        for g in fig["encoder"]["groups"] + fig["decoder"]["groups"]
+        for r in g["rows"] + (g.get("nested") or {}).get("rows", [])
     ]
-    assert by_id["routed_experts"]["weight_shapes"] == [
-        {"name": "gate_proj.weight", "shape": "[256,512] ×64"},
-        {"name": "up_proj.weight", "shape": "[256,512] ×64"},
-        {"name": "down_proj.weight", "shape": "[512,256] ×64"},
-    ]
-    assert by_id["router"]["detail"]["num_experts_per_tok"] == 3
+    assert {"enc_swa_attn", "enc_full", "enc_reuse", "dec_full", "dec_reindex"} <= set(rows)
+    assert fig["engram_targets"] == ["enc_swa_attn", "enc_reuse"] and fig["show_vision"] is False
+    assert {f["id"] for f in fig["kv_flows"]} >= {"ced", "indexer", "reindex"}
+    layer4 = next(b for b in out["blocks"] if b["id"] == "layer-4")
+    parts = {p["id"] for p in layer4["parts"]}
+    assert {"hc_attn", "attn", "compressor", "indexer", "router", "shared_experts", "routed_experts"} <= parts
+    assert next(b for b in out["tail"] if b["id"] == "dspark")["params"] > 0
+    assert next(b for b in out["tail"] if b["id"] == "lm_head")["tied"] is False
 
 
 def test_preset_unknown():

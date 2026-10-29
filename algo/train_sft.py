@@ -260,7 +260,7 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/SFT/sft_miniseek_v5_10g.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
-    p.add_argument("--arch", choices=["dense", "moe", "tiny", "v41"], default="dense", help="model architecture")
+    p.add_argument("--arch", choices=["dense", "tiny", "v41"], default="dense", help="model architecture")
     p.add_argument(
         "--aux-coef",
         type=float,
@@ -422,7 +422,7 @@ def main() -> None:
                 print("[sft] torch.compile enabled")
             except Exception as e:  # noqa: BLE001
                 print(f"[sft] WARN: torch.compile 失败，继续未编译: {e}")
-    has_moe = args.arch in ("moe", "v41")
+    has_moe = is_v41
     print(
         f"[sft] arch={args.arch} release={cfg.release_name} "
         f"aux_coef={args.aux_coef if has_moe else 'n/a'}"

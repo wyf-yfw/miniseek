@@ -56,6 +56,16 @@ def test_load_and_inspect_roundtrip(tmp_path: Path):
     assert out["blocks"][0]["kind"] == "embedding"
 
 
+def test_v41_checkpoint_inspect():
+    from algo.model.v41.config import FlashConfig
+
+    blob = {"config": FlashConfig.tiny().to_dict(), "model": {}, "step": 3, "loss": 2.5}
+    out = inspect_blob(blob, path="x/last.pt")
+    assert out["meta"]["step"] == 3 and out["meta"]["diagram"] == "fig3"
+    assert out["path"] == "x/last.pt" and out["fig3"]["encoder"]["n_layers"] == 4
+    assert out["config"]["arch"] == "v41"
+
+
 def test_synthetic_moe_parts():
     """Checkpoint inspect reads the live MoE module names."""
     cfg = ModelConfig(
