@@ -3,9 +3,11 @@
 Bench measured (effective tok/s vs random pad):
   bucket ~+30% (pad ~1%), pack ~+40% (pad ~0%).
 Packing joins full docs with eos (no per-doc pre-truncate) and cuts the stream
-into non-overlapping max_seq_len chunks; does NOT add cross-document attention
-masks (same as the speed bench). Causal attention still sees across doc
-boundaries. Model context remains the configured max_seq_len.
+into non-overlapping max_seq_len chunks. By default there is no cross-document
+attention mask (causal attention sees across doc boundaries). With
+``with_doc_ids=True`` (v41) docs are padded to ``doc_align`` and every batch
+carries per-token doc ids for sample-level attention masking; predictions that
+cross a doc boundary are dropped from the loss.
 """
 
 from __future__ import annotations
@@ -141,6 +143,83 @@ def stack_pack_group(
     return torch.stack(xs, dim=0), torch.stack(ys, dim=0)
 
 
+def append_aligned_doc(
+    stream_ids: List[int],
+    stream_doc: List[int],
+    stream_lab: List[int],
+    ids: Sequence[int],
+    labs: Sequence[int],
+    doc_id: int,
+    align: int,
+    pad_id: int,
+) -> None:
+    """追加一篇文档（含其 eos）；长度补齐到 align 的倍数，补的 pad 不算损失、归属本文档。"""
+    stream_ids.extend(int(t) for t in ids)
+    stream_lab.extend(int(t) for t in labs)
+    stream_doc.extend([int(doc_id)] * len(ids))
+    rem = len(ids) % max(1, int(align))
+    if rem:
+        n = int(align) - rem
+        stream_ids.extend([int(pad_id)] * n)
+        stream_lab.extend([-100] * n)
+        stream_doc.extend([int(doc_id)] * n)
+
+
+def stack_doc_pack_group(
+    group: Sequence[Tuple[Sequence[int], Sequence[int], Sequence[int]]],
+    max_seq: int,
+    pad_id: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """(ids, doc, lab) 切块 → x [B,S-1]、y [B,S-1]、doc_ids [B,S-1]。
+
+    y[t] = lab[t+1]，若 t+1 属于另一篇文档则为 −100（样本级 attention mask 下不跨文档预测）。
+    doc_ids 在块内从 0 重新编号；尾部补齐的 pad 自成一篇。
+    """
+    if not group:
+        raise ValueError("empty pack group")
+    xs: List[torch.Tensor] = []
+    ys: List[torch.Tensor] = []
+    ds: List[torch.Tensor] = []
+    for ids, docs, labs in group:
+        ids, docs, labs = [int(t) for t in ids], [int(t) for t in docs], [int(t) for t in labs]
+        if len(ids) < max_seq:
+            n = max_seq - len(ids)
+            nxt = (docs[-1] + 1) if docs else 0
+            ids += [int(pad_id)] * n
+            labs += [-100] * n
+            docs += [nxt] * n
+        ids, docs, labs = ids[:max_seq], docs[:max_seq], labs[:max_seq]
+        base = docs[0]
+        docs = [d - base for d in docs]
+        y = [labs[t + 1] if docs[t + 1] == docs[t] else -100 for t in range(max_seq - 1)]
+        xs.append(torch.tensor(ids[:-1], dtype=torch.long))
+        ys.append(torch.tensor(y, dtype=torch.long))
+        ds.append(torch.tensor(docs[:-1], dtype=torch.long))
+    return torch.stack(xs), torch.stack(ys), torch.stack(ds)
+
+
+def _iter_doc_packs(encoded, *, max_seq: int, batch_size: int, align: int, pad_id: int):
+    """encoded 产出 (ids, labs)；对齐打包后按 batch 产出 (x, y, doc_ids)。"""
+    if max_seq % max(1, int(align)):
+        raise ValueError(f"max_seq_len {max_seq} 必须是 doc_align {align} 的倍数")
+    s_ids: List[int] = []
+    s_doc: List[int] = []
+    s_lab: List[int] = []
+    ready: List[Tuple[List[int], List[int], List[int]]] = []
+    for doc_id, (ids, labs) in enumerate(encoded):
+        append_aligned_doc(s_ids, s_doc, s_lab, ids, labs, doc_id, align, pad_id)
+        while len(s_ids) >= max_seq:
+            ready.append((s_ids[:max_seq], s_doc[:max_seq], s_lab[:max_seq]))
+            s_ids, s_doc, s_lab = s_ids[max_seq:], s_doc[max_seq:], s_lab[max_seq:]
+            if len(ready) >= batch_size:
+                yield stack_doc_pack_group(ready[:batch_size], max_seq=max_seq, pad_id=pad_id)
+                ready = ready[batch_size:]
+    if len(s_ids) >= 2:
+        ready.append((s_ids, s_doc, s_lab))
+    for i in range(0, len(ready) - batch_size + 1, batch_size):
+        yield stack_doc_pack_group(ready[i : i + batch_size], max_seq=max_seq, pad_id=pad_id)
+
+
 def build_pack_batches(
     enc: Sequence[Sequence[int]],
     batch_size: int,
@@ -199,6 +278,8 @@ class PackedTextBatchIter:
         pad_id: int = 0,
         eos_id: Optional[int] = None,
         seed: int = 0,
+        doc_align: int = 1,
+        with_doc_ids: bool = False,
     ) -> None:
         self.texts = list(texts)
         self.tokenizer = tokenizer
@@ -211,11 +292,31 @@ class PackedTextBatchIter:
             else (getattr(tokenizer, "eos_token_id", None) or 2)
         )
         self.seed = int(seed)
+        # v41：文档对齐到压缩比的倍数，并产出逐 token 文档编号（样本级 attention mask）
+        self.doc_align = int(doc_align)
+        self.with_doc_ids = bool(with_doc_ids)
 
-    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+    def _encoded_docs(self, order: Sequence[int]):
+        for idx in order:
+            ids = self.tokenizer.encode(self.texts[idx], add_special_tokens=True)
+            if not ids:
+                continue
+            ids = list(ids) + [self.eos_id]
+            yield ids, ids
+
+    def __iter__(self) -> Iterator[Tuple[torch.Tensor, ...]]:
         rng = random.Random(self.seed)
         order = list(range(len(self.texts)))
         rng.shuffle(order)
+        if self.with_doc_ids:
+            yield from _iter_doc_packs(
+                self._encoded_docs(order),
+                max_seq=self.max_seq_len,
+                batch_size=self.batch_size,
+                align=self.doc_align,
+                pad_id=self.pad_id,
+            )
+            return
         stream: List[int] = []
         ready: List[List[int]] = []
         for idx in order:
@@ -392,6 +493,8 @@ class PackedSFTBatchIter:
         batch_size: int,
         pad_id: int = 0,
         seed: int = 0,
+        doc_align: int = 1,
+        with_doc_ids: bool = False,
     ) -> None:
         self.samples = list(samples)
         self.encode_fn = encode_fn
@@ -399,11 +502,31 @@ class PackedSFTBatchIter:
         self.batch_size = int(batch_size)
         self.pad_id = int(pad_id)
         self.seed = int(seed)
+        self.doc_align = int(doc_align)
+        self.with_doc_ids = bool(with_doc_ids)
 
-    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+    def _encoded_samples(self, order: Sequence[int]):
+        for idx in order:
+            ids, labs = self.encode_fn(self.samples[idx])
+            if not ids or len(ids) < 2:
+                continue
+            if len(ids) != len(labs):
+                raise ValueError("encode_fn returned mismatched ids/labels")
+            yield list(ids), list(labs)
+
+    def __iter__(self) -> Iterator[Tuple[torch.Tensor, ...]]:
         rng = random.Random(self.seed)
         order = list(range(len(self.samples)))
         rng.shuffle(order)
+        if self.with_doc_ids:
+            yield from _iter_doc_packs(
+                self._encoded_samples(order),
+                max_seq=self.max_seq_len,
+                batch_size=self.batch_size,
+                align=self.doc_align,
+                pad_id=self.pad_id,
+            )
+            return
         stream_ids: List[int] = []
         stream_labs: List[int] = []
         ready: List[Tuple[List[int], List[int]]] = []
