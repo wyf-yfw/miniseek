@@ -268,6 +268,8 @@ class InferenceEngine:
         self._gen_lock = threading.Lock()
         self._cancel = threading.Event()
         self.prefix_cache = None
+        self.drafter = None
+        self.sps = None
 
     def stop_generation(self) -> None:
         """Signal the active stream_chat / stream_continue loop to break ASAP."""
@@ -332,10 +334,32 @@ class InferenceEngine:
         self.model = model
         self.device = device
         self.loaded_ckpt = ckpt_path
+        dspark_note = self._load_sibling_drafter(path, cfg, device)
         step = blob.get("step", "?")
         loss = blob.get("loss", "?")
         where = "GPU" if device.type == "cuda" else "CPU"
-        return f"已加载 {Path(ckpt_path).name} (Step: {step}, Loss: {loss}, {where})"
+        return f"已加载 {Path(ckpt_path).name} (Step: {step}, Loss: {loss}, {where}){dspark_note}"
+
+    def _load_sibling_drafter(self, path: Path, cfg, device: torch.device) -> str:
+        """v41：checkpoint 同目录有 dspark.pt 时加载草稿头，对话/续写走 DSpark 投机解码。"""
+        self.drafter, self.sps = None, None
+        dpath = path.with_name("dspark.pt") if path.is_file() else None
+        if dpath is None or not dpath.exists() or not getattr(self.model, "supports_prefix_cache", False):
+            return ""
+        try:
+            from algo.model.v41.dspark import measure_sps
+            from algo.train_dspark import load_drafter
+
+            dblob = torch.load(dpath, map_location="cpu", weights_only=False)
+            drafter = load_drafter(dblob)
+            if drafter.cfg.dim != cfg.dim or drafter.cfg.vocab_size != cfg.vocab_size:
+                return "（dspark.pt 与主干尺寸不符，未启用）"
+            self.drafter = drafter.to(device).eval()
+            self.sps = measure_sps(self.model, cfg.dspark_block_size + 1, device)
+            return "，DSpark 投机解码已启用"
+        except Exception as exc:  # noqa: BLE001
+            self.drafter = None
+            return f"（DSpark 加载失败：{exc}）"
 
     def generate(
         self,
@@ -541,7 +565,12 @@ class InferenceEngine:
         prev_text = ""
         n = 0
         cancelled = False
-        extra = {"prefix_cache": self.prefix_cache} if self.prefix_cache is not None else {}
+        if self.drafter is not None:
+            extra = {"drafter": self.drafter, "sps": self.sps}
+        elif self.prefix_cache is not None:
+            extra = {"prefix_cache": self.prefix_cache}
+        else:
+            extra = {}
         with self._gen_lock:
             self._cancel.clear()
             for token in self.model.generate_stream(
@@ -792,6 +821,7 @@ class InferenceEngine:
         prev_text = ""
         n = 0
         cancelled = False
+        extra = {"drafter": self.drafter, "sps": self.sps} if self.drafter is not None else {}
         with self._gen_lock:
             self._cancel.clear()
             for token in self.model.generate_stream(
@@ -800,6 +830,7 @@ class InferenceEngine:
                 temperature=float(temperature),
                 top_k=int(top_k),
                 eos_token_id=eos_id,
+                **extra,
             ):
                 if self._cancel.is_set():
                     cancelled = True

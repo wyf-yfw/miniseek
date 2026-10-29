@@ -243,7 +243,26 @@ class Transformer(nn.Module):
         top_k: Optional[int] = 50,
         eos_token_id: Optional[int] = None,
         prefix_cache=None,
+        drafter=None,
+        sps=None,
+        stats=None,
     ):
+        if drafter is not None:
+            from .dspark import speculative_stream
+
+            yield from speculative_stream(
+                self,
+                drafter,
+                input_ids,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                eos_token_id=eos_token_id,
+                sps=sps,
+                stats=stats,
+            )
+            return
+
         from .cache import stream_tokens
 
         for nxt, _ in stream_tokens(

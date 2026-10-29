@@ -179,6 +179,279 @@ class DSparkDrafter(nn.Module):
             return F.linear(hn.float(), backbone.head.weight.float())
 
 
+# ------------------------------------------------------------------ 推理 ----
+
+
+class DraftCache:
+    """草稿头每个 block 一份上下文环形缓存：最近 window 个主干位置的上下文 KV（已 RoPE）。"""
+
+    def __init__(self, drafter: DSparkDrafter, batch: int, device, dtype) -> None:
+        cfg = drafter.cfg
+        W = cfg.window_size
+        self.kv = [torch.zeros(batch, W, cfg.head_dim, device=device, dtype=dtype) for _ in drafter.blocks]
+        self.pos = torch.full((batch, W), -1, device=device, dtype=torch.long)
+
+    @torch.no_grad()
+    def push(self, drafter: DSparkDrafter, target_hidden: torch.Tensor, start: int) -> None:
+        """写入绝对位置 [start, start+S) 的主干目标层特征 [B,S,n_targets·d]。"""
+        W = drafter.cfg.window_size
+        S = target_hidden.size(1)
+        keep = min(S, W)
+        pos = torch.arange(start + S - keep, start + S, device=target_hidden.device)
+        slot = torch.remainder(pos, W)
+        main_x = drafter.context_features(target_hidden[:, S - keep :].to(drafter.main_proj.weight.dtype))
+        for blk, buf in zip(drafter.blocks, self.kv):
+            kv = blk.attn.project_window_kv(main_x, blk.attn.freqs_cis[pos])
+            buf[:, slot] = kv.to(buf.dtype)
+        self.pos[:, slot] = pos.unsqueeze(0).expand(self.pos.size(0), -1)
+
+
+def _draft_attention_cached(attn: DSparkAttention, x: torch.Tensor, ring_kv, ring_pos, n: int) -> torch.Tensor:
+    B, G, _ = x.shape
+    W = ring_kv.size(1)
+    freqs_q = attn.freqs_cis[n : n + G]
+    _, q = attn.project_q(x, freqs_q)
+    kv_blk = attn.project_window_kv(x, freqs_q)
+    kv_all = torch.cat([ring_kv.to(kv_blk.dtype), kv_blk], dim=1)
+    ok = (ring_pos >= max(0, n - W)) & (ring_pos <= n - 1)
+    ctx_idx = torch.where(ok, torch.arange(W, device=x.device), -1)
+    blk_idx = (W + torch.arange(G, device=x.device)).expand(B, G)
+    idx = torch.cat([ctx_idx, blk_idx], dim=-1).unsqueeze(1).expand(B, G, W + G)
+    o, _ = sparse_attention(q, kv_all, idx, attn.attn_sink, attn.softmax_scale)
+    return attn.output(o, freqs_q)
+
+
+def _scaled_probs(logits: torch.Tensor, temperature: float, top_k: Optional[int]) -> torch.Tensor:
+    logits = logits.float()
+    if temperature is None or temperature <= 0:
+        return F.one_hot(logits.argmax(-1), logits.size(-1)).float()
+    logits = logits / max(temperature, 1e-6)
+    if top_k is not None and top_k > 0:
+        v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+        logits = logits.masked_fill(logits < v[..., [-1]], float("-inf"))
+    return torch.softmax(logits, dim=-1)
+
+
+@torch.no_grad()
+def draft_block(
+    drafter: DSparkDrafter,
+    backbone,
+    anchor: torch.Tensor,
+    n: int,
+    dcache: DraftCache,
+    temperature: float,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """anchor [B,1] 位于位置 n。返回 (草稿 token [B,γ]、草稿分布 [B,γ,V]、置信度原始 logit [B,γ])。"""
+    cfg = drafter.cfg
+    G = cfg.dspark_block_size
+    ids = torch.full((anchor.size(0), G), int(cfg.dspark_noise_token_id), device=anchor.device, dtype=torch.long)
+    ids[:, 0] = anchor[:, 0]
+    x = backbone.embed(ids).unsqueeze(2).repeat(1, 1, cfg.hc_mult, 1)
+    pre_mix = identity_pre_mix(x, cfg.hc_mult)
+    for blk, ring in zip(drafter.blocks, dcache.kv):
+        x, pre_mix, _ = blk.run(x, pre_mix, lambda h, b=blk, r=ring: _draft_attention_cached(b.attn, h, r, dcache.pos, n))
+    h = hc_pre(x, pre_mix)
+    base = drafter.base_logits(backbone, h)
+    tokens, probs, embeds = [], [], []
+    prev = anchor[:, 0]
+    for k in range(G):
+        bias, emb = drafter.markov_head(prev)
+        p = _scaled_probs(base[:, k] + bias, temperature, None)
+        nxt = p.argmax(-1) if temperature is None or temperature <= 0 else torch.multinomial(p, 1).squeeze(-1)
+        tokens.append(nxt)
+        probs.append(p)
+        embeds.append(emb)
+        prev = nxt
+    conf_logits = drafter.confidence_head(h, torch.stack(embeds, dim=1))
+    return torch.stack(tokens, dim=1), torch.stack(probs, dim=1), conf_logits
+
+
+def schedule_prefix(conf: torch.Tensor, sps) -> int:
+    """DSpark Algorithm 1（单请求）：按存活概率 a_j = Π c_i 依次加入，吞吐 τ·SPS(B) 不再上升即停。"""
+    a = torch.cumprod(conf.float(), dim=0).tolist()
+    batch, tau = 1, 1.0
+    best, chosen = tau * sps(batch), 0
+    for j, aj in enumerate(a, start=1):
+        if aj <= 0:
+            break
+        batch += 1
+        tau += aj
+        theta = tau * sps(batch)
+        if theta > best:
+            best, chosen = theta, j
+        else:
+            break
+    return chosen
+
+
+def accept_or_resample(x: int, p_d: torch.Tensor, p_t: torch.Tensor, generator=None) -> Tuple[bool, int]:
+    """无损验证：以 min(1, p_t/p_d) 接受；拒绝时从 norm(max(0, p_t − p_d)) 重采样。"""
+    pd, pt = float(p_d[x]), float(p_t[x])
+    u = float(torch.rand((), generator=generator))
+    if pd <= 0 or u < min(1.0, pt / pd):
+        return True, x
+    residual = (p_t - p_d).clamp(min=0)
+    if float(residual.sum()) <= 0:
+        residual = p_t
+    return False, int(torch.multinomial(residual / residual.sum(), 1, generator=generator))
+
+
+def _snapshot(cache) -> list:
+    snap = []
+    for lc in cache.layers:
+        snap.append(
+            (
+                lc.win_kv.clone(),
+                lc.win_pos.clone(),
+                None if lc.kv_state is None else lc.kv_state.clone(),
+                None if lc.score_state is None else lc.score_state.clone(),
+            )
+        )
+    return [snap, cache.pos]
+
+
+def _restore(cache, snap) -> None:
+    layers, pos = snap
+    for lc, (wkv, wpos, kst, sst) in zip(cache.layers, layers):
+        lc.win_kv.copy_(wkv)
+        lc.win_pos.copy_(wpos)
+        if kst is not None:
+            lc.kv_state.copy_(kst)
+            lc.score_state.copy_(sst)
+    cache.pos = pos
+
+
+def measure_sps(backbone, max_tokens: int, device, repeats: int = 3) -> Dict[int, float]:
+    """实测主干一次处理 B 个 token 的步频（steps/s），B = 1..max_tokens。"""
+    import time
+
+    from .cache import InferenceCache, ced_prefill, decode_chunk
+
+    table = {}
+    ids = torch.randint(1, backbone.cfg.vocab_size, (1, 16), device=device)
+    for b in range(1, max_tokens + 1):
+        cost = []
+        for _ in range(repeats):
+            cache = InferenceCache.create(backbone, 1)
+            ced_prefill(backbone, ids, cache)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            decode_chunk(backbone, ids[:, :b], cache)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            cost.append(time.perf_counter() - t0)
+        table[b] = 1.0 / max(min(cost), 1e-9)
+    return table
+
+
+@torch.no_grad()
+def speculative_stream(
+    backbone,
+    drafter: DSparkDrafter,
+    input_ids: torch.Tensor,
+    *,
+    max_new_tokens: int,
+    temperature: float = 1.0,
+    top_k: Optional[int] = 50,
+    eos_token_id: Optional[int] = None,
+    sps: Optional[Dict[int, float]] = None,
+    stats: Optional[dict] = None,
+    generator=None,
+    force_len: Optional[int] = None,
+    recorder=None,
+):
+    """DSpark 投机解码（单请求）。逐个产出 token（int）；输出分布与普通解码一致。
+
+    force_len 固定每轮验证长度（STS 校准收数据用）；recorder(conf_logits [γ], n_accepted, ell) 记录每轮。
+    """
+    from .cache import InferenceCache, ced_prefill, decode_chunk, sample
+
+    if input_ids.size(0) != 1:
+        raise ValueError("投机解码只支持 batch=1")
+    backbone.eval()
+    drafter.eval()
+    cfg = backbone.cfg
+    G = cfg.dspark_block_size
+    max_len = cfg.max_seq_len
+    sps_table = sps or {b: 1.0 for b in range(1, G + 2)}
+    sps_fn = lambda b: sps_table.get(b, sps_table[max(sps_table)])  # noqa: E731
+    use_cand = bool(getattr(backbone, "infer_candidate_pool", False))
+    ids = input_ids[:, -max_len:]
+    cache = InferenceCache.create(backbone, 1, max_len)
+    targets: Dict[int, torch.Tensor] = {}
+    logits = ced_prefill(backbone, ids, cache, use_candidates=use_cand, targets=targets)
+    dcache = DraftCache(drafter, 1, ids.device, drafter.main_proj.weight.dtype)
+    W = cfg.window_size
+    r0 = max(0, cache.pos - W)
+    dcache.push(drafter, torch.cat([targets[i] for i in cfg.dspark_target_layer_ids], dim=-1), r0)
+    st = stats if stats is not None else {}
+    st.setdefault("cycles", 0)
+    st.setdefault("drafted", 0)
+    st.setdefault("accepted", 0)
+
+    produced = 0
+    anchor = sample(logits, temperature, top_k)
+    while True:
+        tok = int(anchor[0, 0])
+        yield tok
+        produced += 1
+        if produced >= max_new_tokens or (eos_token_id is not None and tok == int(eos_token_id)):
+            return
+        n = cache.pos
+        if n + G + 1 > max_len:
+            # 余量不够一整块：退回普通解码
+            if n + 1 > max_len:
+                return
+            targets = {}
+            logits = decode_chunk(backbone, anchor, cache, use_candidates=use_cand, targets=targets)[:, -1]
+            dcache.push(drafter, torch.cat([targets[i] for i in cfg.dspark_target_layer_ids], dim=-1), n)
+            anchor = sample(logits, temperature, top_k)
+            continue
+        draft, p_d, conf_logits = draft_block(drafter, backbone, anchor, n, dcache, temperature)
+        conf = torch.sigmoid(conf_logits / drafter.sts_temps.to(conf_logits.device))
+        ell = int(force_len) if force_len is not None else schedule_prefix(conf[0], sps_fn)
+        st["cycles"] += 1
+        st["drafted"] += ell
+        snap = _snapshot(cache)
+        targets = {}
+        chunk = torch.cat([anchor, draft[:, :ell]], dim=1)
+        vlogits = decode_chunk(backbone, chunk, cache, use_candidates=use_cand, targets=targets)
+        out, rejected = [], False
+        for k in range(ell):
+            p_t = _scaled_probs(vlogits[0, k], temperature, top_k)
+            x = int(draft[0, k])
+            if temperature is None or temperature <= 0:
+                ok, y = (x == int(p_t.argmax())), int(p_t.argmax())
+            else:
+                ok, y = accept_or_resample(x, p_d[0, k], p_t, generator)
+            if ok:
+                out.append(x)
+            else:
+                out.append(y)
+                rejected = True
+                break
+        n_acc = len(out) - (1 if rejected else 0)
+        st["accepted"] += n_acc
+        if recorder is not None:
+            recorder(conf_logits[0].float().cpu(), n_acc, ell)
+        if rejected:
+            # 回滚：恢复验证前的缓存，只重放 anchor 与已接受的草稿
+            _restore(cache, snap)
+            targets = {}
+            decode_chunk(backbone, chunk[:, : 1 + n_acc], cache, use_candidates=use_cand, targets=targets)
+            final = torch.tensor([[out[-1]]], device=ids.device)
+        else:
+            final = sample(vlogits[:, ell], temperature, top_k)
+        dcache.push(drafter, torch.cat([targets[i] for i in cfg.dspark_target_layer_ids], dim=-1), n)
+        for x in out[:n_acc]:
+            yield x
+            produced += 1
+            if produced >= max_new_tokens or (eos_token_id is not None and x == int(eos_token_id)):
+                return
+        anchor = final
+
+
 def sample_anchors(labels: torch.Tensor, doc_ids: Optional[torch.Tensor], gamma: int, n: int, generator=None):
     """每行随机挑最多 n 个 anchor：其后 γ 个预测目标都有效且同文档。返回 (row, pos) 两个 1-D 张量。"""
     B, T = labels.shape

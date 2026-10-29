@@ -105,6 +105,101 @@ def test_backbone_frozen_and_drafter_trains():
     assert 0.0 <= float(terms["accept"]) <= 1.0
 
 
+def test_scheduler_early_stop():
+    from algo.model.v41.dspark import schedule_prefix
+
+    sps = {1: 100, 2: 95, 3: 90, 4: 60, 5: 50, 6: 40}
+    # Θ: 100 → 1.9·95=180.5 → 2.62·90=235.8 → 2.692·60=161.5（下降即停）
+    assert schedule_prefix(torch.tensor([0.9, 0.8, 0.1, 0.05, 0.01]), sps.__getitem__) == 2
+    assert schedule_prefix(torch.tensor([0.9, 0.8, 0.7]), lambda b: 1.0) == 3
+    assert schedule_prefix(torch.tensor([0.01, 0.9]), lambda b: 100.0 / b) == 0
+
+
+def test_acceptance_preserves_target_distribution():
+    from algo.model.v41.dspark import accept_or_resample
+
+    g = torch.Generator().manual_seed(0)
+    p_d = torch.tensor([0.6, 0.3, 0.1])
+    p_t = torch.tensor([0.2, 0.3, 0.5])
+    counts = torch.zeros(3)
+    for _ in range(20000):
+        x = int(torch.multinomial(p_d, 1, generator=g))
+        _, y = accept_or_resample(x, p_d, p_t, g)
+        counts[y] += 1
+    torch.testing.assert_close(counts / counts.sum(), p_t, atol=0.02, rtol=0)
+
+
+def _spec_models(seed=3):
+    cfg = _cfg(index_topk=64, candidate_topk_blocks=32)
+    torch.manual_seed(seed)
+    backbone = Transformer(cfg).eval()
+    drafter = DSparkDrafter(cfg).eval()
+    return backbone, drafter
+
+
+def test_greedy_spec_equals_greedy_with_rejections():
+    backbone, drafter = _spec_models()
+    ids = torch.randint(1, 97, (1, 12))
+    plain = list(backbone.generate_stream(ids, max_new_tokens=30, temperature=0.0))
+    stats = {}
+    spec = list(backbone.generate_stream(ids, max_new_tokens=30, temperature=0.0, drafter=drafter, stats=stats))
+    assert spec == plain
+    assert stats["cycles"] > 0 and stats["drafted"] > stats["accepted"]  # 随机草稿头：大多被拒绝，走回滚
+
+
+def test_greedy_spec_all_accepted_path(monkeypatch):
+    import algo.model.v41.dspark as dsp
+
+    backbone, drafter = _spec_models(4)
+    ids = torch.randint(1, 97, (1, 10))
+    P, G = ids.size(1), backbone.cfg.dspark_block_size
+    plain = list(backbone.generate_stream(ids, max_new_tokens=40, temperature=0.0))
+
+    def oracle(drafter_, backbone_, anchor, n, dcache, temperature):
+        # anchor 位于位置 n；它之后的贪心 token 依次是 plain[n−P+1 ...]
+        nxt = plain[n - P + 1 : n - P + 1 + G]
+        nxt = nxt + [0] * (G - len(nxt))
+        toks = torch.tensor([nxt])
+        probs = torch.nn.functional.one_hot(toks, backbone_.cfg.vocab_size).float()
+        return toks, probs, torch.full((1, G), 10.0)
+
+    monkeypatch.setattr(dsp, "draft_block", oracle)
+    stats = {}
+    spec = list(backbone.generate_stream(ids, max_new_tokens=40, temperature=0.0, drafter=drafter, stats=stats))
+    assert spec == plain
+    assert stats["accepted"] >= stats["drafted"] - G  # 除了序列末尾，全部接受
+
+
+def test_snapshot_restore_roundtrip():
+    from algo.model.v41.cache import InferenceCache, ced_prefill, decode_chunk
+    from algo.model.v41.dspark import _restore, _snapshot
+
+    backbone, _ = _spec_models(5)
+    cache = InferenceCache.create(backbone, 1)
+    ced_prefill(backbone, torch.randint(1, 97, (1, 9)), cache)
+    snap = _snapshot(cache)
+    decode_chunk(backbone, torch.randint(1, 97, (1, 4)), cache)
+    _restore(cache, snap)
+    assert cache.pos == 9
+    for lc, (wkv, wpos, kst, sst) in zip(cache.layers, snap[0]):
+        assert torch.equal(lc.win_kv, wkv) and torch.equal(lc.win_pos, wpos)
+        if kst is not None:
+            assert torch.equal(lc.kv_state, kst)
+
+
+def test_sts_calibration_reduces_ece():
+    from algo.dspark_calibrate import cumulative_ece, fit_sts
+
+    g = torch.Generator().manual_seed(1)
+    true_logits = torch.randn(4000, 3, generator=g)
+    accept = torch.bernoulli(torch.sigmoid(true_logits), generator=g)
+    survive = torch.cumprod(accept, dim=1)
+    overconfident = true_logits * 3.0
+    temps = fit_sts(overconfident, survive)
+    assert cumulative_ece(overconfident, survive, temps) < cumulative_ece(overconfident, survive, [1.0, 1.0, 1.0])
+    assert all(t > 1.0 for t in temps)
+
+
 @pytest.mark.slow
 def test_train_dspark_cli_smoke(tmp_path):
     backbone = Transformer(_cfg(vocab_size=6400, max_seq_len=64))
