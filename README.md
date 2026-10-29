@@ -2,7 +2,7 @@
 
 # MiniSeek
 
-**由简入难，对齐 DeepSeek-V4.1-Flash 结构思路的超小可训语言模型**
+**单卡 3090 从零训练的 DeepSeek-V4.1-Flash 全架构超小模型**
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/wyf-yfw/miniseek?style=social)](https://github.com/wyf-yfw/miniseek/stargazers)
 [![GitHub Code License](https://img.shields.io/github/license/wyf-yfw/miniseek)](LICENSE)
@@ -14,79 +14,100 @@
 
 </div>
 
-- 从 **Dense 骨架**出发，按阶段逐步接入 MoE / SWA / CSA2 / CED 等结构（见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)），用**同一套数据与评测**做公平 A/B；**MoE（M0.1：1 shared + 64 routed，top-3）已可训**。
-- Stage 0 主线：`d_model=512`、8 层 Dense Decoder-only，MiniMind 词表 **vocab=6400**，tied 权重约 **28.45M**，单卡 3090 可训。
-- 分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 词表（vocab=6400）；**训练数据用自建 MiniSeek 集**（`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`；**可行性 SFT 推荐** `sft_miniseek_v5_short256` + `max_seq_len=256`），核心模型用 **PyTorch 原生**实现。
-- 自带 **Web UI**：训练 Task、对话、续写、架构可视化、C-Eval / CMMLU / GSM8K 评测（lm-eval）。
-- 权重已开源到 Hugging Face：[`MiniSeek-D0.1-base`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base)（预训练）、[`MiniSeek-D0.1`](https://huggingface.co/wyf-yfw/MiniSeek-D0.1)（SFT）。
+* 此开源项目用 PyTorch 原生代码，在单张 RTX 3090 上从 0 训练 **MiniSeek-F0.1**：层实现对齐 [DeepSeek-V4.1-Flash](https://arxiv.org/abs/2609.19969) 的超小语言模型，主干 + Engram 共 **187M** 参数，每个 token 只激活约 **33M**。
+* 层数、宽度、专家个数按 3090 的预算缩小，层内算子一个不换：CED 因果编码-解码、SWA + CSA2（Full / Reuse / Reindex）压缩稀疏注意力与分层稀疏索引、Single-Pass mHC 多流残差、sqrt-softplus 路由的 MoE、Engram n-gram 记忆、DSpark 投机解码草稿头。
+* 训练配方也按论文来：Muon（混合 Newton–Schulz）+ AdamW + Sinkhorn 动量的分组优化、样本级注意力掩码、indexer KL 损失、无辅助损失的专家 bias 均衡。
+* 推理侧实现了 KV 缓存、CED 预填充、前缀缓存与有界重放，以及按置信度调度、输出分布与主干一致的 DSpark 投机解码。
+* 核心算子（RoPE、稀疏注意力、mHC、路由、Engram 哈希等）都移植了 DeepSeek 官方推理代码做等价测试；带缓存生成与整段前向、投机解码与普通解码也做了端到端一致性校验。
+* 数据清洗、预训练、SFT、评测、对话都能在自带的 Web UI 里完成，架构页可以点开任一层查看算子、公式和参数。
 
-> 本仓库当前实现：**Stage 0 Dense（MiniSeek-D0.1）+ Stage 1 MoE（MiniSeek-M0.1，`model/moe.py` + `--arch moe`）** + 训练/评测/Web 全链路；SWA / CSA2 / CED 仍为后续钩子。
+> 注：与论文的差异只有三处：KV 与 indexer 全部用 BF16（论文主 KV 为 FP4、滑窗 KV 为 FP8，3090 不支持这两种精度）；暂不含视觉分支；尺寸缩小。
+
+---
+
+<div align="center">
+
+![MiniSeek-F0.1 架构图](./images/miniseek-f0.1-arch.png)
+
+</div>
 
 ---
 
 # 📌 项目介绍
 
-个人 GPU 很难「从零」摸清大模型训练全流程：框架封装太厚，真实模型又太大。MiniSeek 想做一件更窄但可复现的事——**把结构升级拆成可对比的阶段**，每阶段只改架构，数据和 Eval-Core 全程锁死，从而看清「加 MoE / SWA / CSA2 / CED 到底换来了什么」。
+DeepSeek-V4.1-Flash 在 Transformer 上加了一整套新部件：编码器算一次、解码器各层复用的全局 KV（CED），三种模式交替的压缩稀疏注意力，4 条残差流的 mHC，哈希查表的 Engram 记忆，一次起草多个 token 的 DSpark。论文和官方代码面向的是数百张卡、FP4 / FP8 内核和数千亿参数，在个人显卡上很难读懂、跑通，更谈不上动手改。
 
-#### 本项目当前包含
+MiniSeek 把这套架构原样缩到一张 3090 能训的尺寸：层数、宽度、专家个数可以小，层内每个算子都按论文和官方代码实现，不拿常见的替代品顶替。在一台机器上就能完整走一遍「数据清洗 → 预训练 → SFT → 草稿头训练 → 推理与投机解码 → 评测」，对照代码和单测看清每个部件在做什么。
 
-- Dense Decoder-only（`DenseLM`）完整训练与生成代码（RoPE、RMSNorm、GELU FFN，默认 embedding / LM head tying）
-- MoE（`MoELM` / MiniSeek-M0.1）：1 shared + 64 routed、top-3、中间维 256、clamp SwiGLU、bias 选专家；`python -m algo.train_pretrain --arch moe`
-- 预训练脚本 `algo/train_pretrain.py`、生成 `algo/generate.py`、数据下载与 valid 划分
-- Eval-Core：Valid PPL、Gen-Smoke、以及 Web/CLI 上的 C-Eval / CMMLU / GSM8K（lm-evaluation-harness）
-- FastAPI Web UI（`:7860`）：训练 Task、对话、续写、架构图（简洁 / 标准 / 详细）、评测 Task、MoE 专家负载探针
-- 阶段规格文档 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md) 与冒烟测试
+#### 🎉 本项目包含以下内容
 
-#### 已发布模型
+- MiniSeek-F 全部结构代码（`algo/model/v41/`）：SWA / CSA2 注意力、压缩器、indexer 与候选池、Single-Pass mHC、MoE、Engram、CED 主干、KV 缓存与前缀缓存、DSpark。
+- 优化器（`algo/optim/`）：Muon、Sinkhorn 动量，以及按 V4 规则把参数分到 Muon / AdamW / Sinkhorn 三组。
+- 训练脚本：预训练 `algo/train_pretrain.py`、SFT `algo/train_sft.py`、DSpark `algo/train_dspark.py` 与置信度校准 `algo/dspark_calibrate.py`；支持断点续训、pack 组批与样本级注意力掩码、从训练集按比例抽验证集。
+- 官方推理代码的移植（`tests/v41_ref/`）与逐算子等价测试（`tests/test_v41_*.py`）。
+- Web UI（FastAPI，`:7860`）：训练 Task、对话、续写、架构图、评测（C-Eval / CMMLU / GSM8K）、数据清洗、专家负载。
+- 一条 Dense 小模型线 `DenseLM`（MiniSeek-D0.1），权重已开源。
 
-| 模型 | 角色 | Hub 参数量 | Release |
-|------|------|------------|---------|
-| [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | Dense 预训练基座 | **28.45M**（tied） | 2026-10 |
-| [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | SFT / 对话 | **31.73M**（untied emb+head） | 2026-10 |
+#### 🎉 已发布模型列表
 
-权重格式：`model.safetensors` + `config.json` + MiniMind tokenizer。自定义 `DenseLM`，暂非 `AutoModelForCausalLM` 即插即用。
+| 模型 | 参数量 | 说明 | Release |
+|------|--------|------|---------|
+| MiniSeek-F0.1 | 187M-A33M（DSpark 另 19M） | DeepSeek-V4.1-Flash 全架构 | 待发布 |
+| [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense SFT / 对话 | 2026-10 |
+| [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense 预训练基座 | 2026-10 |
 
 ---
 
 # 📌 快速开始
 
-## 第 0 步：克隆与依赖
+<details>
+<summary>本人的软硬件配置（供参考）</summary>
+
+* GPU：NVIDIA GeForce RTX 3090（24GB）× 1
+* 训练机 Linux，开发机 Windows
+* PyTorch ≥ 2.1，其余见 [requirements.txt](./requirements.txt)
+
+</details>
+
+## 第 0 步
 
 ```bash
 git clone https://github.com/wyf-yfw/miniseek.git
 cd miniseek
-python -m venv .venv
-# Linux / macOS
-source .venv/bin/activate
-# Windows PowerShell
-# .\.venv\Scripts\Activate.ps1
+python -m venv .venv && source .venv/bin/activate   # Windows：.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+# 词表：MiniMind tokenizer（vocab=6400）
+hf download jingyaogong/MiniMind2 --include "tokenizer*" --local-dir ./tokenizer
 ```
 
-CPU 冒烟：
+> 旧版 `huggingface_hub` 没有 `hf` 命令时，把 `hf download` 换成 `huggingface-cli download`。也可以用环境变量 `DS41_TOKENIZER_PATH` 指向已有的词表目录。
+
+在 CPU 上先跑一遍单测（含 F0.1 小尺寸的预训练 → SFT 冒烟）：
 
 ```bash
-python -m pytest tests/test_smoke.py -q
+python -m pytest tests -q
 ```
 
-## Ⅰ 🚀 推理
+## Ⅰ 🚀 模型推理
 
-### 1. 下载开源权重
+### 1' 下载模型
+
+MiniSeek-F0.1 训练完成后发布到 Hugging Face，现在可以先下载 Dense 版：
 
 ```bash
-# 基座（预训练）
-huggingface-cli download wyf-yfw/MiniSeek-D0.1-base --local-dir ./hub/MiniSeek-D0.1-base
-# 或对话版
-huggingface-cli download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
+hf download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
 ```
 
-### 2. CLI 生成（本地 ckpt）
+### 2' CLI 推理
 
 ```bash
-python -m algo.generate --ckpt tasks/_default_pretrain/best.pt --seed 42 --prompt "你好，请介绍一下人工智能。"
+# 本仓库训练出的任意 checkpoint（F0.1 或 D0.1）
+python -m algo.generate --ckpt tasks/f01-sft/last.pt --prompt "你好，请介绍一下你自己。"
 ```
 
-### 3. 从 Hub 加载 DenseLM
+<details>
+<summary>从 Hugging Face 加载 MiniSeek-D0.1（Python）</summary>
 
 ```python
 import json
@@ -116,26 +137,91 @@ out = model.generate(
 print(tok.decode(out[0].tolist(), skip_special_tokens=True))
 ```
 
-### 4. Web UI（推荐）
+</details>
+
+### 3' Web UI
 
 ```bash
-python -m uvicorn api.app:app --host 127.0.0.1 --port 7860
+MINISEEK_MONOLITH=1 python -m uvicorn api.app:app --host 127.0.0.1 --port 7860
 ```
 
-浏览器打开后可用：
+`MINISEEK_MONOLITH=1` 让训练、评测和网页跑在同一个进程里（Windows 默认如此）。长期部署用 `deploy/` 下的三个 systemd 单元：训练进程独立在 worker 里，重启网页或 API 不会打断训练。
 
-| Tab | 作用 |
-|-----|------|
-| 训练 | Task 侧栏：配置 → Start → 日志/指标 → Stop；ckpt 在 `tasks/<id>/` |
-| 对话 / 续写 | 选 checkpoint 做 chat / completion |
-| 架构 | Tiny / Dense / MoE 预设；简洁 · 标准 · 详细图 + 右侧抽屉；MoE 专家负载探针 |
-| 评测 | 与训练同形态的 Bench Task：C-Eval / CMMLU / GSM8K，双进度条 |
+| 页面 | 作用 |
+|------|------|
+| 训练 | 建 Task，选 V4.1 / Dense / Tiny，启停、看日志和 Loss 曲线；产物在 `tasks/<id>/` |
+| 对话 / 续写 | 加载 checkpoint 对话或续写；F0.1 多轮对话复用前缀缓存，同目录有 `dspark.pt` 时改走 DSpark 投机解码 |
+| 架构 | F0.1 架构图（点开每一层看算子、公式、参数）、V4.1-Flash 论文参考图、Dense / Tiny |
+| 评测 | C-Eval / CMMLU / GSM8K（lm-eval） |
+| 数据清洗 | 预训练 jsonl 的长度 / 语言 / 重复 / 去重 / 敏感词过滤 |
+| 专家负载 | 在训练数据上跑路由探针，看 64 个路由专家各被选中多少 |
 
-CPU 链路冒烟：
+## Ⅱ 🛠️ 模型训练
+
+### 1' 下载数据
 
 ```bash
-python scripts/smoke_tiny_task.py
+hf download wyf-yfw/MiniSeek-Pretrain pretrain_mix_12g_clean.jsonl --repo-type dataset --local-dir data/PT
+hf download wyf-yfw/MiniSeek-SFT sft_miniseek_v5_short256.jsonl --repo-type dataset --local-dir data/SFT
 ```
+
+数据组成见下文「数据介绍」。
+
+### 2' 开始训练
+
+> 以下命令在仓库根目录执行；也可以在 Web「训练」页选 V4.1，填同样的参数。
+
+#### 2.1 预训练
+
+```bash
+python -m algo.train_pretrain --arch v41 \
+  --data data/PT/pretrain_mix_12g_clean.jsonl \
+  --out-dir tasks/f01-pretrain \
+  --batch-size 8 --valid-ratio 0.01
+```
+
+`--arch v41` 默认 `max_seq_len=1024`、峰值学习率 `3e-4`（余弦退火到 `3e-5`）、BF16 自动混合精度、pack 组批加样本级注意力掩码。优化器按 V4 规则分组：矩阵走 Muon，Embedding / LM Head / Engram 表走 Sinkhorn 动量，RMSNorm 与标量走 AdamW。候选池在预训练默认关闭（`--candidate-pool` 可开）。显存不够时加 `--act-ckpt` 按层重计算，或调小 `--batch-size`。
+
+训练后得到 `tasks/f01-pretrain/last.pt`（每 5000 步滚动保存）和 `best.pt`。
+
+#### 2.2 指令微调
+
+```bash
+python -m algo.train_sft --arch v41 \
+  --init-ckpt tasks/f01-pretrain/last.pt \
+  --data data/SFT/sft_miniseek_v5_short256.jsonl \
+  --max-seq-len 256 \
+  --out-dir tasks/f01-sft
+```
+
+SFT 默认打开候选池（论文在后训练阶段才启用分层稀疏索引）和解码器有界重放模拟；超出 `max_seq_len` 的对话从尾部截断，尽量保留问题。`sft_miniseek_v5_short256.jsonl` 适合先验证模型能不能对话；正式长上下文 SFT 换成 `sft_miniseek_v5_10g.jsonl` 和 `--max-seq-len 1024`。
+
+#### 2.3 DSpark 草稿头（可选）
+
+```bash
+python -m algo.train_dspark --backbone tasks/f01-sft/last.pt --out-dir tasks/f01-sft
+python -m algo.dspark_calibrate --dspark tasks/f01-sft/dspark.pt --data data/PT/pretrain_mix_12g_clean.jsonl
+```
+
+主干冻结，只训草稿头，损失为 `0.1·CE + 0.9·TV + 1.0·BCE`；校准把逐位置温度写回 `dspark.pt`。`dspark.pt` 和主干 checkpoint 放在同一目录，网页加载主干时会自动启用投机解码。
+
+#### 2.4 测试模型
+
+```bash
+python -m algo.generate --ckpt tasks/f01-sft/last.pt --prompt "你好，请介绍一下你自己。"
+python -m algo.eval.valid_ppl --ckpt tasks/f01-pretrain/last.pt --data data/PT/pretrain_mix_12g_clean.jsonl --valid-ratio 0.01
+```
+
+<details>
+<summary>注：其它须知</summary>
+
+- 断点续训：`--resume <ckpt>`（含优化器状态）。`--max-steps` 是本轮步数上限，续训时进度和学习率日程从 0 起算。
+- Checkpoint：默认只保留滚动的 `last.pt` 和最好的 `best.pt`；需要里程碑时再显式加 `--save-loss-thresholds`。
+- 验证集：没有独立文件，用 `--valid-ratio` 从训练集里抽，不改动源 jsonl。
+- `torch.compile`：v41 默认关闭（MoE 分发与稀疏索引会频繁 graph-break），Dense 默认开启。
+- Dense 线：把 `--arch v41` 换成 `--arch dense`（默认 `max_seq_len=512`）。
+
+</details>
 
 ---
 
@@ -143,171 +229,124 @@ python scripts/smoke_tiny_task.py
 
 ## Ⅰ Tokenizer
 
-使用 MiniMind 词表（**vocab=6400**）。推荐：
+沿用 [MiniMind](https://github.com/jingyaogong/minimind) 的词表（vocab=6400）。词表小，Embedding 与 LM Head 各只占 3.3M，参数主要留给注意力和专家。没有本地词表时代码会退回字节级 `FallbackTokenizer`，只能用于冒烟，不能正式训练。
 
-```bash
-huggingface-cli download jingyaogong/MiniMind2 --include "tokenizer*" --local-dir ./tokenizer
-# 或 export DS41_TOKENIZER_PATH=/path/to/minimind_tokenizer
-```
+## Ⅱ 预训练 / SFT 数据
 
-无本地文件时，代码会回退到 byte-level `FallbackTokenizer`（仅 smoke，不可正式训练）。
+| 用途 | 路径 | 说明 |
+|------|------|------|
+| 预训练 | `data/PT/pretrain_mix_12g_clean.jsonl` | 每行 `{"text": ...}`，中英混合，由 12G 混合语料清洗而来 |
+| SFT（正式） | `data/SFT/sft_miniseek_v5_10g.jsonl` | 约 10 GiB / 596 万条对话；另有 5G 子集 `sft_miniseek_v5_5g.jsonl` |
+| SFT（快速验证） | `data/SFT/sft_miniseek_v5_short256.jsonl` | 从 10G 中筛出的短对话，约 0.84 GiB / 202 万条 |
+| 验证集 | 无独立文件 | 训练和 `valid_ppl` 都用 `--valid-ratio` 从训练集内存抽样 |
 
-## Ⅱ 预训练 / Valid / SFT
-
-```bash
-python scripts/download_data.py   # 检查本地 MiniSeek 数据是否齐
-# mix 构建见 data/scripts/（build_pretrain_mix_5g.py / split_mix_5pct.py）
-```
-
-| 用途 | 路径 |
-|------|------|
-| 预训练 | `data/PT/pretrain_mix_12g_clean.jsonl` |
-| 验证集 | 不单独提供。训练和 `valid_ppl` 用 `--valid-ratio` 从训练集内存划分 |
-| SFT（正式 / 默认） | `data/SFT/sft_miniseek_v5_10g.jsonl`（另有 `sft_miniseek_v5_5g.jsonl` 小跑；5G ⊂ 10G） |
-| SFT（**可行性验证推荐**） | `data/SFT/sft_miniseek_v5_short256.jsonl`（从 10G 筛短样本；≈0.84 GiB / ~202 万条） |
-
-Hub：[`MiniSeek-Pretrain`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-Pretrain)、[`MiniSeek-SFT`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-SFT)（含 config `sft_short256`）。
-
-> MiniMind 旧集（`pretrain_t2t_mini` / `sft_t2t_mini` / `valid.jsonl`）已删除，不再下载。
+Hub：[`MiniSeek-Pretrain`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-Pretrain)、[`MiniSeek-SFT`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-SFT)（含 config `sft_short256`）。来源与配比见 `data/PT/SOURCES.md`、`data/SFT/SOURCES_v5.md`、`data/SFT/SOURCES_v5_short256.md`。
 
 ---
 
 # 📌 模型
 
-## 结构（Stage 0）
+## 结构
 
-```text
-Token Embedding (V=6400 × d=512)
-        ↓
-×8 Transformer Block
-  RMSNorm → Causal Attn (RoPE) → Residual
-  RMSNorm → Dense FFN (intermediate=2048) → Residual
-        ↓
-RMSNorm → LM Head（基座默认与 Embedding tying）
-```
+MiniSeek-F0.1 共 8 层：前 4 层是因果编码器，后 4 层是解码器，层内算子与 DeepSeek-V4.1-Flash 一致。
 
-| 项 | 定稿值 |
-|----|--------|
-| `d_model` / `n_layers` / `n_heads` / `head_dim` | 512 / 8 / 8 / 64 |
-| Dense FFN | 2048 (=4d) |
-| `max_seq_len`（训练起步） | 512 |
-| 精度 / 硬件目标 | BF16 · 单卡 3090 |
+* **注意力**：Q 走低秩（512→128→16×128）；K、V 是同一份 128 维潜向量，所有头共享；只在最后 32 维加 RoPE，输出端再反向旋转；softmax 带每头可学习的 sink；输出分 2 组做低秩投影。每层都有窗口 128 的本层滑窗。
+* **CSA2 三种模式**：Full 层用压缩器把序列压成全局 KV（编码器 m=2 两两池化，解码器 m=1），由 indexer 打分选 top-64；Reuse 层复用来源层的全局 KV 和 top-k；Reindex 层复用全局 KV，在候选池里重选 top-k。
+* **CED**：编码器输出只在解码器第一层（L4）投影成全局 KV，后面的解码器层全部复用。推理时命中前缀缓存后，只需对最后 128 个 token 做有界重放。
+* **分层稀疏索引**：L4 把 indexer 分数按 8 个位置一块取最大，留 32 块作为候选池，L6（Reindex）只在池内重选。预训练关闭，SFT 开启。
+* **Single-Pass mHC**：4 条残差流，每个子层用 pre / post / comb 三组系数读写残差，comb 经 20 次 Sinkhorn 归一。
+* **MoE**：1 个共享专家 + 64 个路由专家选 top-6，专家是 clamp SwiGLU（中间维 176）；打分 sqrt(softplus)，选专家看分数加 bias，加权用原分数归一后乘 1.5；bias 按负载 ±0.001 更新，另有 1e-4 的序列级均衡损失。
+* **Engram**：L1、L3 之前各有一个 2~4-gram 哈希记忆，每条残差流用自己的门控写入。
+* **DSpark**：3 个 block 的草稿头读主干 L5–L7 的隐状态，一次起草 5 个 token，按置信度提前停，再由主干一次验证。
 
-## 阶段路线
+逐层排布（每层都是「注意力 + MoE」两个子层，残差走 mHC）：
 
-| Stage | 结构 | 本仓 |
-|-------|------|------|
-| 0 | Dense Decoder-only | ✅ |
-| 1 | + MoE MiniSeek-M0.1（1 shared + 64 routed, top-3, h=256, clamp SwiGLU, 216.4M） | ✅ `model/moe.py` + `--arch moe` |
-| 2 | + SWA | TODO |
-| 3 | + CSA2 | TODO |
-| 4 | + CED | TODO |
-| 5 | + HSI / Replay | TODO |
+| 层 | 位置 | 注意力模式 | 压缩比 m | 其它 |
+|----|------|-----------|---------|------|
+| L0 | 编码器 | SWA | — | 只有滑窗 |
+| L1 | 编码器 | SWA | — | Engram |
+| L2 | 编码器 | CSA2 Full | 2 | 产出全局 KV、indexer K 与 top-k |
+| L3 | 编码器 | CSA2 Reuse | 2 | Engram |
+| L4 | 解码器 | CSA2 Full | 1 | CED：由编码器输出投影全局 KV；建候选池 |
+| L5 | 解码器 | CSA2 Reuse | 1 | |
+| L6 | 解码器 | CSA2 Reindex | 1 | 候选池内重选 top-k |
+| L7 | 解码器 | CSA2 Reuse | 1 | |
 
-细节与参数量表：[`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)。
+完整超参见 [`algo/model/v41/config.py`](algo/model/v41/config.py)，设计说明见 [`docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`](docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md)。
 
-命名（DeepSeek 风格，Hub 一仓一权重）：
+## 模型配置
 
-- `MiniSeek-D{x.y}-base` — Dense 预训练
-- `MiniSeek-D{x.y}` — Dense SFT / chat
-- `MiniSeek-M{x.y}-*` — MoE 线（M0.1 本地可训；Hub 权重后续发布）
+| Model Name | params | vocab | max_seq | d_model | n_layers | heads × head_dim | MoE | note |
+|------------|--------|-------|---------|---------|----------|------------------|-----|------|
+| MiniSeek-F0.1 | 187M-A33M | 6400 | 1024 | 512 | 8（4+4） | 16 × 128（KV 共享） | 1+64，top-6，h=176 | V4.1-Flash 全架构 |
+| MiniSeek-D0.1 | 28M | 6400 | 512 | 512 | 8 | 8 × 64 | — | Dense |
 
----
+187M = 主干 158M + Engram 表 29M；A33M 是每个 token 实际参与计算的主干参数（只算被选中的 6 个路由专家，不含 Engram 表）。DSpark 草稿头另有 19M。
 
-# 📌 训练
+## 与 DeepSeek-V4.1-Flash 的差异
 
-```bash
-# 正式预训练
-python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/_default_pretrain
-
-# 短跑 / 调参（默认不写 loss-*.pt；需要里程碑再显式加 --save-loss-thresholds）
-python -m algo.train_pretrain --data data/pretrain_mix_5g.jsonl --out-dir tasks/_default_pretrain \
-  --max-steps 5000 --warmup-steps 200 --lr 1e-4
-```
-
-### ✅ 推荐：MoE 可行性 SFT（短上下文快跑）
-
-验证「这套 MoE 能不能聊」时，**优先走 short256 + `max_seq_len=256`**，不必一上来吃满 10G / 512：
-
-| 项 | 推荐 |
-|----|------|
-| 数据 | `data/SFT/sft_miniseek_v5_short256.jsonl`（Hub config `sft_short256`） |
-| 长度规则 | 对话 content 字符和 **优先 ≤256**，软上限 **≤280**（约 7% 在 257–280）；更长已在打包时丢掉 |
-| `max_seq_len` | **256**（最多可试 512；可行性验证用 256 最快） |
-| 初始化 | 最近一次 **MoE 预训练** `last.pt` / `best.pt`（`--arch moe` + Init Ckpt） |
-| FlashAttention | 默认开：优先 `flash_attn` 包，否则 **torch SDPA flash**（看 `train.log` 的 `flash_attn=on backend=...`） |
-| 超长截断 | SFT 编码超过 `max_seq_len` 时 **从尾部截断（keep-head）**，尽量留住问题/prompt，丢掉回答尾部 |
-
-```bash
-python -m algo.train_sft \
-  --arch moe \
-  --data data/SFT/sft_miniseek_v5_short256.jsonl \
-  --init-ckpt tasks/<moe-pretrain-id>/last.pt \
-  --max-seq-len 256 \
-  --out-dir tasks/moe-sft-short256 \
-  --flash-attn
-```
-
-Web「训练」Tab 选同一数据与 `max_seq_len=256` 亦可。正式长上下文 SFT 仍用默认 `sft_miniseek_v5_10g.jsonl`。细节见 `data/SFT/SOURCES_v5_short256.md`、`docs/superpowers/specs/2026-10-28-sft-v5-short256-design.md`。
-
-### Checkpoint 策略
-
-- **默认只保留** `best.pt`（更好时覆盖）与 `last.pt`（结束写一次），避免占满磁盘
-- **里程碑** `loss-*.pt`：可选；需显式设 `--save-loss-thresholds`（某一档连续 `--stable-steps` 步 `loss<=阈值` 才写）；默认空=不写
-- **`--save-every`**：默认 `0` 关闭；需要按步备份再开（也会占盘）
-
-也可在 Web UI「训练」Tab 里用 Task 形态启停，产物在 `tasks/<id>/`。
+| 项 | DeepSeek-V4.1-Flash | MiniSeek-F0.1 |
+|----|---------------------|---------------|
+| 层数 | 40（编码 20 + 解码 20） | 8（编码 4 + 解码 4） |
+| MoE | 1 共享 + 384 路由，top-6 | 1 共享 + 64 路由，top-6 |
+| 参数 | 主干 552B + Engram 196B | 主干 158M + Engram 29M |
+| indexer top-k / 候选池 | 512 / 2048 块 × 8 | 64 / 32 块 × 8 |
+| KV 精度 | 主 KV FP4，滑窗 KV FP8 | 全部 BF16 |
+| 视觉 | 有 | 暂无 |
 
 ---
 
 # 📌 评估
 
-**Eval-Core**（各阶段同一套）：
+所有模型用同一套 Eval-Core：
 
 | # | 项目 | 说明 |
 |---|------|------|
-| 1 | Valid PPL | 从训练 jsonl 按 `--valid-ratio` 划分 |
+| 1 | Valid PPL | 从训练 jsonl 按 `--valid-ratio` 抽样 |
 | 2 | Gen-Smoke | 20 条固定 prompt，seed=42 |
 | 3 | C-Eval valid | lm-eval |
 | 4 | CMMLU | lm-eval（需 `trust_remote_code`；`datasets>=2.14,<4.0`） |
 | 5 | GSM8K | lm-eval generate_until |
-| 6 | 效率 | 同硬件记峰值显存 / tokens/s |
-
-CLI 示例：
+| 6 | 效率 | 同硬件记峰值显存与 tokens/s |
 
 ```bash
-python -m algo.eval.valid_ppl --ckpt tasks/_default_pretrain/last.pt --data data/PT/pretrain_mix_12g_clean.jsonl --valid-ratio 0.01
-python -m algo.eval.gen_smoke --ckpt tasks/_default_pretrain/last.pt --seed 42
-# 或 Web「评测」Tab / eval/run_benchmark.py
+python -m algo.eval.valid_ppl --ckpt tasks/f01-pretrain/last.pt --data data/PT/pretrain_mix_12g_clean.jsonl --valid-ratio 0.01
+python -m algo.eval.gen_smoke --ckpt tasks/f01-sft/last.pt --seed 42
 ```
 
-报告模板：`eval/reports/stage-0.md`、`eval/reports/leaderboard.md`。更多见 [`eval/README.md`](eval/README.md)。
-
-锚点参考：MiniMind-3（~64M）C-Eval≈24.9 / CMMLU≈25.4——Stage 0 体量更小，重点看**相对变化**而非绝对分数。
+C-Eval / CMMLU / GSM8K 在 Web「评测」页跑，或用 `algo/eval/run_benchmark.py`（见 [`algo/eval/README.md`](algo/eval/README.md)）。F0.1 的结果会在训练完成后补到这里，Dense 线的结果在 `algo/eval/reports/`。
 
 ---
 
 # 📌 目录
 
 ```text
-model/              # config · DenseLM · tokenizer
-algo/train_pretrain.py  # 预训练入口
-algo/generate.py         # CLI 生成
-frontend/ + api/    # Web 前端 + FastAPI（Task/Bench/架构）
-algo/               # model / train / eval / generate
-# 权重：tasks/<id>/checkpoints/（根目录不再保留 checkpoints/）
-eval/               # PPL · Gen-Smoke · lm-eval · reports
-scripts/            # 数据下载 · smoke
-docs/STAGE_PLAN.md  # 阶段规格（主文档）
-tests/              # 冒烟与单测
+algo/
+├── model/v41/          # MiniSeek-F：config · rope · attention · mhc · moe · engram · model · cache · dspark
+├── model/dense.py      # MiniSeek-D：DenseLM
+├── optim/              # Muon · Sinkhorn 动量 · 参数分组
+├── train_pretrain.py   # 预训练
+├── train_sft.py        # SFT
+├── train_dspark.py     # DSpark 草稿头
+├── dspark_calibrate.py # DSpark 置信度校准（STS）
+├── generate.py         # CLI 生成
+└── eval/               # Valid PPL · Gen-Smoke · lm-eval
+api/                    # FastAPI：训练 Task · 推理 · 架构 · 评测 · worker
+frontend/               # Web UI
+deploy/                 # systemd 单元（web / api / worker）
+scripts/                # 数据检查 · 清洗 · 冒烟
+tests/                  # 单测；tests/v41_ref/ 为官方推理代码移植
+docs/                   # 设计文档与实现计划
+images/                 # README 配图
+tasks/                  # 训练产物（不进 Git）
 ```
 
 ---
 
 # 📌 致谢
 
-- 词表生态：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)；训练数据：自建 `pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`（可行性 SFT 另有 `sft_miniseek_v5_short256`）
-- 结构对齐参考：[DeepSeek-V4.1 相关论文](https://arxiv.org/html/2609.19969)
+- 架构与参考实现：[DeepSeek-V4.1 论文](https://arxiv.org/abs/2609.19969) 与 [deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) 的官方推理代码（MIT）
+- 词表与 README 版式：[jingyaogong/minimind](https://github.com/jingyaogong/minimind)
 - 客观评测：[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)、C-Eval、CMMLU
 
 欢迎 Issue / PR。
@@ -316,11 +355,11 @@ tests/              # 冒烟与单测
 
 # 🎓 引用
 
-若本项目对你有帮助，欢迎引用仓库或在论文/博客中注明链接：
+若本项目对你有帮助，欢迎引用仓库或在论文 / 博客中注明链接：
 
 ```bibtex
 @misc{miniseek2026,
-  title        = {MiniSeek: Tiny Trainable LMs Toward DeepSeek-V4.1-Flash Structures},
+  title        = {MiniSeek: A Tiny Trainable Reproduction of the DeepSeek-V4.1-Flash Architecture},
   author       = {wyf-yfw},
   year         = {2026},
   howpublished = {\url{https://github.com/wyf-yfw/miniseek}}

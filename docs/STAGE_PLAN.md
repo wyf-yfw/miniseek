@@ -1,11 +1,13 @@
 # 对齐 DeepSeek-V4.1-Flash：由简入难阶段计划
 
 > 来源：2026-10-23 Canvas《对齐 DeepSeek-V4.1-Flash：由简入难阶段计划》完整落盘。  
-> 仓库：`wyf-yfw/miniseek`。本文件是主规格；实现以本仓库代码与实测为准。
+> 仓库：`wyf-yfw/miniseek`。
+
+> **2026-10-29 起本文件只作历史记录。** 下文阶段 1–6 的全部结构（SWA / CSA2 / CED / 分层稀疏索引 / Replay / mHC / Engram / DSpark）已在 MiniSeek-F0.1（`--arch v41`）里一次实现，旧的 M0.1 MoE（`MoELM`）已移除。现行规格见 [`docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`](superpowers/specs/2026-10-29-v41-flash-full-arch-design.md) 与 `algo/model/v41/config.py`。下文数字保留当时的规划值，不再更新。
 
 冻结超小规格：`d=512`、8 层；数据与 benchmark 已定；每阶段有层表、参数量、训练数据与能力门槛，逐步对齐 V4.1 Flash 结构。
 
-**对齐口径：** 参数量、宽度、层数、专家个数、top-k 可以小于论文。层内算子要对齐 V4.1-Flash，不能换成另一种算法。`MoELM` 的 MoE 层已是：共享专家常开 + 路由专家 top-k、clamp SwiGLU（阈值 10）、选专家用 sigmoid 分数加 bias、加权用原始分数，另有权重 0.0001 的序列级均衡损失。专家个数是 1 共享 + 64 路由、top-3，中间维 256。注意力和残差还没改。
+**对齐口径：** 参数量、宽度、层数、专家个数、top-k 可以小于论文。层内算子要对齐 V4.1-Flash，不能换成另一种算法。
 
 参考：
 
@@ -273,12 +275,8 @@ Replay 末尾 128 token 的 SWA
 
 | Stage | 内容 | 状态 |
 |-------|------|------|
-| 0 | Dense Decoder-only + train/generate/Web UI | **进行中 / 已有权重** |
-| 1 | MoE FFN（MiniSeek-M0.1） | 实现中 / `model/moe.py` |
-| 2 | SWA | TODO |
-| 3 | CSA2 | TODO |
-| 4 | CED | TODO |
-| 5 | HSI / Replay | TODO |
-| 6 | Engram / mHC / DSpark / FP4 / 视觉 | 后置，默认关 |
+| 0 | Dense Decoder-only + train/generate/Web UI | 已完成，权重 MiniSeek-D0.1 已开源 |
+| 1–6 | MoE / SWA / CSA2 / CED / HSI / Replay / mHC / Engram / DSpark | 已在 MiniSeek-F0.1（`--arch v41`）一次实现 |
+| — | FP4 / FP8 KV、视觉分支 | 不做（3090 不支持 FP4/FP8，全程 BF16）；视觉后置 |
 
-M0.1 MoE 已实现（`ModelConfig(arch="moe")` + `MoELM`）；SWA/CSA2/CED 仍为钩子，未实现前不要混进对比实验。
+M0.1 MoE（`MoELM`）已移除，旧 M0.1 checkpoint 不能再加载训练或推理。
