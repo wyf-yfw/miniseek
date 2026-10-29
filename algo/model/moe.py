@@ -1,6 +1,9 @@
-"""MiniSeek-M 系列：DeepSeekMoE 风格混合专家（M0.1）。
+"""MiniSeek-M 系列：DeepSeek-V4.1 的 MoE 层（宽度和专家个数仍是 M0.1）。
 
-每层：1 shared + N routed，top-k；训练损失 = CE + λ·load-balance aux。
+每层：1 个共享专家始终计算 + N 个路由专家 top-k。
+专家是 clamp SwiGLU。选专家用 sigmoid 分数加 bias，加权只用原始分数。
+bias 不进梯度，每步按负载加减。序列级均衡损失权重由训练的 aux_coef 控制（V4.1 为 0.0001）。
+注意力仍是全因果，残差仍是普通 Pre-Norm 相加。
 """
 
 from __future__ import annotations
@@ -21,54 +24,88 @@ from .dense import (
 )
 
 
-def load_balance_loss(
-    router_probs: torch.Tensor, topk_idx: torch.Tensor, n_experts: int
-) -> torch.Tensor:
-    """Switch-style aux: n_experts * sum_i (f_i * P_i).
+def clamped_swiglu(gate: torch.Tensor, up: torch.Tensor, limit: float) -> torch.Tensor:
+    """SwiGLU，pre-activation 按 OpenAI 的方式截断。阈值用 V4.1 的 10。
 
-    router_probs: (T, E) softmax over experts
-    topk_idx: (T, K) expert indices
+    gate 只限制上界，up 限制到 [-limit, limit]。激活仍是 SiLU(gate) * up。
     """
-    t = router_probs.size(0)
-    k = topk_idx.size(1)
-    # f_i = fraction of (token,slot) assignments to expert i
-    one_hot = F.one_hot(topk_idx.reshape(-1), num_classes=n_experts).float()  # (T*K, E)
-    f = one_hot.mean(dim=0)  # (E,)  each assignment equally weighted → / (T*K)
-    p = router_probs.mean(dim=0)  # (E,)
-    return n_experts * (f * p).sum()
+    gate = gate.clamp(max=limit)
+    up = up.clamp(min=-limit, max=limit)
+    return F.silu(gate) * up
+
+
+def route_tokens(
+    logits: torch.Tensor, bias: torch.Tensor, top_k: int
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """sigmoid 分数加 bias 只用来选 top-k；加权用选中项的原始分数，再归一化。
+
+    logits: (T, E)，bias: (E,)。
+    返回 scores (T, E)、topk_weight (T, K)、topk_idx (T, K)。
+    """
+    scores = torch.sigmoid(logits)
+    _choice, topk_idx = torch.topk(scores + bias, top_k, dim=-1)
+    topk_weight = scores.gather(-1, topk_idx)
+    topk_weight = topk_weight / topk_weight.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+    return scores, topk_weight, topk_idx
+
+
+def sequence_balance_loss(
+    scores: torch.Tensor, topk_idx: torch.Tensor, n_experts: int
+) -> torch.Tensor:
+    """每条序列自己的 N * Σ f_i P_i，再对 batch 取平均。
+
+    scores: (B, T, E) 原始 sigmoid 分数。topk_idx: (B, T, K)。
+    f_i 是这条序列里分到专家 i 的槽位比例，P_i 是该专家分数的平均值。
+    """
+    b, _t, _e = scores.shape
+    k = topk_idx.size(-1)
+    one_hot = F.one_hot(topk_idx.reshape(b, -1), num_classes=n_experts).to(scores.dtype)
+    f = one_hot.mean(dim=1)
+    p = scores.mean(dim=1)
+    return (n_experts * (f * p).sum(dim=-1)).mean()
 
 
 class ExpertMLP(nn.Module):
-    """单专家 MLP：GELU，无 bias。"""
+    """单专家：clamp SwiGLU，三套无 bias 线性层。"""
 
-    def __init__(self, d_model: int, intermediate: int, dropout: float = 0.0) -> None:
+    def __init__(
+        self, d_model: int, intermediate: int, dropout: float = 0.0, clamp: float = 10.0
+    ) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(d_model, intermediate, bias=False)
-        self.fc2 = nn.Linear(intermediate, d_model, bias=False)
+        self.clamp = float(clamp)
+        self.gate_proj = nn.Linear(d_model, intermediate, bias=False)
+        self.up_proj = nn.Linear(d_model, intermediate, bias=False)
+        self.down_proj = nn.Linear(intermediate, d_model, bias=False)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.dropout(self.fc2(F.gelu(self.fc1(x))))
+        hidden = clamped_swiglu(self.gate_proj(x), self.up_proj(x), self.clamp)
+        return self.dropout(self.down_proj(hidden))
 
 
 class MoELayer(nn.Module):
-    """1 shared + N routed, top-k；返回 (y, aux_loss)。"""
+    """1 shared + N routed, top-k；返回 (y, sequence_balance_loss)。"""
 
     def __init__(self, cfg: ModelConfig) -> None:
         super().__init__()
         h = cfg.moe_intermediate_size
         d = cfg.d_model
         drop = cfg.dropout
+        clamp = cfg.swiglu_clamp
         self.n_routed = cfg.n_routed_experts
         self.top_k = cfg.num_experts_per_tok
-        self.shared = ExpertMLP(d, h, drop)
+        self.bias_speed = float(cfg.expert_bias_speed)
+        self.shared = ExpertMLP(d, h, drop, clamp)
         self.experts = nn.ModuleList(
-            [ExpertMLP(d, h, drop) for _ in range(self.n_routed)]
+            [ExpertMLP(d, h, drop, clamp) for _ in range(self.n_routed)]
         )
         self.router = nn.Linear(d, self.n_routed, bias=False)
+        # 不进优化器。选专家时加到分数上，过载就减、欠载就加。
+        self.register_buffer("expert_bias", torch.zeros(self.n_routed))
         # Probe-only: when True, accumulate top-k assignment counts (CPU long).
         self._record_usage = False
         self._usage_counts: Optional[torch.Tensor] = None
+        self._step_counts: Optional[torch.Tensor] = None
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Sorted / grouped expert dispatch (torch-only).
@@ -84,18 +121,7 @@ class MoELayer(nn.Module):
         shared_out = self.shared(flat)
 
         logits = self.router(flat)
-        probs = F.softmax(logits, dim=-1)
-        topk_prob, topk_idx = torch.topk(probs, self.top_k, dim=-1)
-        topk_prob = topk_prob / topk_prob.sum(dim=-1, keepdim=True).clamp_min(1e-9)
-
-        if self._record_usage:
-            # 留在 GPU 上累加：end_expert_usage() 取的时候才 .cpu()，
-            # 之前这里每层每步都同步一次，纯属浪费
-            batch_counts = torch.bincount(topk_idx.reshape(-1), minlength=self.n_routed)
-            if self._usage_counts is None:
-                self._usage_counts = batch_counts
-            else:
-                self._usage_counts += batch_counts
+        scores, topk_prob, topk_idx = route_tokens(logits, self.expert_bias, self.top_k)
 
         # (T, K) → (T*K,) assignments
         k = self.top_k
@@ -116,6 +142,7 @@ class MoELayer(nn.Module):
         weight_sorted = weights[order]
 
         counts = torch.bincount(expert_sorted, minlength=self.n_routed)
+        self._remember_assignment_counts(counts)
         # offsets[e] = start index of expert e in the sorted list
         offsets = torch.zeros(self.n_routed + 1, dtype=torch.long, device=flat.device)
         offsets[1:] = counts.cumsum(0)
@@ -139,8 +166,35 @@ class MoELayer(nn.Module):
         routed.index_add_(0, token_sorted, weighted)
 
         y = (shared_out + routed).view(b, t, d)
-        aux = load_balance_loss(probs, topk_idx, self.n_routed)
+        aux = sequence_balance_loss(
+            scores.view(b, t, -1), topk_idx.view(b, t, -1), self.n_routed
+        )
         return y, aux
+
+    @torch.compiler.disable
+    def _remember_assignment_counts(self, counts: torch.Tensor) -> None:
+        """训练步留一份计数给 bias 更新；探针另累加。不放进 compile 图。"""
+        counts = counts.detach()
+        if self.training:
+            self._step_counts = counts
+        if not self._record_usage:
+            return
+        if self._usage_counts is None:
+            self._usage_counts = counts
+        else:
+            self._usage_counts = self._usage_counts + counts
+
+    @torch.no_grad()
+    def update_expert_bias(self, speed: Optional[float] = None) -> None:
+        """这一步谁分到的 token 多于平均数，就减小它的 bias，反之加大。"""
+        counts = self._step_counts
+        self._step_counts = None
+        if counts is None:
+            return
+        counts = counts.to(device=self.expert_bias.device, dtype=self.expert_bias.dtype)
+        expected = counts.sum() / self.n_routed
+        step = self.bias_speed if speed is None else float(speed)
+        self.expert_bias.add_(step * torch.sign(expected - counts))
 
 
 class MoETransformerBlock(nn.Module):
@@ -188,13 +242,13 @@ class MoELM(nn.Module):
                 layer.attn.o_proj.weight, mean=0.0, std=0.02 / math.sqrt(2 * c.n_layers)
             )
             torch.nn.init.normal_(
-                layer.moe.shared.fc2.weight,
+                layer.moe.shared.down_proj.weight,
                 mean=0.0,
                 std=0.02 / math.sqrt(2 * c.n_layers),
             )
             for exp in layer.moe.experts:
                 torch.nn.init.normal_(
-                    exp.fc2.weight, mean=0.0, std=0.02 / math.sqrt(2 * c.n_layers)
+                    exp.down_proj.weight, mean=0.0, std=0.02 / math.sqrt(2 * c.n_layers)
                 )
 
         n = count_parameters(self)
@@ -263,6 +317,11 @@ class MoELM(nn.Module):
         if total is None:
             return torch.zeros(self.cfg.n_routed_experts, dtype=torch.long)
         return total
+
+    @torch.no_grad()
+    def update_expert_bias(self, speed: Optional[float] = None) -> None:
+        for block in self.layers:
+            block.moe.update_expert_bias(speed)
 
     @torch.no_grad()
     def probe_expert_load(
@@ -390,6 +449,14 @@ class MoELM(nn.Module):
             yield token, info
             if eos_token_id is not None and token == int(eos_token_id):
                 break
+
+
+def step_expert_bias(model: nn.Module) -> None:
+    """优化器 step 之后调用。compile 包装过的模型走原始模块。"""
+    root = getattr(model, "_orig_mod", model)
+    fn = getattr(root, "update_expert_bias", None)
+    if fn is not None:
+        fn()
 
 
 def build_moe(cfg: ModelConfig) -> MoELM:

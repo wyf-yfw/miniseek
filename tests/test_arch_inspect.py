@@ -57,7 +57,7 @@ def test_load_and_inspect_roundtrip(tmp_path: Path):
 
 
 def test_synthetic_moe_parts():
-    """MoE implementation may be stub; inspect must still classify expert keys."""
+    """Checkpoint inspect reads the live MoE module names."""
     cfg = ModelConfig(
         arch="moe",
         d_model=64,
@@ -79,17 +79,22 @@ def test_synthetic_moe_parts():
         "layers.0.attn.qkv.weight": torch.zeros(192, 64),
         "layers.0.attn.o_proj.weight": torch.zeros(64, 64),
         "layers.0.ffn_norm.weight": torch.ones(64),
-        "layers.0.ffn.gate.weight": torch.zeros(4, 64),
-        "layers.0.ffn.shared_experts.0.fc1.weight": torch.zeros(128, 64),
-        "layers.0.ffn.shared_experts.0.fc2.weight": torch.zeros(64, 128),
-        "layers.0.ffn.experts.0.fc1.weight": torch.zeros(128, 64),
-        "layers.0.ffn.experts.0.fc2.weight": torch.zeros(64, 128),
-        "layers.0.ffn.experts.1.fc1.weight": torch.zeros(128, 64),
-        "layers.0.ffn.experts.1.fc2.weight": torch.zeros(64, 128),
-        "layers.0.ffn.experts.2.fc1.weight": torch.zeros(128, 64),
-        "layers.0.ffn.experts.2.fc2.weight": torch.zeros(64, 128),
-        "layers.0.ffn.experts.3.fc1.weight": torch.zeros(128, 64),
-        "layers.0.ffn.experts.3.fc2.weight": torch.zeros(64, 128),
+        "layers.0.moe.router.weight": torch.zeros(4, 64),
+        "layers.0.moe.shared.gate_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.shared.up_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.shared.down_proj.weight": torch.zeros(64, 128),
+        "layers.0.moe.experts.0.gate_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.0.up_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.0.down_proj.weight": torch.zeros(64, 128),
+        "layers.0.moe.experts.1.gate_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.1.up_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.1.down_proj.weight": torch.zeros(64, 128),
+        "layers.0.moe.experts.2.gate_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.2.up_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.2.down_proj.weight": torch.zeros(64, 128),
+        "layers.0.moe.experts.3.gate_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.3.up_proj.weight": torch.zeros(128, 64),
+        "layers.0.moe.experts.3.down_proj.weight": torch.zeros(64, 128),
         "norm.weight": torch.ones(64),
         "lm_head.weight": torch.zeros(100, 64),
     }

@@ -73,16 +73,19 @@ def test_design_moe_has_experts():
     assert "add_attn" in ids and "add_ffn" in ids
     assert out["total_params"] > inspect_design("dense")["total_params"]
     by_id = {p["id"]: p for p in layer["parts"]}
-    # moe: d=512, moe_intermediate=512, n_routed=32, n_shared=1
-    assert by_id["router"]["weight_shapes"] == [{"name": "gate.weight", "shape": "[32,512]"}]
+    # moe: d=512, moe_intermediate=256, n_routed=64, n_shared=1, top-3
+    assert by_id["router"]["weight_shapes"] == [{"name": "gate.weight", "shape": "[64,512]"}]
     assert by_id["shared_experts"]["weight_shapes"] == [
-        {"name": "fc1.weight", "shape": "[512,512] ×1"},
-        {"name": "fc2.weight", "shape": "[512,512] ×1"},
+        {"name": "gate_proj.weight", "shape": "[256,512] ×1"},
+        {"name": "up_proj.weight", "shape": "[256,512] ×1"},
+        {"name": "down_proj.weight", "shape": "[512,256] ×1"},
     ]
     assert by_id["routed_experts"]["weight_shapes"] == [
-        {"name": "fc1.weight", "shape": "[512,512] ×32"},
-        {"name": "fc2.weight", "shape": "[512,512] ×32"},
+        {"name": "gate_proj.weight", "shape": "[256,512] ×64"},
+        {"name": "up_proj.weight", "shape": "[256,512] ×64"},
+        {"name": "down_proj.weight", "shape": "[512,256] ×64"},
     ]
+    assert by_id["router"]["detail"]["num_experts_per_tok"] == 3
 
 
 def test_preset_unknown():

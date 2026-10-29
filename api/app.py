@@ -1177,7 +1177,7 @@ def defaults() -> dict:
             "valid_seed": 42,
             "init_ckpt": "",
             "resume": "",
-            "aux_coef": 0.01,
+            "aux_coef": 0.0001,
         },
         "moe": {
             "arch": "moe",
@@ -1206,7 +1206,7 @@ def defaults() -> dict:
             "valid_seed": 42,
             "init_ckpt": "",
             "resume": "",
-            "aux_coef": 0.01,
+            "aux_coef": 0.0001,
         },
         "tiny": {
             "arch": "tiny",
@@ -1235,7 +1235,7 @@ def defaults() -> dict:
             "valid_seed": 42,
             "init_ckpt": "",
             "resume": "",
-            "aux_coef": 0.01,
+            "aux_coef": 0.0001,
         },
         "pretrain": {
             "arch": "dense",
@@ -1254,7 +1254,7 @@ def defaults() -> dict:
             "save_loss_thresholds": "",
             "init_ckpt": "",
             "resume": "",
-            "aux_coef": 0.01,
+            "aux_coef": 0.0001,
         },
         "pretrain_moe": {
             "arch": "moe",
@@ -1273,7 +1273,7 @@ def defaults() -> dict:
             "save_loss_thresholds": "",
             "init_ckpt": "",
             "resume": "",
-            "aux_coef": 0.01,
+            "aux_coef": 0.0001,
         },
         "sft": {
             "arch": "dense",
@@ -1291,7 +1291,7 @@ def defaults() -> dict:
             "save_loss_thresholds": "",
             "init_ckpt": str(best) if best.exists() else "",
             "resume": "",
-            "aux_coef": 0.01,
+            "aux_coef": 0.0001,
         },
         "data_path": DEFAULT_PRETRAIN_DATA,
         "out_dir": DEFAULT_PRETRAIN_OUT,

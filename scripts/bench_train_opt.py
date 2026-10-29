@@ -29,7 +29,7 @@ if str(_ROOT) not in sys.path:
 
 from algo.model import build_model
 from algo.model.config import ModelConfig
-from algo.model.moe import MoELayer, load_balance_loss
+from algo.model.moe import MoELayer, route_tokens, sequence_balance_loss
 from algo.model.tokenizer import load_tokenizer
 from algo.train_pretrain import collate_pad
 
@@ -156,10 +156,9 @@ def _make_moe_forward(*, bounds_fast: bool, usage_gpu: bool) -> Callable:
         n_tok = flat.size(0)
         shared_out = self.shared(flat)
 
-        logits = self.router(flat)
-        probs = F.softmax(logits, dim=-1)
-        topk_prob, topk_idx = torch.topk(probs, self.top_k, dim=-1)
-        topk_prob = topk_prob / topk_prob.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+        _scores, topk_prob, topk_idx = route_tokens(
+            self.router(flat), self.expert_bias, self.top_k
+        )
 
         if self._record_usage:
             if usage_gpu:
@@ -213,7 +212,9 @@ def _make_moe_forward(*, bounds_fast: bool, usage_gpu: bool) -> Callable:
         routed = torch.zeros_like(flat)
         routed.index_add_(0, token_sorted, weighted)
         y = (shared_out + routed).view(b, t, d)
-        aux = load_balance_loss(probs, topk_idx, self.n_routed)
+        aux = sequence_balance_loss(
+            _scores.view(b, t, -1), topk_idx.view(b, t, -1), self.n_routed
+        )
         return y, aux
 
     return _forward

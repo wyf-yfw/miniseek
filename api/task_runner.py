@@ -195,7 +195,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         cmd.extend(["--max-steps", str(int(max_steps))])
 
     # arch / aux_coef apply to both pretrain and SFT (MoE SFT supported)
-    cmd.extend(["--arch", arch, "--aux-coef", str(float(_hp(hp, "aux_coef", 0.01)))])
+    cmd.extend(["--arch", arch, "--aux-coef", str(float(_hp(hp, "aux_coef", 0.0001)))])
 
     resume = str(_hp(hp, "resume", "") or "").strip()
     init_ckpt = str(_hp(hp, "init_ckpt", "") or "").strip()

@@ -46,7 +46,8 @@ def _dense_ffn_params(d: int, intermediate: int) -> int:
 
 
 def _expert_ffn_params(d: int, moe_intermediate: int) -> int:
-    return d * moe_intermediate + moe_intermediate * d
+    # gate + up + down，clamp SwiGLU
+    return 3 * d * moe_intermediate
 
 
 def _shape(
@@ -183,8 +184,9 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "shape_in": btd,
                         "shape_out": btd,
                         "weight_shapes": [
-                            _w("fc1.weight", [mid, d], note=f"×{n_shared}"),
-                            _w("fc2.weight", [d, mid], note=f"×{n_shared}"),
+                            _w("gate_proj.weight", [mid, d], note=f"×{n_shared}"),
+                            _w("up_proj.weight", [mid, d], note=f"×{n_shared}"),
+                            _w("down_proj.weight", [d, mid], note=f"×{n_shared}"),
                         ],
                         "detail": {
                             "n_shared_experts": n_shared,
@@ -199,8 +201,9 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
                         "shape_in": btd,
                         "shape_out": btd,
                         "weight_shapes": [
-                            _w("fc1.weight", [mid, d], note=f"×{n_routed}"),
-                            _w("fc2.weight", [d, mid], note=f"×{n_routed}"),
+                            _w("gate_proj.weight", [mid, d], note=f"×{n_routed}"),
+                            _w("up_proj.weight", [mid, d], note=f"×{n_routed}"),
+                            _w("down_proj.weight", [d, mid], note=f"×{n_routed}"),
                         ],
                         "detail": {
                             "n_routed_experts": n_routed,
@@ -835,7 +838,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                         {"id": "enc_swa_attn", "type": "swa", "label": "SWA", "mode": "SWA"},
                         {"id": "enc_swa_moe", "type": "moe", "label": "MoE"},
                     ],
-                    "note": "L0–1 · n_win=128 · Engram@1",
+                    "note": "L0–L1 · 窗口 128 · Engram@L1",
                 },
                 {
                     "id": "enc_csa2",
@@ -852,7 +855,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                             {"id": "enc_reuse_moe", "type": "moe", "label": "MoE"},
                         ],
                     },
-                    "note": "L2–19 · three groups of Full + Reuse×5 · Engram@14",
+                    "note": "L2–L19 · 三组 Full + Reuse×5 · Engram@L14",
                 },
             ],
             "output": {"id": "enc_hidden", "label": "Enc. Hidden States"},
@@ -870,7 +873,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                         {"id": "dec_full", "type": "csa2-full", "label": "CSA2(1, Full)", "mode": "Full", "m": 1},
                         {"id": "dec_full_moe", "type": "moe", "label": "MoE"},
                     ],
-                    "note": "L20 · builds main KV + indexer K + Top-K + candidate pool",
+                    "note": "L20 · 产出 main KV、indexer K、Top-K 和候选池",
                 },
                 {
                     "id": "dec_reuse_early",
@@ -880,7 +883,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                         {"id": "dec_reuse_e", "type": "csa2-reuse", "label": "CSA2(1, Reuse)", "mode": "Reuse", "m": 1},
                         {"id": "dec_reuse_e_moe", "type": "moe", "label": "MoE"},
                     ],
-                    "note": "L21–23 · reuse KV + indices",
+                    "note": "L21–L23 · 复用 KV 和已有 Top-K",
                 },
                 {
                     "id": "dec_reindex_g",
@@ -897,7 +900,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                             {"id": "dec_reuse_r_moe", "type": "moe", "label": "MoE"},
                         ],
                     },
-                    "note": "L24–39 · four groups of Reindex + Reuse×3",
+                    "note": "L24–L39 · 四组 Reindex + Reuse×3",
                 },
             ],
             "output": {"id": "dspark", "label": "DSpark"},
@@ -912,11 +915,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                 "from": "enc_hidden",
                 "to": "dec_full",
                 "style": "ced",
-                "note": (
-                    "Prefill: mostly Causal Encoder; Decoder global KV projected from "
-                    "H_{L/2}=Enc.Hidden via W^{KV}/W^Z (shared to Reuse/Reindex). "
-                    "Each layer still keeps own global Q + SWA KV local."
-                ),
+                "note": "解码器全局 KV 只由编码器最终隐状态 H_L/2 投影到最底 CSA2(1, Full)。Reuse 和 Reindex 复用这份 KV。每层仍有自己的 global Q 和 SWA KV。",
             },
             {
                 "id": "indexer",
@@ -924,7 +923,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                 "from": "dec_full",
                 "to": "candidate_pool",
                 "style": "indexer",
-                "note": "Full builds candidate pool (≤2048 blocks × 8 = 16384 tokens).",
+                "note": "Full 建立候选池（最多 2048 块 × 8 = 16384 token）。",
             },
             {
                 "id": "reindex",
@@ -932,7 +931,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                 "from": "candidate_pool",
                 "to": "dec_reindex",
                 "style": "reindex",
-                "note": "Reindex reuses KV/indexer K, computes new Top-K from pool (Top-512).",
+                "note": "Reindex 复用 main KV 与 indexer K，只在候选池里重选 Top-512。",
             },
             {
                 "id": "engram_feed",
@@ -940,7 +939,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
                 "from": "engram",
                 "to": "enc_swa_attn",
                 "style": "engram",
-                "note": "Engram side-injection at early encoder (L1) and mid encoder (L14).",
+                "note": "Engram 打进第 1 层 SWA（层号从 0 起）。",
             },
             {
                 "id": "engram_feed_2",
@@ -948,37 +947,37 @@ def inspect_v41_flash() -> Dict[str, Any]:
                 "from": "engram",
                 "to": "enc_full",
                 "style": "engram",
-                "note": "Engram @L14 into CSA2 Full groups.",
+                "note": "Engram @L14（0-indexed）打进编码器第三组的 CSA2 Full，不是每一组 Full。",
             },
         ],
         "csa2_modes": [
             {
                 "mode": "Full",
                 "color": "#86efac",
-                "kv": "produce main KV + indexer K + Top-K",
+                "kv": "本层产出 main KV、indexer K 和 Top-K",
             },
             {
                 "mode": "Reuse",
                 "color": "#fde047",
-                "kv": "reuse main KV + indices (no new Top-K)",
+                "kv": "复用最近一次 Full/Reindex 的 main KV 与 Top-K，不再索引",
             },
             {
                 "mode": "Reindex",
                 "color": "#93c5fd",
-                "kv": "reuse KV/indexer K; new Top-K from Candidate Pool",
+                "kv": "复用 main KV 与 indexer K，只在候选池里重选 Top-K",
             },
             {
                 "mode": "SWA",
                 "color": "#fda4af",
-                "kv": "local sliding-window KV only (n_win=128); Bounded Replay",
+                "kv": "仅 L0–L1 是纯滑窗。其余层仍有本层 SWA KV（n_win=128）",
             },
         ],
         "notes": [
-            "CED: Causal Encoder–Decoder split; decoder global KV from encoder final hidden, not each decoder H_l.",
-            "Per CSA2 layer: own global Q + SWA KV local (FP8); main KV FP4 post-train QAT.",
-            "SWA Bounded Replay keeps local window consistent under compression.",
-            "Activated: ~8B (prefill, encoder-heavy) / ~16B (decode).",
-            "Reference only — not a MiniSeek trainable preset.",
+            "CED：解码器全局 KV 来自编码器最终隐状态，不是每一层解码器隐状态。",
+            "每个 CSA2 层仍有自己的 global Q 和本层 SWA KV。",
+            "只有 L0–L1 是纯滑窗；其余层是 CSA2，同时还有窗口 128 的本层滑窗。",
+            "预填充激活约 8B（编码器为主），解码约 16B。",
+            "论文参考图，不是 MiniSeek 可训练预设。",
         ],
     }
 
@@ -1095,7 +1094,7 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
     is_moe = bool(
         (cfg_out.get("arch") == "moe")
         or cfg_out.get("use_moe")
-        or any(".ffn.experts." in k or ".ffn.shared_experts." in k for k in sd)
+        or any(".moe.experts." in k or ".moe.shared." in k for k in sd)
     )
 
     for i in range(n_layers):
@@ -1118,9 +1117,9 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
             }
         ]
         if is_moe:
-            gate_params = _sum_prefix(sd, pref + "ffn.gate.")
-            shared_params = _sum_prefix(sd, pref + "ffn.shared_experts.")
-            routed_params = _sum_prefix(sd, pref + "ffn.experts.")
+            gate_params = _sum_prefix(sd, pref + "moe.router.")
+            shared_params = _sum_prefix(sd, pref + "moe.shared.")
+            routed_params = _sum_prefix(sd, pref + "moe.experts.")
             ffn_norm = _sum_prefix(sd, pref + "ffn_norm.")
             parts.append(
                 {

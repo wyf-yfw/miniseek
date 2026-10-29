@@ -41,9 +41,13 @@ class ModelConfig:
     # --- MoE（arch=moe 时使用；dense 忽略）---
     use_moe: bool = False
     n_shared_experts: int = 1
-    n_routed_experts: int = 32
-    num_experts_per_tok: int = 2
-    moe_intermediate_size: int = 512
+    n_routed_experts: int = 64
+    num_experts_per_tok: int = 3
+    # 1+64 专家把中间维收到 256。总参约 216.4M，比 h=512 的 1+32 略小。
+    moe_intermediate_size: int = 256
+    # V4.1 MoE：SwiGLU clamp 阈值；bias 每步按负载更新的步长。不计入可训练参数。
+    swiglu_clamp: float = 10.0
+    expert_bias_speed: float = 0.001
 
     # --- Attention 实现（训练/推理默认开 Flash；装不上 flash_attn 时走 torch SDPA flash）---
     use_flash_attn: bool = True

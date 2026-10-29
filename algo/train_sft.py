@@ -43,6 +43,7 @@ from algo.batching import (
     truncate_keep_head_with_eos,
 )
 from algo.model import build_model
+from algo.model.moe import step_expert_bias
 from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
@@ -260,7 +261,12 @@ def main() -> None:
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
     p.add_argument("--arch", choices=["dense", "moe", "tiny"], default="dense", help="model architecture")
-    p.add_argument("--aux-coef", type=float, default=0.01, help="MoE load-balance aux weight")
+    p.add_argument(
+        "--aux-coef",
+        type=float,
+        default=0.0001,
+        help="MoE 序列级均衡损失权重（V4.1 为 0.0001）。专家 bias 另按负载更新，不靠这个系数",
+    )
     p.add_argument("--max-seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--lr", type=float, default=5e-5, help="peak LR after warmup (SFT 通常低于预训练)")
@@ -673,6 +679,8 @@ def main() -> None:
             if args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             opt.step()
+            if args.arch == "moe":
+                step_expert_bias(model)
             global_step += 1
             last_loss = float(loss.item())
             if args.arch == "moe":

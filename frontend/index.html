@@ -955,9 +955,52 @@
     .fig3-wires circle.own-res-hit { pointer-events: all; cursor: pointer; }
     .own-moe-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 128px;
-      gap: 16px;
-      align-items: end;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+    .own-moe {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .own-moe-sum {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #111827;
+    }
+    .own-moe-sum::before,
+    .own-moe-sum::after {
+      content: "";
+      height: 2px;
+      background: #111827;
+    }
+    .own-moe-fork {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+    .own-moe-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 0;
+    }
+    .own-moe-col > .fig3-chip { width: 100%; }
+    .own-moe-rail {
+      flex: 1 1 auto;
+      width: 2px;
+      min-height: 12px;
+      background: #111827;
+    }
+    .own-moe-split {
+      height: 2px;
+      background: #111827;
     }
     .fig3-bracket-body.has-res { padding-right: 46px; }
 
@@ -1198,7 +1241,7 @@
                 <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
               </div>
               <p id="mode-hint" class="mode-hint">Pretrain：从零/续训语言模型；数据为每行 text 的 jsonl。</p>
-              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：MiniSeek-M0.1（1+32 top-2）；Tiny：d=64 L=2 冒烟档。</p>
+              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；MoE：MiniSeek-M0.1（1+64 top-3）；Tiny：d=64 L=2 冒烟档。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
 
               <div class="param-group" id="group-data">
@@ -1247,7 +1290,7 @@
                 <div class="group-title">MoE 专属</div>
                 <p class="group-desc">仅 arch=MoE 时写入 train_* --aux-coef；Dense/Tiny 隐藏。</p>
                 <div class="grid">
-                  <label><span class="field-title">Aux Coef</span><span class="field-hint">负载均衡辅助损失系数（默认约 0.01）。</span><input id="aux-coef" type="number" step="any" /></label>
+                  <label><span class="field-title">Aux Coef</span><span class="field-hint">序列级均衡损失权重，默认 0.0001。专家选择的 bias 另按负载更新。</span><input id="aux-coef" type="number" step="any" /></label>
                 </div>
               </div>
 
@@ -2091,7 +2134,7 @@
       $("arch-tiny").classList.toggle("active", arch === "tiny");
       $("arch-hint").textContent =
         arch === "tiny" ? "Tiny：DenseLM d=64 L=2，CPU 冒烟。"
-        : arch === "moe" ? "MoE：MiniSeek-M0.1（1 shared + 32 routed，top-2；Pretrain/SFT 均可）。"
+        : arch === "moe" ? "MoE：MiniSeek-M0.1（1 shared + 64 routed，top-3；Pretrain/SFT 均可）。"
         : "Dense：MiniSeek-D DenseLM。";
       syncParamVisibility();
     }
@@ -2164,7 +2207,7 @@
           next.batch_size = 4;
         }
       }
-      next.aux_coef = base.aux_coef != null ? base.aux_coef : (cur.aux_coef || 0.01);
+      next.aux_coef = base.aux_coef != null ? base.aux_coef : (cur.aux_coef != null ? cur.aux_coef : 0.0001);
       fillHparams(next);
     }
 
@@ -3782,7 +3825,7 @@
     const ARCH_PRESET_HINT = {
       tiny: "Tiny：冒烟档 DenseLM，d=64 L=2，适合 CPU。",
       dense: "Dense：MiniSeek-D0.1，d=512 L=8 FFN=2048。",
-      moe: "MoE：MiniSeek-M0.1，同主干 + 1 shared / 32 routed / top-2。",
+      moe: "MoE：MiniSeek-M0.1，同主干 + 1 shared / 64 routed / top-3。",
       "v41-flash": "V4.1-Flash 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
     };
 
@@ -3881,20 +3924,20 @@
           formula: `h = GELU(W1(x))\ny = W2(h)\nW1: ${d} → ${ffn}\nW2: ${ffn} → ${d}\n无 bias\n${gelu}`,
         },
         router: {
-          role: `给每个 token 对 ${nExp} 个路由专家打分，留下概率最大的 ${k} 个，再把这 ${k} 个权重归一化到和为 1。共享专家不经过这里。`,
-          formula: `p = softmax(W_g(x))\nW_g: ${d} → ${nExp}，无 bias\n取 p 里最大的 ${k} 个，记为 p_i\np_i = p_i / sum(p_i)\n训练时另加负载均衡损失：\naux = ${nExp} * Σ (f_i * P_i)\nf_i 是分到专家 i 的 token 比例\nP_i 是该专家概率的平均值`,
+          role: `给每个 token 对 ${nExp} 个路由专家打分。选专家时在 sigmoid 分数上加一组不训练的 bias，加权只用被选中的原始分数，再归一化到和为 1。共享专家不经过这里。`,
+          formula: `s = sigmoid(W_g(x))\nW_g: ${d} → ${nExp}，无 bias\n选 top-${k}：看 s + b，b 不进梯度\n权重 p_i = s_i / sum(s_i)，不用 b\n训练时每条序列另有一个很小的均衡损失：\naux = ${nExp} * Σ (f_i * P_i)\nb 每步按负载加减：分多了就减，分少了就加`,
         },
         shared_experts: {
-          role: "共享专家。每个 token 都要算一遍，不看 Router。算法和稠密 FFN 一样，中间维更窄。最后和路由专家的输出相加。",
-          formula: `y_s = W2(GELU(W1(x)))\nW1: ${d} → ${moeH}\nW2: ${moeH} → ${d}\n无 bias\n${gelu}`,
+          role: "共享专家。每个 token 都要算一遍，不看 Router。中间是 clamp SwiGLU：gate 和 up 两路，阈值 10。最后和路由专家的输出相加。",
+          formula: `g = clamp(W_gate(x), max=10)\nu = clamp(W_up(x), -10, 10)\ny_s = W_down(SiLU(g) * u)\nW_gate、W_up: ${d} → ${moeH}\nW_down: ${moeH} → ${d}\n无 bias`,
         },
         routed_experts: {
-          role: `路由专家共 ${nExp} 个。一个 token 只计算被 Router 选中的 ${k} 个，其余这次不跑。输出按归一化权重相加，再和共享专家相加。`,
-          formula: `y_r = Σ p_i * Expert_i(x)\nExpert_i(x) = W2_i(GELU(W1_i(x)))\nW1_i: ${d} → ${moeH}\nW2_i: ${moeH} → ${d}\ni 只取 top-${k}\ny = y_s + y_r`,
+          role: `路由专家共 ${nExp} 个。一个 token 只计算被 Router 选中的 ${k} 个，其余这次不跑。算法和共享专家相同，都是 clamp SwiGLU。输出按归一化权重相加，再和共享专家相加。`,
+          formula: `y_r = Σ p_i * Expert_i(x)\nExpert 与共享专家相同：clamp SwiGLU，阈值 10\ni 只取按 s+b 选出的 top-${k}\np_i 来自原始分数 s，不含 b\ny = y_s + y_r`,
         },
         moe: {
           role: "这一层的 FFN 位置。共享专家始终计算，路由专家只算 top-k，两边相加。",
-          formula: `y = Shared(x) + Σ p_i Expert_i(x)\np = softmax(W_g(x)) 的 top-${k}，再归一化`,
+          formula: `s = sigmoid(W_g(x))\n选 top-${k} 用 s + b，加权用 s\ny = Shared(x) + Σ p_i Expert_i(x)`,
         },
         "res-attn": {
           role: "注意力的残差。橙色圆点是这一层的输入，在进 pre-Attn RMSNorm 之前分出来。这条 x 不进 Norm，也不进注意力，直接加到注意力的输出上。",
@@ -4454,7 +4497,10 @@
       if (routed && srcEl) {
         const a = fig3Rel(board, srcEl);
         const b = fig3Rel(board, routed);
-        path(`M ${a.r.toFixed(1)} ${a.cy.toFixed(1)} H ${b.l.toFixed(1)}`, "#1d4ed8", 'stroke-dasharray="6 4" marker-end="url(#own-mk-top)"');
+        // Router 在路由专家正下方时，中间已有向上的箭头，不再横着画一条。
+        if (Math.abs(a.cy - b.cy) < 24) {
+          path(`M ${a.r.toFixed(1)} ${a.cy.toFixed(1)} H ${b.l.toFixed(1)}`, "#1d4ed8", 'stroke-dasharray="6 4" marker-end="url(#own-mk-top)"');
+        }
       }
       // Pre-norm residual: x splits off before RMSNorm and rejoins at ⊕.
       const drawRes = (srcName, addName, which) => {
@@ -4500,14 +4546,15 @@
       const hd = cfg.head_dim;
       const mid = isMoe ? cfg.moe_intermediate_size : cfg.intermediate_size;
       const nShared = cfg.n_shared_experts != null ? cfg.n_shared_experts : 1;
-      const nRouted = cfg.n_routed_experts != null ? cfg.n_routed_experts : 32;
-      const topk = cfg.num_experts_per_tok != null ? cfg.num_experts_per_tok : 2;
+      const nRouted = cfg.n_routed_experts != null ? cfg.n_routed_experts : 64;
+      const topk = cfg.num_experts_per_tok != null ? cfg.num_experts_per_tok : 3;
       const theta = cfg.rope_theta;
       const thetaText = theta === 1000000 || theta === 1e6 ? "1e6" : (theta != null ? String(theta) : "");
       const mode = archViewMode || "standard";
       const attnSub = mode === "compact" || heads == null ? "" : `RoPE · QKV 一个线性层 · ${heads}×${hd}`;
       const attn = ownChip("attn", "attn", "Causal Attn", attnSub);
       const ffnSub = mode === "compact" || d == null || mid == null ? "" : `GELU · ${d}→${mid}→${d}`;
+      const moeSub = mode === "compact" || d == null || mid == null ? "" : `SwiGLU · clamp 10 · ${d}→${mid}→${d}`;
       let upper;
       if (!isMoe) {
         upper = ownChip("ffn", "ffn", "FFN", ffnSub);
@@ -4515,10 +4562,17 @@
         upper = `<div class="own-moe-row">${ownChip("moe", "shared", "MoE", "")}${ownChip("routed_experts", "routed", `Routed ×${nRouted}`, "")}</div>`;
       } else {
         const sharedLabel = Number(nShared) === 1 ? "Shared Expert" : `Shared ×${nShared}`;
-        const shared = ownChip("shared_experts", "shared", sharedLabel, ffnSub);
+        const shared = ownChip("shared_experts", "shared", sharedLabel, moeSub);
         const router = ownChip("router", "router", "Router", `top-${topk} / ${nRouted}`);
         const routed = ownChip("routed_experts", "routed", `Routed ×${nRouted}`, "只算被选中的");
-        upper = `<div class="own-moe-row"><div class="own-moe-main">${shared}${fig3Arrow()}${router}</div>${routed}</div>`;
+        upper = `<div class="own-moe">
+          <div class="own-moe-sum">相加</div>
+          <div class="own-moe-fork">
+            <div class="own-moe-col">${fig3Arrow()}${shared}<div class="own-moe-rail"></div></div>
+            <div class="own-moe-col">${fig3Arrow()}${routed}${fig3Arrow()}${router}</div>
+          </div>
+          <div class="own-moe-split"></div>
+        </div>`;
       }
       let body;
       if (mode === "detailed") {
@@ -4552,7 +4606,7 @@
         `注意力是 CausalSelfAttention：Q、K、V 共用一个线性层，RoPE 加在 Q 和 K 上${thetaText ? `（θ=${thetaText}）` : ""}，因果 mask，再过输出投影。线性层没有 bias。`,
       ];
       if (isMoe) {
-        notes.push(`FFN 位置是 MoE：${nShared} 个共享专家每个 token 都算；Router 在 ${nRouted} 个路由专家里取 top-${topk}，权重归一化后与共享专家相加。专家仍是 GELU MLP${mid != null ? `，中间维 ${mid}` : ""}。`);
+        notes.push(`FFN 位置是 MoE，RMSNorm 之后分成两路。一路是 ${nShared} 个共享专家，每个 token 都算。另一路是 Router 在 ${nRouted} 个路由专家里取 top-${topk}：选的时候分数加 bias，加权只用原始分数。专家是 clamp SwiGLU${mid != null ? `，中间维 ${mid}` : ""}，阈值 10。`);
         notes.push("负载均衡 aux 是训练损失，不在这张结构图里单独成块。");
       } else {
         notes.push(`FFN 是 Linear → GELU → Linear${d != null && mid != null ? `，${d}→${mid}→${d}` : ""}，没有 bias。`);

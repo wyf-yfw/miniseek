@@ -14,7 +14,7 @@
 
 </div>
 
-- 从 **Dense 骨架**出发，按阶段逐步接入 MoE / SWA / CSA2 / CED 等结构（见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)），用**同一套数据与评测**做公平 A/B；**MoE（M0.1：1 shared + 32 routed，top-2）已可训**。
+- 从 **Dense 骨架**出发，按阶段逐步接入 MoE / SWA / CSA2 / CED 等结构（见 [`docs/STAGE_PLAN.md`](docs/STAGE_PLAN.md)），用**同一套数据与评测**做公平 A/B；**MoE（M0.1：1 shared + 64 routed，top-3）已可训**。
 - Stage 0 主线：`d_model=512`、8 层 Dense Decoder-only，MiniMind 词表 **vocab=6400**，tied 权重约 **28.45M**，单卡 3090 可训。
 - 分词对齐 [MiniMind](https://github.com/jingyaogong/minimind) 词表（vocab=6400）；**训练数据用自建 MiniSeek 集**（`pretrain_mix_12g_clean` / `sft_miniseek_v5_10g`；**可行性 SFT 推荐** `sft_miniseek_v5_short256` + `max_seq_len=256`），核心模型用 **PyTorch 原生**实现。
 - 自带 **Web UI**：训练 Task、对话、续写、架构可视化、C-Eval / CMMLU / GSM8K 评测（lm-eval）。
@@ -31,7 +31,7 @@
 #### 本项目当前包含
 
 - Dense Decoder-only（`DenseLM`）完整训练与生成代码（RoPE、RMSNorm、GELU FFN，默认 embedding / LM head tying）
-- MoE（`MoELM` / MiniSeek-M0.1）：1 shared + 32 routed、top-2、负载均衡 aux loss；`python -m algo.train_pretrain --arch moe`
+- MoE（`MoELM` / MiniSeek-M0.1）：1 shared + 64 routed、top-3、中间维 256、clamp SwiGLU、bias 选专家；`python -m algo.train_pretrain --arch moe`
 - 预训练脚本 `algo/train_pretrain.py`、生成 `algo/generate.py`、数据下载与 valid 划分
 - Eval-Core：Valid PPL、Gen-Smoke、以及 Web/CLI 上的 C-Eval / CMMLU / GSM8K（lm-evaluation-harness）
 - FastAPI Web UI（`:7860`）：训练 Task、对话、续写、架构图（简洁 / 标准 / 详细）、评测 Task、MoE 专家负载探针
@@ -198,7 +198,7 @@ RMSNorm → LM Head（基座默认与 Embedding tying）
 | Stage | 结构 | 本仓 |
 |-------|------|------|
 | 0 | Dense Decoder-only | ✅ |
-| 1 | + MoE MiniSeek-M0.1（1 shared + 32 routed, top-2, h=512, ≈150M） | ✅ `model/moe.py` + `--arch moe` |
+| 1 | + MoE MiniSeek-M0.1（1 shared + 64 routed, top-3, h=256, clamp SwiGLU, 216.4M） | ✅ `model/moe.py` + `--arch moe` |
 | 2 | + SWA | TODO |
 | 3 | + CSA2 | TODO |
 | 4 | + CED | TODO |

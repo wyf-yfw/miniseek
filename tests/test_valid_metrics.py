@@ -76,15 +76,14 @@ def test_build_train_cmd_includes_valid_flags(tasks_root):
         hparams={
             "batch_size": 2,
             "max_steps": 4,
-            "valid_path": "data/valid_mix.jsonl",
+            "valid_ratio": 0.01,
             "valid_every": 20,
             "valid_max_samples": 64,
         },
     )
     cmd = tr.build_train_cmd(t)
-    assert "--valid" in cmd
-    i = cmd.index("--valid")
-    assert cmd[i + 1] == "data/valid_mix.jsonl"
+    assert "--valid" not in cmd
+    assert "--valid-ratio" in cmd
     assert "--valid-every" in cmd
     assert cmd[cmd.index("--valid-every") + 1] == "20"
     assert "--valid-max-samples" in cmd
@@ -96,8 +95,9 @@ def test_build_train_cmd_skips_valid_when_every_zero(tasks_root):
         name="valid-off",
         arch="tiny",
         mode="pretrain",
-        hparams={"valid_path": "data/valid_mix.jsonl", "valid_every": 0},
+        hparams={"valid_ratio": 0.01, "valid_every": 0},
     )
     cmd = tr.build_train_cmd(t)
     assert "--valid" not in cmd
+    assert "--valid-ratio" not in cmd
     assert "--valid-every" not in cmd

@@ -52,10 +52,10 @@ def test_build_cmd_prefers_ratio(tmp_path, monkeypatch):
     assert "--valid-ratio" in cmd
     assert cmd[cmd.index("--valid-ratio") + 1] == "0.01"
     assert cmd[cmd.index("--valid-seed") + 1] == "7"
-    assert "--valid" not in cmd  # ignored when ratio > 0
+    assert "--valid" not in cmd  # 独立 valid 文件不再传入
 
 
-def test_build_cmd_path_when_ratio_zero(tmp_path, monkeypatch):
+def test_build_cmd_ignores_path_when_ratio_zero(tmp_path, monkeypatch):
     root = tmp_path / "tasks"
     monkeypatch.setattr(ts, "TASKS_ROOT", root)
     t = ts.create_task(
@@ -70,6 +70,28 @@ def test_build_cmd_path_when_ratio_zero(tmp_path, monkeypatch):
         },
     )
     cmd = tr.build_train_cmd(t)
-    assert "--valid" in cmd
-    assert cmd[cmd.index("--valid") + 1] == "data/valid_mix.jsonl"
+    assert "--valid" not in cmd
     assert "--valid-ratio" not in cmd
+
+
+def test_build_cmd_sft_uses_ratio(tmp_path, monkeypatch):
+    root = tmp_path / "tasks"
+    monkeypatch.setattr(ts, "TASKS_ROOT", root)
+    ckpt = tmp_path / "last.pt"
+    ckpt.write_bytes(b"x")
+    t = ts.create_task(
+        name="sft-ratio",
+        arch="tiny",
+        mode="sft",
+        hparams={
+            "valid_path": "data/valid_mix.jsonl",
+            "valid_ratio": 0.02,
+            "valid_seed": 3,
+            "valid_every": 10,
+            "init_ckpt": str(ckpt),
+        },
+    )
+    cmd = tr.build_train_cmd(t)
+    assert "--valid-ratio" in cmd
+    assert cmd[cmd.index("--valid-ratio") + 1] == "0.02"
+    assert "--valid" not in cmd

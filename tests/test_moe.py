@@ -13,9 +13,9 @@ def test_moe_config_defaults():
     assert cfg.use_moe is True
     assert cfg.model_family == "MiniSeek-M"
     assert cfg.n_shared_experts == 1
-    assert cfg.n_routed_experts == 32
-    assert cfg.num_experts_per_tok == 2
-    assert cfg.moe_intermediate_size == 512
+    assert cfg.n_routed_experts == 64
+    assert cfg.num_experts_per_tok == 3
+    assert cfg.moe_intermediate_size == 256
     assert cfg.release_name.startswith("MiniSeek-M")
 
 
@@ -48,15 +48,15 @@ def test_moe_layer_forward_and_aux():
     assert any(p.grad is not None for p in layer.parameters())
 
 
-def test_load_balance_uniform_low():
-    from algo.model.moe import load_balance_loss
+def test_sequence_balance_uniform_finite():
+    from algo.model.moe import sequence_balance_loss
 
-    n, t, e = 4, 32, 8
-    probs = torch.full((n * t, e), 1.0 / e)
-    idx = torch.arange(n * t) % e
-    topk = idx.view(-1, 1)
-    aux = load_balance_loss(probs, topk, e)
-    assert torch.isfinite(aux)
+    b, t, e = 4, 32, 8
+    scores = torch.full((b, t, e), 1.0 / e)
+    idx = torch.arange(b * t) % e
+    topk = idx.view(b, t, 1)
+    aux = sequence_balance_loss(scores, topk, e)
+    assert aux.ndim == 0 and torch.isfinite(aux)
 
 
 def test_moelm_param_count_and_forward():
@@ -65,7 +65,8 @@ def test_moelm_param_count_and_forward():
     cfg = ModelConfig(arch="moe", vocab_size=6400, max_seq_len=128)
     model = MoELM(cfg)
     n = count_parameters(model)
-    assert abs(n - 150_200_000) / 150_200_000 < 0.05, n
+    # SwiGLU 三矩阵：8 层 × (1+64) 专家 × 3 × 512 × 256，加上注意力和词表
+    assert n == 216_408_576, n
     ids = torch.randint(0, 6400, (2, 16))
     labels = torch.randint(0, 6400, (2, 16))
     logits, ce, aux = model(ids, labels=labels)
@@ -86,17 +87,12 @@ def test_moelm_generate():
 
 def _naive_moe_forward(layer, x: torch.Tensor):
     """Reference: nested slot × expert Python loops (pre-sorted dispatch)."""
-    import torch.nn.functional as F
-
-    from algo.model.moe import load_balance_loss
+    from algo.model.moe import route_tokens, sequence_balance_loss
 
     b, t, d = x.shape
     flat = x.reshape(b * t, d)
     shared_out = layer.shared(flat)
-    logits = layer.router(flat)
-    probs = F.softmax(logits, dim=-1)
-    topk_prob, topk_idx = torch.topk(probs, layer.top_k, dim=-1)
-    topk_prob = topk_prob / topk_prob.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+    scores, topk_prob, topk_idx = route_tokens(layer.router(flat), layer.expert_bias, layer.top_k)
     routed = torch.zeros_like(flat)
     for slot in range(layer.top_k):
         idx = topk_idx[:, slot]
@@ -107,7 +103,7 @@ def _naive_moe_forward(layer, x: torch.Tensor):
                 continue
             routed[mask] = routed[mask] + w[mask] * layer.experts[e](flat[mask])
     y = (shared_out + routed).view(b, t, d)
-    aux = load_balance_loss(probs, topk_idx, layer.n_routed)
+    aux = sequence_balance_loss(scores.view(b, t, -1), topk_idx.view(b, t, -1), layer.n_routed)
     return y, aux
 
 
@@ -238,3 +234,73 @@ def test_train_window_expert_usage_and_log_line(capsys):
     # 3 steps × layers × B × T × top_k
     assert payload["total_assignments"] == 3 * 2 * b * t * 2
     assert abs(sum(payload["fractions"]) - 1.0) < 1e-6
+
+
+def test_swiglu_clamps_preactivation():
+    from algo.model.moe import clamped_swiglu
+
+    gate = torch.tensor([100.0, -3.0])
+    up = torch.tensor([100.0, -100.0])
+    y = clamped_swiglu(gate, up, 10.0)
+    silu10 = 10.0 * torch.sigmoid(torch.tensor(10.0))
+    assert torch.allclose(y[0], silu10 * 10.0)
+    silu_neg = (-3.0) * torch.sigmoid(torch.tensor(-3.0))
+    assert torch.allclose(y[1], silu_neg * -10.0)
+
+
+def test_bias_changes_selection_not_weights():
+    from algo.model.moe import MoELayer, route_tokens
+
+    cfg = ModelConfig(
+        arch="moe",
+        d_model=32,
+        n_heads=1,
+        head_dim=32,
+        n_routed_experts=4,
+        num_experts_per_tok=2,
+        moe_intermediate_size=64,
+        vocab_size=100,
+        max_seq_len=32,
+        dropout=0.0,
+    )
+    layer = MoELayer(cfg).eval()
+    torch.manual_seed(0)
+    x = torch.randn(1, 4, cfg.d_model)
+    flat = x.reshape(-1, cfg.d_model)
+    logits = layer.router(flat)
+    scores, weight, idx = route_tokens(logits, layer.expert_bias, layer.top_k)
+    layer.expert_bias.zero_()
+    layer.expert_bias[0] = 50.0
+    scores2, weight2, idx2 = route_tokens(logits, layer.expert_bias, layer.top_k)
+    assert (idx2[:, 0] == 0).all()
+    assert not torch.equal(idx, idx2)
+    gathered = scores2.gather(-1, idx2)
+    expect = gathered / gathered.sum(dim=-1, keepdim=True)
+    assert torch.allclose(weight2, expect)
+
+
+def test_bias_update_moves_overloaded_expert_down():
+    from algo.model.moe import MoELayer
+
+    cfg = ModelConfig(
+        arch="moe",
+        d_model=32,
+        n_heads=1,
+        head_dim=32,
+        n_routed_experts=4,
+        num_experts_per_tok=2,
+        moe_intermediate_size=32,
+        vocab_size=100,
+        max_seq_len=32,
+        dropout=0.0,
+        expert_bias_speed=0.001,
+    )
+    layer = MoELayer(cfg)
+    layer.train()
+    counts = torch.zeros(4)
+    counts[0] = 100
+    layer._step_counts = counts
+    layer.update_expert_bias()
+    assert layer.expert_bias[0].item() < 0
+    assert layer.expert_bias[1].item() > 0
+    assert layer.expert_bias.requires_grad is False

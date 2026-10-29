@@ -4,7 +4,7 @@
 
 ## 项目是什么
 
-- **目标**：DeepSeek 结构对齐的超小可训语言模型（MoE 约 150M），**不是**跟 MiniMind 学架构；MiniMind 仅可作小模型参考（如 tokenizer），已弃用其数据集。
+- **目标**：做一套**层实现对齐 DeepSeek-V4.1-Flash**（arXiv:2609.19969）的超小可训语言模型。`d`、层数、专家个数、top-k、中间维、总参可以小于论文；**层内算子不能换成另一种算法**。MoE 层要对齐的是：共享专家常开、路由专家 top-k、专家为 clamp SwiGLU、选专家用「分数 + bias」、加权用原始分数（无辅助损失均衡；另可留极小的序列级 balance loss）。当前 `MoELM`（M0.1）是 1 个共享 + 64 个路由、top-3，专家中间维 256，总参 216,408,576。层算法是 clamp SwiGLU + sigmoid/bias 选专家 + 序列级均衡损失（aux 默认 0.0001）。注意力侧目标仍是 SWA / CSA2（Full、Reuse、Reindex）/ CED，残差目标是 Single-Pass mHC；未实现前不要画进 Tiny / Dense / MoE 三档。旧 MoE 检查点（GELU 的 `fc1`/`fc2`）不能加载。MiniMind 仅可作小模型参考（如 tokenizer），已弃用其数据集。
 - **作者署名**：`wyf-yfw`（勿写真实姓名）。
 - **仓库**：https://github.com/wyf-yfw/miniseek（公仓）。大语料与权重不进 Git。
 
@@ -84,7 +84,7 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 
 1. 公仓安全：无私钥、无隧道、无机器内网细节进 commit；文档里若必须提 VPS，仅运维说明且提醒勿提交配置文件。
 2. 改部署/重启服务前确认 worker 与训练隔离仍在；优先热更 API/前端，勿连带停训。
-3. 架构叙事对齐 DeepSeek，不把 MiniMind 当学习目标。
+3. 层实现对齐 DeepSeek-V4.1-Flash。宽度和专家数量可以缩小。MoE 层用 clamp SwiGLU 和 bias 选专家。注意力和残差还没对齐之前，不要把普通因果注意力或普通 Pre-Norm 残差画成 SWA / CSA2 / CED / mHC。不把 MiniMind 当学习目标。
 4. 用户未要求时不要新建无关大文件、不要擅自删正在训练引用的数据路径。
 5. 中文沟通可默认；代码/commit 信息保持清晰英文或中英均可，与现有风格一致。
 
@@ -104,7 +104,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 - **PT 训练**：`moe-pretrain-3` 在 wyf 上跑（resume 自 PT `last.pt`，数据 `clean.jsonl` / 12g clean）。
 - **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 主文件 `pretrain_mix_12g_clean.jsonl`；SFT **默认与 HF 已切 v5 10G**（`sft_miniseek_v5_10g.jsonl`；5G 对照包保留；见 `SOURCES_v5.md`）。**可行性快跑推荐 short256**（已推 HF `sft_short256`；见 `SOURCES_v5_short256.md`）。训练用 `--valid-ratio`，Hub 无独立 valid。v1 与 `_raw_sft_v5` 已清。
 - **代码**：公仓已含 PT/SFT 布局、valid-ratio、FlashAttention 默认开、`.gitignore`；`data/scripts` 旧拼盘脚本已删；`deploy/miniseek-tunnel.service` 不上库。
-- **架构页**：含 DeepSeek-V4.1-Flash 参考预设（arXiv:2609.19969，`source=reference`，`meta.diagram=fig3`，不可训练）。须画出 **Causal Encoder / Decoder** 分区与 **CED / Indexer / Reindex / Engram** 等 KV 流转箭头，嵌套 ×3(Full+Reuse×5) / ×4(Reindex+Reuse×3)，勿退回扁平 layer 卡片。Tiny / Dense / MoE 用同一套自下而上括号图，按 `DenseLM` / `MoELM` 画：注意力在下，FFN 或 MoE（1 shared + 32 routed、top-2）在上，右侧 ×层数，LM Head 与 Embedding 的 tied 用虚线。未实现的 SWA / CSA2 / CED 不要画进这三档。
+- **架构页**：含 DeepSeek-V4.1-Flash 参考预设（arXiv:2609.19969，`source=reference`，`meta.diagram=fig3`，不可训练）。须画出 **Causal Encoder / Decoder** 分区与 **CED / Indexer / Reindex / Engram** 等 KV 流转箭头，嵌套 ×3(Full+Reuse×5) / ×4(Reindex+Reuse×3)，勿退回扁平 layer 卡片。Tiny / Dense / MoE 用同一套自下而上括号图，按 `DenseLM` / `MoELM` 画：注意力在下，FFN 或 MoE（1 shared + 64 routed、top-3）在上，右侧 ×层数，LM Head 与 Embedding 的 tied 用虚线。未实现的 SWA / CSA2 / CED 不要画进这三档。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。
 - **Loss 图**：取点间隔可在 UI 调节（从 train.log 按 `plot_every` 重采样），不绑死训练启动时的 plot_every。
