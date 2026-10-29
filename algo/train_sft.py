@@ -42,9 +42,9 @@ from algo.batching import (
     PackedSFTBatchIter,
     truncate_keep_head_with_eos,
 )
-from algo import v41_train as v41t
+from algo import miniseek_m_train as mmt
 from algo.model import build_model
-from algo.model.v41 import step_expert_bias
+from algo.model.miniseek_m import step_expert_bias
 from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
@@ -201,7 +201,7 @@ def build_ckpt(
     loss: Optional[float],
 ) -> Dict[str, Any]:
     return {
-        "model": v41t.state_for_ckpt(model),
+        "model": mmt.state_for_ckpt(model),
         "optimizer": {k: v.cpu() if torch.is_tensor(v) else v for k, v in opt.state_dict().items()},
         "config": cfg.to_dict(),
         "step": global_step,
@@ -260,34 +260,34 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/SFT/sft_miniseek_v5_10g.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
-    p.add_argument("--arch", choices=["dense", "tiny", "v41"], default="dense", help="model architecture")
+    p.add_argument("--arch", choices=["dense", "tiny", "miniseek-m", "m", "v41"], default="dense", help="model architecture")
     p.add_argument(
         "--aux-coef",
         type=float,
         default=0.0001,
-        help="MoE 序列级均衡损失权重（V4.1 为 0.0001）。专家 bias 另按负载更新，不靠这个系数",
+        help="MoE 序列级均衡损失权重（DeepSeek-M 为 0.0001）。专家 bias 另按负载更新，不靠这个系数",
     )
     p.add_argument("--max-seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--lr", type=float, default=5e-5, help="peak LR after warmup (SFT 通常低于预训练)")
-    p.add_argument("--min-lr", type=float, default=None, help="cosine floor LR（默认 v41=lr×0.1，其余 1e-5）")
+    p.add_argument("--min-lr", type=float, default=None, help="cosine floor LR（默认 m=lr×0.1，其余 1e-5）")
     p.add_argument(
         "--candidate-pool",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="v41：分层稀疏索引候选池（论文在后训练引入，SFT 默认开）",
+        help="M：分层稀疏索引候选池（论文在后训练引入，SFT 默认开）",
     )
     p.add_argument(
         "--bounded-replay",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="v41：模拟 Decoder SWA Bounded Replay（回答起点前 window 个位置的滑窗截断，SFT 默认开）",
+        help="M：模拟 Decoder SWA Bounded Replay（回答起点前 window 个位置的滑窗截断，SFT 默认开）",
     )
     p.add_argument(
         "--act-ckpt",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="v41：按层 activation checkpointing（显存不够时开）",
+        help="M：按层 activation checkpointing（显存不够时开）",
     )
     p.add_argument("--warmup-steps", type=int, default=100)
     p.add_argument("--epochs", type=int, default=1)
@@ -351,7 +351,7 @@ def main() -> None:
         "--compile",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="CUDA 上 torch.compile；默认 v41 关（MoE 分发与稀疏索引会 graph-break），其余开",
+        help="CUDA 上 torch.compile；默认 m 关（MoE 分发与稀疏索引会 graph-break），其余开",
     )
     p.add_argument(
         "--fused-adamw",
@@ -374,11 +374,11 @@ def main() -> None:
         "bucket=长度分桶；random=随机 pad。pack 不做跨样本 attention mask",
     )
     args = p.parse_args()
-    is_v41 = args.arch == "v41"
+    is_mm = args.arch in ("miniseek-m", "m", "v41")
     if args.compile is None:
-        args.compile = not is_v41
+        args.compile = not is_mm
     if args.min_lr is None:
-        args.min_lr = args.lr * 0.1 if is_v41 else 1e-5
+        args.min_lr = args.lr * 0.1 if is_mm else 1e-5
 
     thresholds = parse_loss_thresholds(args.save_loss_thresholds)
     hit_thresholds: Set[float] = set()
@@ -388,8 +388,8 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[sft] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
     attn_name = configure_attn_backend(bool(args.flash_attn))
-    if is_v41:
-        print("[sft] flash_attn=n/a（v41 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
+    if is_mm:
+        print("[sft] flash_attn=n/a（m 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
     else:
         print(f"[sft] flash_attn={'on' if args.flash_attn else 'off'} backend={attn_name}")
 
@@ -397,12 +397,12 @@ def main() -> None:
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    if is_v41:
-        cfg, model = v41t.build_v41(tok, vocab, pad_id, args.max_seq_len, device)
-        v41t.unwrap(model).act_ckpt = bool(args.act_ckpt)
-        print(v41t.describe(cfg, model), flush=True)
+    if is_mm:
+        cfg, model = mmt.build_miniseek_m(tok, vocab, pad_id, args.max_seq_len, device)
+        mmt.unwrap(model).act_ckpt = bool(args.act_ckpt)
+        print(mmt.describe(cfg, model), flush=True)
         print(
-            f"[sft] v41 post-train: candidate_pool={bool(args.candidate_pool)} "
+            f"[sft] m post-train: candidate_pool={bool(args.candidate_pool)} "
             f"bounded_replay={bool(args.bounded_replay)}",
             flush=True,
         )
@@ -424,7 +424,7 @@ def main() -> None:
                 print("[sft] torch.compile enabled")
             except Exception as e:  # noqa: BLE001
                 print(f"[sft] WARN: torch.compile 失败，继续未编译: {e}")
-    has_moe = is_v41
+    has_moe = is_mm
     print(
         f"[sft] arch={args.arch} release={cfg.release_name} "
         f"aux_coef={args.aux_coef if has_moe else 'n/a'}"
@@ -432,7 +432,7 @@ def main() -> None:
     expert_window_steps = 0
     if has_moe:
         _unwrap_model(model).begin_expert_usage()
-    pack_kw = {"doc_align": v41t.doc_align(cfg), "with_doc_ids": True} if is_v41 else {}
+    pack_kw = {"doc_align": mmt.doc_align(cfg), "with_doc_ids": True} if is_mm else {}
 
     if not Path(args.data).exists():
         raise SystemExit(f"[sft] 缺少数据文件: {args.data}")
@@ -573,8 +573,8 @@ def main() -> None:
     plan_steps = steps_per_epoch * max(1, args.epochs)
 
     opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
-    if is_v41:
-        opt = v41t.build_optimizer(model, args.lr, fused=bool(args.fused_adamw) and device.type == "cuda")
+    if is_mm:
+        opt = mmt.build_optimizer(model, args.lr, fused=bool(args.fused_adamw) and device.type == "cuda")
         print("[sft] optimizer=Muon(矩阵)+AdamW(norm/标量)+Sinkhorn(embedding/head/Engram)", flush=True)
     elif bool(args.fused_adamw) and device.type == "cuda":
         try:
@@ -605,7 +605,7 @@ def main() -> None:
     if args.resume:
         resume_path = Path(args.resume)
         blob = torch.load(resume_path, map_location="cpu", weights_only=False)
-        _unwrap_model(model).load_state_dict(v41t.clean_state_dict(blob["model"]))
+        _unwrap_model(model).load_state_dict(mmt.clean_state_dict(blob["model"]))
         if "optimizer" in blob:
             try:
                 opt.load_state_dict(blob["optimizer"])
@@ -622,7 +622,7 @@ def main() -> None:
     elif args.init_ckpt:
         init_path = Path(args.init_ckpt)
         blob = torch.load(init_path, map_location="cpu", weights_only=False)
-        _unwrap_model(model).load_state_dict(v41t.clean_state_dict(blob["model"]), strict=True)
+        _unwrap_model(model).load_state_dict(mmt.clean_state_dict(blob["model"]), strict=True)
         print(f"[sft] init weights from {init_path} (pretrain step={blob.get('step', '?')})")
 
     total_steps, step_limit = resolve_step_budget(lifetime_base, args.max_steps, plan_steps)
@@ -691,7 +691,7 @@ def main() -> None:
         for batch in epoch_iter:
             if step_limit is not None and global_step >= step_limit:
                 break
-            input_ids, labels, doc_ids = v41t.unpack_batch(batch, device)
+            input_ids, labels, doc_ids = mmt.unpack_batch(batch, device)
 
             next_step = global_step + 1
             cur_lr = lr_at_step(
@@ -706,8 +706,8 @@ def main() -> None:
             opt.zero_grad(set_to_none=True)
 
             def _step_forward():
-                if is_v41:
-                    return v41t.forward_loss(
+                if is_mm:
+                    return mmt.forward_loss(
                         model,
                         input_ids,
                         labels,
@@ -742,8 +742,8 @@ def main() -> None:
                 expert_window_steps += 1
 
             if global_step % args.log_every == 0 or global_step == 1:
-                if is_v41:
-                    print(v41t.log_line(epoch, global_step, last_loss, ce_loss, aux_loss, cur_lr), flush=True)
+                if is_mm:
+                    print(mmt.log_line(epoch, global_step, last_loss, ce_loss, aux_loss, cur_lr), flush=True)
                 elif aux_loss is not None:
                     print(
                         f"epoch={epoch} step={global_step} loss={last_loss:.4f} "

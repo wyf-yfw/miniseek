@@ -1,10 +1,10 @@
-# MiniSeek-F0.1（V4.1-Flash 全架构）实施计划
+# MiniSeek-M0.1（DeepSeek-M 全架构）实施计划
 
 > 执行方式：同一会话内联执行（用户授权全程不再审核）。逐任务 TDD：先写对拍/行为测试，再实现，测试通过后提交。代码以提交为准，本文锁定文件、接口、测试断言与提交节点。
 
-**目标：** 按 `docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md` 实现可在单卡 3090 训练的 MiniSeek-F0.1。
+**目标：** 按 `docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md` 实现可在单卡 3090 训练的 MiniSeek-M0.1。
 
-**架构：** 新包 `algo/model/v41/`（模块边界同官方 `inference/model.py`）+ `algo/optim/` 三类优化器；训练 / 推理 / API / UI 按 `arch="v41"` 派发；删除旧 M0.1 MoE。
+**架构：** 新包 `algo/model/miniseek_m/`（模块边界同官方 `inference/model.py`）+ `algo/optim/` 三类优化器；训练 / 推理 / API / UI 按 `arch="miniseek-m"` 派发；删除旧 M0.1 MoE。
 
 **技术栈：** PyTorch（训练 BF16 autocast；测试 CPU fp32）、numpy、tokenizers、pytest。
 
@@ -12,24 +12,24 @@
 
 - 本机测试：`.\.venv\Scripts\python.exe -m pytest -q --ignore=_sync_stash`（CPU；基线 127 passed / 3 skipped）。
 - 全部 BF16；不做 FP4/FP8/QAT；不做多模态。
-- F0.1：主干 + Engram `numel()` ≤ 200M；DSpark 另算。
-- 官方语义参考移植放 `tests/v41_ref/`，注明来源 HF `deepseek-ai/DeepSeek-V4.1-Flash/inference`（MIT）。
+- M0.1：主干 + Engram `numel()` ≤ 200M；DSpark 另算。
+- 官方语义参考移植放 `tests/miniseek_m_ref/`，注明来源 HF `deepseek-ai/DeepSeek-V4.1-Flash/inference`（MIT）。
 - 提交信息：`<type>(<scope>): <summary>`，除 docs 外带正文；issue 编号留空；不加 Co-Authored-By；不提交 `_sync_stash/`、数据、权重。
 
 ## 文件结构
 
 | 文件 | 职责 |
 |------|------|
-| `algo/model/v41/__init__.py` | 导出 `FlashConfig`、`Transformer`、`build_v41` |
-| `algo/model/v41/config.py` | `FlashConfig`（官方字段名）、`tiny()` 测试配置、序列化 |
-| `algo/model/v41/rope.py` | `precompute_freqs_cis`、`apply_rotary_emb`、`rotate_tail`、`layer_freqs` |
-| `algo/model/v41/attention.py` | `RMSNorm`、`AttnState`、`window_indices`、`sparse_attention`、`select_candidate_blocks`、`Compressor`、`Indexer`、`Attention` |
-| `algo/model/v41/mhc.py` | `hc_split_sinkhorn`、`hc_mixes`、`hc_pre`、`hc_post` |
-| `algo/model/v41/moe.py` | `Gate`、`Expert`、`MoE`、`sequence_balance_loss` |
-| `algo/model/v41/engram.py` | 压缩 token 表、`EngramLayout`、`compute_hash_multipliers`、`NgramHasher`、`Engram` |
-| `algo/model/v41/model.py` | `Block`、`Transformer`、`bounded_replay_floor` |
-| `algo/model/v41/cache.py` | `InferenceCache`、分块 forward、CED 预填充、解码、前缀缓存 |
-| `algo/model/v41/dspark.py` | DSpark 草稿头、训练损失、调度器、投机解码 |
+| `algo/model/miniseek_m/__init__.py` | 导出 `FlashConfig`、`Transformer`、`build_miniseek_m` |
+| `algo/model/miniseek_m/config.py` | `FlashConfig`（官方字段名）、`tiny()` 测试配置、序列化 |
+| `algo/model/miniseek_m/rope.py` | `precompute_freqs_cis`、`apply_rotary_emb`、`rotate_tail`、`layer_freqs` |
+| `algo/model/miniseek_m/attention.py` | `RMSNorm`、`AttnState`、`window_indices`、`sparse_attention`、`select_candidate_blocks`、`Compressor`、`Indexer`、`Attention` |
+| `algo/model/miniseek_m/mhc.py` | `hc_split_sinkhorn`、`hc_mixes`、`hc_pre`、`hc_post` |
+| `algo/model/miniseek_m/moe.py` | `Gate`、`Expert`、`MoE`、`sequence_balance_loss` |
+| `algo/model/miniseek_m/engram.py` | 压缩 token 表、`EngramLayout`、`compute_hash_multipliers`、`NgramHasher`、`Engram` |
+| `algo/model/miniseek_m/model.py` | `Block`、`Transformer`、`bounded_replay_floor` |
+| `algo/model/miniseek_m/cache.py` | `InferenceCache`、分块 forward、CED 预填充、解码、前缀缓存 |
+| `algo/model/miniseek_m/dspark.py` | DSpark 草稿头、训练损失、调度器、投机解码 |
 | `algo/optim/muon.py` / `sinkhorn.py` / `param_groups.py` | 三类优化器与参数分组、组合优化器 |
 | `algo/train_dspark.py`、`algo/dspark_calibrate.py` | DSpark 训练与 STS 校准 |
 | 修改：`algo/model/__init__.py`、`algo/batching.py`、`algo/train_pretrain.py`、`algo/train_sft.py`、`algo/generate.py`、`algo/eval/*`、`api/*`、`frontend/index.html`、文档 | 接入 |
@@ -40,14 +40,14 @@
 ```python
 # config.py
 @dataclass
-class FlashConfig:  # 字段与默认值见 spec §3.2；另含 arch="v41", model_family="MiniSeek-F", model_version="0.1"
+class FlashConfig:  # 字段与默认值见 spec §3.2；另含 arch="miniseek-m", model_family="MiniSeek-M", model_version="0.1"
     def to_dict(self) -> dict: ...
     @classmethod
     def from_dict(cls, d: dict) -> "FlashConfig": ...
     @classmethod
     def tiny(cls) -> "FlashConfig": ...          # 8 层同模式、dim 32，CPU 测试用
     @property
-    def release_name(self) -> str: ...           # "MiniSeek-F0.1"
+    def release_name(self) -> str: ...           # "MiniSeek-M0.1"
     def is_decoder(self, layer_id: int) -> bool: ...  # layer_id >= n_layers // 2
 
 # rope.py
@@ -108,7 +108,7 @@ def bounded_replay_floor(labels, doc_ids, window) -> Tensor  # [B,T] long
 class Muon(torch.optim.Optimizer)             # 组字段：lr, lr_mult, weight_decay, momentum, ns_steps；参数属性 _muon_splits
 class SinkhornMomentum(torch.optim.Optimizer) # 组字段：lr, lr_mult, beta, gamma, k_iters, tau, eps
 class CompositeOptimizer                      # param_groups / step / zero_grad / state_dict / load_state_dict
-def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> CompositeOptimizer
+def build_miniseek_m_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> CompositeOptimizer
 ```
 
 ---
@@ -117,15 +117,15 @@ def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> C
 
 ### 任务 1：配置、RoPE、官方参考移植
 
-**文件：** 新建 `algo/model/v41/{__init__,config,rope}.py`、`tests/v41_ref/{__init__,official}.py`、`tests/test_v41_rope.py`
+**文件：** 新建 `algo/model/miniseek_m/{__init__,config,rope}.py`、`tests/miniseek_m_ref/{__init__,official}.py`、`tests/test_v41_rope.py`
 
-- [ ] `tests/v41_ref/official.py`：把官方 `precompute_freqs_cis`、`apply_rotary_emb`（原地版）、`get_window_topk_idxs`、`Compressor`（prefill 分支）、`Indexer` 打分 + top-k、`select_candidate_blocks`、`sparse_attn`（kernel 数学）、`hc_split_sinkhorn`（kernel 数学）、`Gate`、`Expert`、`MoE`、`Engram.forward`、`EngramLayout`、`compute_hash_multipliers`、`NgramHashState.forward`、`get_dspark_topk_idxs` 移植为纯 torch / numpy 函数。
+- [ ] `tests/miniseek_m_ref/official.py`：把官方 `precompute_freqs_cis`、`apply_rotary_emb`（原地版）、`get_window_topk_idxs`、`Compressor`（prefill 分支）、`Indexer` 打分 + top-k、`select_candidate_blocks`、`sparse_attn`（kernel 数学）、`hc_split_sinkhorn`（kernel 数学）、`Gate`、`Expert`、`MoE`、`Engram.forward`、`EngramLayout`、`compute_hash_multipliers`、`NgramHashState.forward`、`get_dspark_topk_idxs` 移植为纯 torch / numpy 函数。
 - [ ] 测试：`test_freqs_match_official`（含 YaRN 开/关）；`test_rotate_matches_official`；`test_inverse_rotation_roundtrip`；`test_flash_config_roundtrip`；`test_f01_defaults`（层模式、来源层、尺寸与 spec 一致）。
 - [ ] 运行 `pytest tests/test_v41_rope.py -q` 通过；提交 `feat(v41): add FlashConfig, RoPE and official reference ports`。
 
 ### 任务 2：注意力（SWA + CSA2 + indexer + 候选池 + KL）
 
-**文件：** 新建 `algo/model/v41/attention.py`、`tests/test_v41_attention.py`
+**文件：** 新建 `algo/model/miniseek_m/attention.py`、`tests/test_v41_attention.py`
 
 - [ ] 测试（fp32、`FlashConfig.tiny()`）：
   - `test_window_indices_match_official`
@@ -144,28 +144,28 @@ def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> C
 
 ### 任务 3：mHC
 
-**文件：** `algo/model/v41/mhc.py`、`tests/test_v41_mhc.py`
+**文件：** `algo/model/miniseek_m/mhc.py`、`tests/test_v41_mhc.py`
 
 - [ ] 测试：`test_sinkhorn_matches_official`；`test_comb_doubly_stochastic`（行列和误差 < 1e-3）；`test_hc_post_formula`；`test_zero_scale_is_prenorm`（`scale=0, base=0` 时多流 Block 等价单流 Pre-Norm）。
 - [ ] 提交 `feat(v41): add single-pass mHC`。
 
 ### 任务 4：MoE
 
-**文件：** `algo/model/v41/moe.py`、`tests/test_v41_moe.py`
+**文件：** `algo/model/miniseek_m/moe.py`、`tests/test_v41_moe.py`
 
 - [ ] 测试：`test_gate_matches_official`；`test_moe_matches_official`；`test_bias_only_changes_selection`；`test_balance_loss_hand_example`（手算 2 专家 / top-1 小例）；`test_bias_update_direction`；`test_counts_accumulate_over_microbatches`。
 - [ ] 提交 `feat(v41): add sqrt-softplus MoE with seq balance loss`。
 
 ### 任务 5：Engram
 
-**文件：** `algo/model/v41/engram.py`、`tests/test_v41_engram.py`
+**文件：** `algo/model/miniseek_m/engram.py`、`tests/test_v41_engram.py`
 
 - [ ] 测试：`test_primes_and_layout_match_official`；`test_hash_ids_match_official`；`test_doc_boundary_blocks_lookback`；`test_compressed_map_merges_case`（用 `tokenizers` 在内存里构造的小词表）；`test_engram_forward_matches_official`；`test_engram_identity_at_init`。
 - [ ] 提交 `feat(v41): add Engram n-gram hash memory`。
 
 ### 任务 6：Transformer、CED 接线、损失、参数量
 
-**文件：** `algo/model/v41/model.py`、修改 `algo/model/__init__.py`、`tests/test_v41_model.py`
+**文件：** `algo/model/miniseek_m/model.py`、修改 `algo/model/__init__.py`、`tests/test_v41_model.py`
 
 - [ ] 测试：`test_forward_backward_tiny`（三项损失有限且可反传）；`test_ced_decoder_kv_from_encoder_output`（解码器仅第 4 层有压缩器，且其 latent 等于由编码器输出单独计算的结果）；`test_doc_isolation_full_model`；`test_replay_floor_from_labels`；`test_f01_param_budget`（meta device，`numel` ≤ 200M 并打印）；`test_build_model_dispatch`。
 - [ ] 提交 `feat(v41): assemble CED transformer with losses`。
@@ -191,7 +191,7 @@ def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> C
 
 **文件：** 修改 `algo/train_pretrain.py`、`algo/train_sft.py`（及其共用的 checkpoint 加载工具），测试 `tests/test_v41_train_smoke.py`
 
-- [ ] `--arch v41`：构建 `FlashConfig`（含 tokenizer 压缩表）、组合优化器、损失组合、按 step 更新 bias、doc_ids / swa_floor、`--candidate-pool`、`--bounded-replay`、`--act-ckpt`；checkpoint 存取 `FlashConfig`；日志打印层模式与三项损失。
+- [ ] `--arch miniseek-m`：构建 `FlashConfig`（含 tokenizer 压缩表）、组合优化器、损失组合、按 step 更新 bias、doc_ids / swa_floor、`--candidate-pool`、`--bounded-replay`、`--act-ckpt`；checkpoint 存取 `FlashConfig`；日志打印层模式与三项损失。
 - [ ] 测试：CPU 上 tiny 配置跑 3 步预训练和 3 步 SFT，loss 有限、ckpt 可续训。
 - [ ] 提交 `feat(train): wire v41 into pretrain and sft`。
 
@@ -199,7 +199,7 @@ def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> C
 
 ### 任务 10：缓存、CED 预填充、解码
 
-**文件：** `algo/model/v41/cache.py`、修改 `model.py`、`tests/test_v41_infer.py`
+**文件：** `algo/model/miniseek_m/cache.py`、修改 `model.py`、`tests/test_v41_infer.py`
 
 - [ ] 测试：`test_cached_equals_full_short_prompt`（P ≤ 窗口，贪心逐 token 一致）；`test_ced_prefill_matches_replay_forward`（P > 窗口时，与带 `swa_floor` 的 forward 一致）；`test_ring_wraparound`；`test_m2_partial_group_across_steps`；`test_generate_stream_interface`。
 - [ ] 提交 `feat(v41): add KV caches, CED prefill and cached decoding`。
@@ -215,7 +215,7 @@ def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> C
 
 ### 任务 12：草稿头与训练
 
-**文件：** `algo/model/v41/dspark.py`、`algo/train_dspark.py`、`tests/test_v41_dspark.py`
+**文件：** `algo/model/miniseek_m/dspark.py`、`algo/train_dspark.py`、`tests/test_v41_dspark.py`
 
 - [ ] 测试：`test_dspark_topk_idxs_match_official`；`test_losses_math`；`test_backbone_frozen`；`test_train_dspark_smoke`。
 - [ ] 提交 `feat(dspark): add DSpark drafter and training stage`。
@@ -233,7 +233,7 @@ def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> C
 
 **文件：** 删除 `algo/model/moe.py`、`tests/test_moe.py`；修改 `api/arch_inspect.py`、`api/app.py`、`api/task_runner.py`、`frontend/index.html`、相关测试
 
-- [ ] 架构页新增 `v41` 可训练预设（CED 分区、逐层模式、mHC 4 流、Engram、KV 流转）；训练表单选项 Tiny / Dense / V4.1；专家负载页适配。
+- [ ] 架构页新增 `v41` 可训练预设（CED 分区、逐层模式、mHC 4 流、Engram、KV 流转）；训练表单选项 Tiny / Dense / M；专家负载页适配。
 - [ ] 全量测试通过；提交 `feat(ui): replace M0.1 MoE with v41 preset`。
 
 ### 任务 15：文档与收尾
@@ -241,9 +241,9 @@ def build_v41_optimizer(model, lr, *, weight_decay=0.1, engram_lr_mult=5.0) -> C
 **文件：** `docs/STAGE_PLAN.md`、`README.md`、`README_en.md`、`AGENTS.md`
 
 - [ ] 更新架构状态、MoE 规则（sqrt-softplus）、绘图规则、训练默认值与命令；全量测试通过；`git pull --rebase` 后 push。
-- [ ] 提交 `docs: document MiniSeek-F0.1 architecture and workflow`。
+- [ ] 提交 `docs: document MiniSeek-M0.1 architecture and workflow`。
 
 ## 自查记录
 
 - spec §3–§12 每节均有对应任务（§3→1/6，§4→2，§5→6/10，§6→3，§7→4，§8→5，§9→7/8/9，§10→10/11，§11→12/13，§12→14/15）。
-- 接口名在各任务间一致（`AttnState`、`bounded_replay_floor`、`build_v41_optimizer`、`CompositeOptimizer`）。
+- 接口名在各任务间一致（`AttnState`、`bounded_replay_floor`、`build_miniseek_m_optimizer`、`CompositeOptimizer`）。

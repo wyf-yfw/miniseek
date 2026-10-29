@@ -1,17 +1,17 @@
-# 对齐 DeepSeek-V4.1-Flash：由简入难阶段计划
+# 对齐 DeepSeek-M：由简入难阶段计划
 
-> 来源：2026-10-23 Canvas《对齐 DeepSeek-V4.1-Flash：由简入难阶段计划》完整落盘。  
+> 来源：2026-10-23 Canvas《对齐 DeepSeek-M：由简入难阶段计划》完整落盘。  
 > 仓库：`wyf-yfw/miniseek`。
 
-> **2026-10-29 起本文件只作历史记录。** 下文阶段 1–6 的全部结构（SWA / CSA2 / CED / 分层稀疏索引 / Replay / mHC / Engram / DSpark）已在 MiniSeek-F0.1（`--arch v41`）里一次实现，旧的 M0.1 MoE（`MoELM`）已移除。现行规格见 [`docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`](superpowers/specs/2026-10-29-v41-flash-full-arch-design.md) 与 `algo/model/v41/config.py`。下文数字保留当时的规划值，不再更新。
+> **2026-10-29 起本文件只作历史记录。** 下文阶段 1–6 的全部结构（SWA / CSA2 / CED / 分层稀疏索引 / Replay / mHC / Engram / DSpark）已在 MiniSeek-M0.1（`--arch miniseek-m`）里一次实现，旧的 M0.1 MoE（`MoELM`）已移除。现行规格见 [`docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`](superpowers/specs/2026-10-29-v41-flash-full-arch-design.md) 与 `algo/model/miniseek_m/config.py`。下文数字保留当时的规划值，不再更新。
 
-冻结超小规格：`d=512`、8 层；数据与 benchmark 已定；每阶段有层表、参数量、训练数据与能力门槛，逐步对齐 V4.1 Flash 结构。
+冻结超小规格：`d=512`、8 层；数据与 benchmark 已定；每阶段有层表、参数量、训练数据与能力门槛，逐步对齐 M Flash 结构。
 
-**对齐口径：** 参数量、宽度、层数、专家个数、top-k 可以小于论文。层内算子要对齐 V4.1-Flash，不能换成另一种算法。
+**对齐口径：** 参数量、宽度、层数、专家个数、top-k 可以小于论文。层内算子要对齐 DeepSeek-M，不能换成另一种算法。
 
 参考：
 
-- [DeepSeek-V4.1 相关论文 / HTML](https://arxiv.org/html/2609.19969)
+- [DeepSeek-M 相关论文 / HTML](https://arxiv.org/html/2609.19969)
 - [jingyaogong/minimind_dataset](https://huggingface.co/datasets/jingyaogong/minimind_dataset)
 - [C-Eval](https://cevalbenchmark.com/)
 - [CMMLU](https://github.com/haonan-li/CMMLU)
@@ -276,7 +276,7 @@ Replay 末尾 128 token 的 SWA
 | Stage | 内容 | 状态 |
 |-------|------|------|
 | 0 | Dense Decoder-only + train/generate/Web UI | 已完成，权重 MiniSeek-D0.1 已开源 |
-| 1–6 | MoE / SWA / CSA2 / CED / HSI / Replay / mHC / Engram / DSpark | 已在 MiniSeek-F0.1（`--arch v41`）一次实现 |
+| 1–6 | MoE / SWA / CSA2 / CED / HSI / Replay / mHC / Engram / DSpark | 已在 MiniSeek-M0.1（`--arch miniseek-m`）一次实现 |
 | — | FP4 / FP8 KV、视觉分支 | 不做（3090 不支持 FP4/FP8，全程 BF16）；视觉后置 |
 
 M0.1 MoE（`MoELM`）已移除，旧 M0.1 checkpoint 不能再加载训练或推理。

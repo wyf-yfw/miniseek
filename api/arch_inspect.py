@@ -9,14 +9,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 
 from algo.model.config import ModelConfig
-from algo.model.v41.config import FlashConfig
+from algo.model.miniseek_m.config import FlashConfig
 
 _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
 
-PRESET_ARCHS = ("tiny", "dense", "v41", "v41-flash")
+PRESET_ARCHS = ("tiny", "dense", "miniseek-m", "m-ref")
 
-# Reference-only aliases (DeepSeek-V4.1-Flash paper diagram; not ModelConfig.preset).
-_V41_FLASH_ALIASES = frozenset({
+# Reference-only aliases（DeepSeek-M 论文示意；不可训练）。
+_M_REF_ALIASES = frozenset({
+    "m-ref",
+    "deepseek-m",
     "v41-flash",
     "v4.1-flash",
     "deepseek-v4.1-flash",
@@ -30,10 +32,10 @@ def preset_config(arch: str):
         return ModelConfig.tiny()
     if a == "dense":
         return ModelConfig()  # D0.1 defaults
-    if a == "v41":
-        return FlashConfig()  # MiniSeek-F0.1
+    if a in ("miniseek-m", "m", "v41"):
+        return FlashConfig()  # MiniSeek-M0.1
     raise ValueError(
-        f"未知架构: {arch}（可选: tiny / dense / v41 / v41-flash）"
+        f"未知架构: {arch}（可选: tiny / dense / m / m-ref）"
     )
 
 
@@ -312,7 +314,7 @@ def inspect_from_config(cfg: ModelConfig, *, source: str = "design") -> Dict[str
 
 def inspect_design(arch: str) -> Dict[str, Any]:
     a = (arch or "").strip().lower()
-    if a in _V41_FLASH_ALIASES:
+    if a in _M_REF_ALIASES:
         return inspect_v41_flash()
     cfg = preset_config(arch)
     if isinstance(cfg, FlashConfig):
@@ -320,15 +322,15 @@ def inspect_design(arch: str) -> Dict[str, Any]:
     return inspect_from_config(cfg, source="design")
 
 
-# ---------------------------------------------------------------- MiniSeek-F（v41，可训练）----
+# ---------------------------------------------------------------- MiniSeek-M（m，可训练）----
 
 _MODE_COLORS = {"Full": "#86efac", "Reuse": "#fde047", "Reindex": "#93c5fd", "SWA": "#fda4af"}
 
 
 def _v41_param_counts(cfg: FlashConfig) -> Tuple[Dict[str, Tuple[int, Tuple[int, ...]]], int]:
     """在 meta device 上构建主干与 DSpark，返回 {参数名: (numel, shape)} 与草稿头总参。"""
-    from algo.model.v41.dspark import DSparkDrafter
-    from algo.model.v41.model import Transformer
+    from algo.model.miniseek_m.dspark import DSparkDrafter
+    from algo.model.miniseek_m.model import Transformer
 
     with torch.device("meta"):
         model = Transformer(cfg)
@@ -429,7 +431,7 @@ def inspect_v41_model(
     step: Any = None,
     loss: Any = None,
 ) -> Dict[str, Any]:
-    """MiniSeek-F（DeepSeek-V4.1-Flash 全架构的小尺寸版）：Fig.3 风格示意 + 逐层参数。"""
+    """MiniSeek-M（DeepSeek-M 全架构的小尺寸版）：Fig.3 风格示意 + 逐层参数。"""
     named, dspark_params = _v41_param_counts(cfg)
     d, V, E = cfg.dim, cfg.vocab_size, cfg.n_encoder_layers
     btd, bt = f"[b,t,{d}]", "[b,t]"
@@ -506,7 +508,7 @@ def inspect_v41_model(
     tgt = sorted(cfg.dspark_target_layer_ids)
     tgt_text = f"L{tgt[0]}–L{tgt[-1]}" if tgt == list(range(tgt[0], tgt[-1] + 1)) else "、".join(f"L{i}" for i in tgt)
     fig3 = {
-        "title": f"{cfg.release_name} | DeepSeek-V4.1-Flash 架构（{cfg.n_layers} 层：编码 {E} + 解码 {cfg.n_layers - E}）",
+        "title": f"{cfg.release_name} | DeepSeek-M 架构（{cfg.n_layers} 层：编码 {E} + 解码 {cfg.n_layers - E}）",
         "encoder": {"id": "causal_encoder", "label": f"Causal Encoder ({E}L)", "n_layers": E,
                     "groups": _v41_groups(cfg, 0, E, "enc"), "output": {"id": "enc_hidden", "label": "Enc. Hidden States"}},
         "decoder": {"id": "decoder", "label": f"Decoder ({cfg.n_layers - E}L)", "n_layers": cfg.n_layers - E,
@@ -559,7 +561,7 @@ def inspect_v41_model(
 
 
 def inspect_v41_flash() -> Dict[str, Any]:
-    """DeepSeek-V4.1-Flash reference architecture (arXiv:2609.19969 §2.1 / Fig.3 / §4.2.1).
+    """DeepSeek-M reference architecture (arXiv:2609.19969 §2.1 / Fig.3 / §4.2.1).
 
     Reference-only design diagram — not a trainable MiniSeek ModelConfig.
     Layer blocks are *group-level* (matching Fig.3 readability), not 40 expanded stacks.
@@ -1012,8 +1014,8 @@ def inspect_v41_flash() -> Dict[str, Any]:
     ]
 
     config: Dict[str, Any] = {
-        "arch": "deepseek-v4.1-flash",
-        "release_name": "DeepSeek-V4.1-Flash",
+        "arch": "deepseek-m",
+        "release_name": "DeepSeek-M",
         "d_model": d,
         "n_layers": n_layers,
         "n_heads": n_heads,
@@ -1041,7 +1043,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
         "loss": None,
         "source": "reference",
         "diagram": "fig3",
-        "release_name": "DeepSeek-V4.1-Flash",
+        "release_name": "DeepSeek-M",
         "paper": "arXiv:2609.19969",
         "backbone_params": backbone,
         "act_prefill": 8_000_000_000,
@@ -1051,7 +1053,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
 
     # Dedicated Fig.3 schematic payload (frontend renders this instead of flat cards).
     fig3: Dict[str, Any] = {
-        "title": "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash",
+        "title": "Figure 3 | Overall architecture of DeepSeek-M",
         "caption": (
             "40-layer Multimodal MoE Transformer = Causal Encoder 20L + Decoder 20L (CED). "
             "All FFN = DeepSeekMoE. L0–1 SWA; remaining layers CSA2. "
@@ -1224,7 +1226,7 @@ def inspect_v41_flash() -> Dict[str, Any]:
     }
 
     return {
-        "path": "reference:deepseek-v4.1-flash",
+        "path": "reference:deepseek-m",
         "config": config,
         "meta": meta,
         "fig3": fig3,
@@ -1299,7 +1301,7 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
     cfg_raw = blob.get("config") or {}
     if not isinstance(cfg_raw, dict):
         cfg_raw = {}
-    if cfg_raw.get("arch") == "v41":
+    if cfg_raw.get("arch") in ("miniseek-m", "m", "v41"):
         return inspect_v41_model(
             FlashConfig.from_dict(cfg_raw),
             source=str(blob.get("source") or "training"),

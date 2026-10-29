@@ -30,13 +30,13 @@ import time
 
 import torch
 
-from algo import v41_train as v41t
+from algo import miniseek_m_train as mmt
 from algo.batching import PackedTextBatchIter
 from algo.model import load_model_from_blob
 from algo.model.tokenizer import load_tokenizer
-from algo.model.v41 import FlashConfig, step_expert_bias
-from algo.model.v41.dspark import DSparkDrafter, dspark_training_losses
-from algo.optim import build_v41_optimizer
+from algo.model.miniseek_m import FlashConfig, step_expert_bias
+from algo.model.miniseek_m.dspark import DSparkDrafter, dspark_training_losses
+from algo.optim import build_miniseek_m_optimizer
 from algo.train_pretrain import JsonlTextDataset, lr_at_step, save_ckpt, set_lr, set_seed
 
 
@@ -44,7 +44,7 @@ def save_dspark(path: Path, drafter: DSparkDrafter, opt, backbone_path: str, ste
     save_ckpt(
         path,
         {
-            "dspark": v41t.state_for_ckpt(drafter),
+            "dspark": mmt.state_for_ckpt(drafter),
             "config": drafter.cfg.to_dict(),
             "backbone": str(backbone_path),
             "step": int(step),
@@ -57,12 +57,12 @@ def save_dspark(path: Path, drafter: DSparkDrafter, opt, backbone_path: str, ste
 
 def load_drafter(blob: dict) -> DSparkDrafter:
     drafter = DSparkDrafter(FlashConfig.from_dict(blob["config"]))
-    drafter.load_state_dict(v41t.clean_state_dict(blob["dspark"]), strict=True)
+    drafter.load_state_dict(mmt.clean_state_dict(blob["dspark"]), strict=True)
     return drafter
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="MiniSeek-F DSpark drafter training (backbone frozen)")
+    p = argparse.ArgumentParser(description="MiniSeek-M DSpark drafter training (backbone frozen)")
     p.add_argument("--backbone", type=str, required=True, help="v41 主干 checkpoint（PT 或 SFT）")
     p.add_argument("--data", type=str, default="data/PT/pretrain_mix_12g_clean.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
@@ -101,7 +101,7 @@ def main() -> None:
     else:
         rblob = None
         drafter = DSparkDrafter(cfg).to(device)
-    opt = build_v41_optimizer(drafter, lr=args.lr, cfg=cfg)
+    opt = build_miniseek_m_optimizer(drafter, lr=args.lr, cfg=cfg)
     if rblob is not None and "optimizer" in rblob:
         opt.load_state_dict(rblob["optimizer"])
     print(
@@ -125,7 +125,7 @@ def main() -> None:
             pad_id=pad_id,
             eos_id=eos_id,
             seed=args.seed + epoch,
-            doc_align=v41t.doc_align(cfg),
+            doc_align=mmt.doc_align(cfg),
             with_doc_ids=True,
         )
 
@@ -140,7 +140,7 @@ def main() -> None:
         for batch in epoch_iter(epoch):
             if step >= total_steps:
                 break
-            ids, labels, docs = v41t.unpack_batch(batch, device)
+            ids, labels, docs = mmt.unpack_batch(batch, device)
             set_lr(opt, lr_at_step(step + 1, base_lr=args.lr, min_lr=args.min_lr, warmup_steps=args.warmup_steps, total_steps=total_steps))
             opt.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):

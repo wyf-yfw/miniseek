@@ -2,7 +2,7 @@
 
 # MiniSeek
 
-**A tiny DeepSeek-V4.1-Flash, full architecture, trained from scratch on one RTX 3090**
+**A tiny DeepSeek-M, full architecture, trained from scratch on one RTX 3090**
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/wyf-yfw/miniseek?style=social)](https://github.com/wyf-yfw/miniseek/stargazers)
 [![GitHub Code License](https://img.shields.io/github/license/wyf-yfw/miniseek)](LICENSE)
@@ -14,7 +14,7 @@
 
 </div>
 
-* This project trains **MiniSeek-F0.1** from scratch on a single RTX 3090 in native PyTorch: a tiny language model whose layers match [DeepSeek-V4.1-Flash](https://arxiv.org/abs/2609.19969). Backbone + Engram total **187M** parameters, with about **33M** active per token.
+* This project trains **MiniSeek-M0.1** from scratch on a single RTX 3090 in native PyTorch: a tiny language model whose layers match [DeepSeek-M](https://arxiv.org/abs/2609.19969). Backbone + Engram total **187M** parameters, with about **33M** active per token.
 * Depth, width and expert count are scaled down to fit a 3090; no operator inside a layer is swapped for something else: CED causal encoder–decoder, SWA + CSA2 (Full / Reuse / Reindex) compressed sparse attention with the hierarchical sparse indexer, Single-Pass mHC multi-stream residuals, sqrt-softplus routed MoE, Engram n-gram memory, and the DSpark speculative-decoding drafter.
 * The training recipe follows the paper too: grouped Muon (hybrid Newton–Schulz) + AdamW + Sinkhorn momentum, sample-level attention masking, the indexer KL loss, and auxiliary-loss-free expert-bias balancing.
 * Inference implements KV caches, CED prefill, a prefix cache with bounded replay, and confidence-scheduled DSpark speculative decoding whose output distribution matches the backbone.
@@ -27,7 +27,7 @@
 
 <div align="center">
 
-![MiniSeek-F0.1 architecture](./images/miniseek-f0.1-arch.png)
+![MiniSeek-M0.1 architecture](./images/miniseek-f0.1-arch.png)
 
 </div>
 
@@ -35,16 +35,16 @@
 
 # 📌 Overview
 
-DeepSeek-V4.1-Flash adds a whole set of new parts to the Transformer: a global KV computed once by the encoder and reused by every decoder layer (CED), compressed sparse attention that alternates between three modes, four residual streams with mHC, hashed Engram memory, and DSpark, which drafts several tokens at once. The paper and the official code target hundreds of GPUs, FP4 / FP8 kernels and hundreds of billions of parameters, which makes them hard to read, run or modify on a personal GPU.
+DeepSeek-M adds a whole set of new parts to the Transformer: a global KV computed once by the encoder and reused by every decoder layer (CED), compressed sparse attention that alternates between three modes, four residual streams with mHC, hashed Engram memory, and DSpark, which drafts several tokens at once. The paper and the official code target hundreds of GPUs, FP4 / FP8 kernels and hundreds of billions of parameters, which makes them hard to read, run or modify on a personal GPU.
 
 MiniSeek shrinks the same architecture to a size a 3090 can train. Depth, width and expert count are smaller, but every operator follows the paper and the official code instead of a common stand-in. On one machine you can walk the whole path (data cleaning → pretraining → SFT → drafter training → inference with speculative decoding → evaluation) and use the code and tests to see what each part does.
 
 #### 🎉 What's included
 
-- All MiniSeek-F model code (`algo/model/v41/`): SWA / CSA2 attention, compressor, indexer and candidate pool, Single-Pass mHC, MoE, Engram, the CED backbone, KV and prefix caches, DSpark.
+- All MiniSeek-M model code (`algo/model/miniseek_m/`): SWA / CSA2 attention, compressor, indexer and candidate pool, Single-Pass mHC, MoE, Engram, the CED backbone, KV and prefix caches, DSpark.
 - Optimizers (`algo/optim/`): Muon, Sinkhorn momentum, and the V4 rules that split parameters into Muon / AdamW / Sinkhorn groups.
 - Training scripts: pretraining `algo/train_pretrain.py`, SFT `algo/train_sft.py`, DSpark `algo/train_dspark.py` and its confidence calibration `algo/dspark_calibrate.py`, with resume, packed batches with sample-level attention masks, and a validation split drawn from the training set.
-- Ports of the official inference code (`tests/v41_ref/`) and per-operator equivalence tests (`tests/test_v41_*.py`).
+- Ports of the official inference code (`tests/miniseek_m_ref/`) and per-operator equivalence tests (`tests/test_v41_*.py`).
 - Web UI (FastAPI, `:7860`): training Tasks, chat, continuation, architecture diagrams, evaluation (C-Eval / CMMLU / GSM8K), data cleaning, expert load.
 - A small dense line, `DenseLM` (MiniSeek-D0.1), with released weights.
 
@@ -52,7 +52,7 @@ MiniSeek shrinks the same architecture to a size a 3090 can train. Depth, width 
 
 | Model | Params | Notes | Release |
 |-------|--------|-------|---------|
-| MiniSeek-F0.1 | 187M-A33M (+19M DSpark) | Full DeepSeek-V4.1-Flash architecture | coming |
+| MiniSeek-M0.1 | 187M-A33M (+19M DSpark) | Full DeepSeek-M architecture | coming |
 | [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense SFT / chat | 2026-10 |
 | [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense pretrained base | 2026-10 |
 
@@ -83,7 +83,7 @@ hf download jingyaogong/MiniMind2 --include "tokenizer*" --local-dir ./tokenizer
 
 > With an older `huggingface_hub` that has no `hf` command, use `huggingface-cli download` instead. You can also point `DS41_TOKENIZER_PATH` at an existing tokenizer directory.
 
-Run the tests on CPU first (they include a tiny F0.1 pretrain → SFT smoke run):
+Run the tests on CPU first (they include a tiny M0.1 pretrain → SFT smoke run):
 
 ```bash
 python -m pytest tests -q
@@ -93,7 +93,7 @@ python -m pytest tests -q
 
 ### 1' Download a model
 
-MiniSeek-F0.1 will be published on Hugging Face once training finishes. For now you can try the dense model:
+MiniSeek-M0.1 will be published on Hugging Face once training finishes. For now you can try the dense model:
 
 ```bash
 hf download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
@@ -102,7 +102,7 @@ hf download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
 ### 2' CLI generation
 
 ```bash
-# any checkpoint trained with this repo (F0.1 or D0.1)
+# any checkpoint trained with this repo (M0.1 or D0.1)
 python -m algo.generate --ckpt tasks/f01-sft/last.pt --prompt "Hello, please introduce yourself."
 ```
 
@@ -149,9 +149,9 @@ MINISEEK_MONOLITH=1 python -m uvicorn api.app:app --host 127.0.0.1 --port 7860
 
 | Page | What it does |
 |------|--------------|
-| Train | Create Tasks, pick V4.1 / Dense / Tiny, start and stop runs, follow logs and loss curves; artifacts go to `tasks/<id>/` |
-| Chat / Continue | Load a checkpoint to chat or continue text; F0.1 multi-turn chat reuses the prefix cache, and a `dspark.pt` next to the checkpoint switches to DSpark speculative decoding |
-| Architecture | The F0.1 diagram (open any layer for operators, formulas, parameters), the V4.1-Flash paper reference, Dense / Tiny |
+| Train | Create Tasks, pick M / Dense / Tiny, start and stop runs, follow logs and loss curves; artifacts go to `tasks/<id>/` |
+| Chat / Continue | Load a checkpoint to chat or continue text; M0.1 multi-turn chat reuses the prefix cache, and a `dspark.pt` next to the checkpoint switches to DSpark speculative decoding |
+| Architecture | The M0.1 diagram (open any layer for operators, formulas, parameters), the DeepSeek-M paper reference, Dense / Tiny |
 | Bench | C-Eval / CMMLU / GSM8K (lm-eval) |
 | Data cleaning | Length / language / repetition / dedup / sensitive-word filters for pretraining jsonl |
 | Expert load | Runs a routing probe on training data and shows how often each of the 64 routed experts is picked |
@@ -169,25 +169,25 @@ See "Data" below for what is in each file.
 
 ### 2' Train
 
-> Run these from the repo root, or pick V4.1 in the Web "Train" page and fill in the same values.
+> Run these from the repo root, or pick M in the Web "Train" page and fill in the same values.
 
 #### 2.1 Pretraining
 
 ```bash
-python -m algo.train_pretrain --arch v41 \
+python -m algo.train_pretrain --arch miniseek-m \
   --data data/PT/pretrain_mix_12g_clean.jsonl \
   --out-dir tasks/f01-pretrain \
   --batch-size 8 --valid-ratio 0.01
 ```
 
-With `--arch v41` the defaults are `max_seq_len=1024`, a peak learning rate of `3e-4` with cosine decay to `3e-5`, BF16 autocast, and packed batches with sample-level attention masks. Parameters are grouped by the V4 rules: matrices use Muon, the embedding / LM head / Engram tables use Sinkhorn momentum, and RMSNorm weights and scalars use AdamW. The candidate pool is off during pretraining (`--candidate-pool` turns it on). If memory is tight, add `--act-ckpt` for per-layer recomputation or lower `--batch-size`.
+With `--arch miniseek-m` the defaults are `max_seq_len=1024`, a peak learning rate of `3e-4` with cosine decay to `3e-5`, BF16 autocast, and packed batches with sample-level attention masks. Parameters are grouped by the V4 rules: matrices use Muon, the embedding / LM head / Engram tables use Sinkhorn momentum, and RMSNorm weights and scalars use AdamW. The candidate pool is off during pretraining (`--candidate-pool` turns it on). If memory is tight, add `--act-ckpt` for per-layer recomputation or lower `--batch-size`.
 
 The run writes `tasks/f01-pretrain/last.pt` (rolled every 5000 steps) and `best.pt`.
 
 #### 2.2 SFT
 
 ```bash
-python -m algo.train_sft --arch v41 \
+python -m algo.train_sft --arch miniseek-m \
   --init-ckpt tasks/f01-pretrain/last.pt \
   --data data/SFT/sft_miniseek_v5_short256.jsonl \
   --max-seq-len 256 \
@@ -219,7 +219,7 @@ python -m algo.eval.valid_ppl --ckpt tasks/f01-pretrain/last.pt --data data/PT/p
 - Checkpoints: only the rolling `last.pt` and the best `best.pt` are kept by default; pass `--save-loss-thresholds` if you want milestones.
 - Validation: there is no separate file; `--valid-ratio` samples from the training set without touching the source jsonl.
 - `torch.compile`: off by default for v41 (MoE dispatch and sparse indexing cause frequent graph breaks), on by default for Dense.
-- Dense line: replace `--arch v41` with `--arch dense` (default `max_seq_len=512`).
+- Dense line: replace `--arch miniseek-m` with `--arch dense` (default `max_seq_len=512`).
 
 </details>
 
@@ -248,7 +248,7 @@ Hub: [`MiniSeek-Pretrain`](https://huggingface.co/datasets/wyf-yfw/MiniSeek-Pret
 
 ## Structure
 
-MiniSeek-F0.1 has 8 layers: the first 4 form the causal encoder and the last 4 the decoder. Every operator matches DeepSeek-V4.1-Flash.
+MiniSeek-M0.1 has 8 layers: the first 4 form the causal encoder and the last 4 the decoder. Every operator matches DeepSeek-M.
 
 * **Attention**: Q goes through a low-rank path (512→128→16×128); K and V are one shared 128-dim latent used by all heads; RoPE covers only the last 32 dims and is rotated back on the output; softmax has a learnable per-head sink; the output uses a grouped low-rank projection with 2 groups. Every layer has its own 128-token sliding window.
 * **CSA2 modes**: a Full layer compresses the sequence into a global KV (m=2 pairwise pooling in the encoder, m=1 in the decoder) and the indexer picks the top-64 entries; a Reuse layer reuses the source layer's global KV and top-k; a Reindex layer reuses the global KV and re-selects top-k inside the candidate pool.
@@ -272,20 +272,20 @@ Layer layout (every layer is an attention sublayer plus an MoE sublayer, with mH
 | L6 | decoder | CSA2 Reindex | 1 | re-selects top-k inside the candidate pool |
 | L7 | decoder | CSA2 Reuse | 1 | |
 
-Full hyperparameters are in [`algo/model/v41/config.py`](algo/model/v41/config.py); the design write-up is [`docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`](docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md).
+Full hyperparameters are in [`algo/model/miniseek_m/config.py`](algo/model/miniseek_m/config.py); the design write-up is [`docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`](docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md).
 
 ## Configurations
 
 | Model Name | params | vocab | max_seq | d_model | n_layers | heads × head_dim | MoE | note |
 |------------|--------|-------|---------|---------|----------|------------------|-----|------|
-| MiniSeek-F0.1 | 187M-A33M | 6400 | 1024 | 512 | 8 (4+4) | 16 × 128 (shared KV) | 1+64, top-6, h=176 | full V4.1-Flash architecture |
+| MiniSeek-M0.1 | 187M-A33M | 6400 | 1024 | 512 | 8 (4+4) | 16 × 128 (shared KV) | 1+64, top-6, h=176 | full DeepSeek-M architecture |
 | MiniSeek-D0.1 | 28M | 6400 | 512 | 512 | 8 | 8 × 64 | — | dense |
 
 187M = 158M backbone + 29M Engram tables; A33M counts the backbone parameters each token actually uses (only the 6 selected routed experts, no Engram tables). The DSpark drafter adds another 19M.
 
-## Differences from DeepSeek-V4.1-Flash
+## Differences from DeepSeek-M
 
-| Item | DeepSeek-V4.1-Flash | MiniSeek-F0.1 |
+| Item | DeepSeek-M | MiniSeek-M0.1 |
 |------|---------------------|---------------|
 | Layers | 40 (20 encoder + 20 decoder) | 8 (4 encoder + 4 decoder) |
 | MoE | 1 shared + 384 routed, top-6 | 1 shared + 64 routed, top-6 |
@@ -314,7 +314,7 @@ python -m algo.eval.valid_ppl --ckpt tasks/f01-pretrain/last.pt --data data/PT/p
 python -m algo.eval.gen_smoke --ckpt tasks/f01-sft/last.pt --seed 42
 ```
 
-Run C-Eval / CMMLU / GSM8K from the Web "Bench" page or with `algo/eval/run_benchmark.py` (see [`algo/eval/README.md`](algo/eval/README.md)). F0.1 results will be added here after training; dense-line results are in `algo/eval/reports/`.
+Run C-Eval / CMMLU / GSM8K from the Web "Bench" page or with `algo/eval/run_benchmark.py` (see [`algo/eval/README.md`](algo/eval/README.md)). M0.1 results will be added here after training; dense-line results are in `algo/eval/reports/`.
 
 ---
 
@@ -322,7 +322,7 @@ Run C-Eval / CMMLU / GSM8K from the Web "Bench" page or with `algo/eval/run_benc
 
 ```text
 algo/
-├── model/v41/          # MiniSeek-F: config · rope · attention · mhc · moe · engram · model · cache · dspark
+├── model/miniseek_m/          # MiniSeek-M: config · rope · attention · mhc · moe · engram · model · cache · dspark
 ├── model/dense.py      # MiniSeek-D: DenseLM
 ├── optim/              # Muon · Sinkhorn momentum · parameter groups
 ├── train_pretrain.py   # pretraining
@@ -335,7 +335,7 @@ api/                    # FastAPI: training Tasks · inference · architecture �
 frontend/               # Web UI
 deploy/                 # systemd units (web / api / worker)
 scripts/                # data checks · cleaning · smoke
-tests/                  # tests; tests/v41_ref/ ports the official inference code
+tests/                  # tests; tests/miniseek_m_ref/ ports the official inference code
 docs/                   # design docs and implementation plans
 images/                 # README images
 tasks/                  # training outputs (not in Git)
@@ -345,7 +345,7 @@ tasks/                  # training outputs (not in Git)
 
 # 📌 Acknowledgements
 
-- Architecture and reference implementation: the [DeepSeek-V4.1 paper](https://arxiv.org/abs/2609.19969) and the official inference code in [deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) (MIT)
+- Architecture and reference implementation: the [DeepSeek-M paper](https://arxiv.org/abs/2609.19969) and the official inference code in [deepseek-ai/DeepSeek-M](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) (MIT)
 - Tokenizer and README layout: [jingyaogong/minimind](https://github.com/jingyaogong/minimind)
 - Benchmarks: [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness), C-Eval, CMMLU
 
@@ -359,7 +359,7 @@ If this project helps you, please cite the repository or link to it:
 
 ```bibtex
 @misc{miniseek2026,
-  title        = {MiniSeek: A Tiny Trainable Reproduction of the DeepSeek-V4.1-Flash Architecture},
+  title        = {MiniSeek: A Tiny Trainable Reproduction of the DeepSeek-M Architecture},
   author       = {wyf-yfw},
   year         = {2026},
   howpublished = {\url{https://github.com/wyf-yfw/miniseek}}

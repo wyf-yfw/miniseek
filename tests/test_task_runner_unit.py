@@ -124,13 +124,13 @@ def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
 
 
 
-def test_build_train_cmd_sft_v41(tasks_root, tmp_path):
-    """SFT + v41 builds a cmd with --arch v41, aux coef and post-train switches."""
+def test_build_train_cmd_sft_m(tasks_root, tmp_path):
+    """SFT + M builds a cmd with --arch miniseek-m, aux coef and post-train switches."""
     ckpt = tmp_path / "pretrain.pt"
     ckpt.write_bytes(b"x")
     t = ts.create_task(
-        name="sft-v41",
-        arch="v41",
+        name="sft-m",
+        arch="miniseek-m",
         mode="sft",
         hparams={
             "max_steps": 2,
@@ -143,11 +143,11 @@ def test_build_train_cmd_sft_v41(tasks_root, tmp_path):
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
     assert "algo.train_sft" in cmd
-    assert cmd[cmd.index("--arch") + 1] == "v41"
+    assert cmd[cmd.index("--arch") + 1] == "miniseek-m"
     assert cmd[cmd.index("--aux-coef") + 1] == "0.02"
     assert cmd[cmd.index("--init-ckpt") + 1] == str(ckpt)
     assert "--no-candidate-pool" in cmd and "--act-ckpt" in cmd
-    assert "--no-compile" in cmd  # v41 默认不编译
+    assert "--no-compile" in cmd  # M 默认不编译
 
 
 def test_build_train_cmd_rejects_removed_moe(tasks_root):

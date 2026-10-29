@@ -292,7 +292,7 @@ class PackedTextBatchIter:
             else (getattr(tokenizer, "eos_token_id", None) or 2)
         )
         self.seed = int(seed)
-        # v41：文档对齐到压缩比的倍数，并产出逐 token 文档编号（样本级 attention mask）
+        # M：文档对齐到压缩比的倍数，并产出逐 token 文档编号（样本级 attention mask）
         self.doc_align = int(doc_align)
         self.with_doc_ids = bool(with_doc_ids)
 

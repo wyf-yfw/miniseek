@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from algo.model.v41.attention import (
+from algo.model.miniseek_m.attention import (
     Attention,
     AttnState,
     Compressor,
@@ -11,8 +11,8 @@ from algo.model.v41.attention import (
     sparse_attention,
     window_indices,
 )
-from algo.model.v41.config import FlashConfig
-from tests.v41_ref import official as ref
+from algo.model.miniseek_m.config import FlashConfig
+from tests.miniseek_m_ref import official as ref
 
 
 def _cfg():

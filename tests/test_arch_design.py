@@ -64,8 +64,8 @@ def test_design_dense_matches_denselm():
 
 
 def test_design_v41_fig3():
-    out = inspect_design("v41")
-    assert out["config"]["arch"] == "v41"
+    out = inspect_design("miniseek-m")
+    assert out["config"]["arch"] == "miniseek-m"
     assert out["meta"]["diagram"] == "fig3" and out["meta"]["trainable"] is True
     assert out["total_params"] <= 200_000_000
     fig = out["fig3"]

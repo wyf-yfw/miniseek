@@ -1,4 +1,4 @@
-# MiniSeek-F0.1：完整复现 DeepSeek-V4.1-Flash 架构（3090 可训）
+# MiniSeek-M0.1：完整复现 DeepSeek-M 架构（3090 可训）
 
 - 日期：2026-10-29
 - 状态：第 1–8 部分已逐段经用户确认；第 9–10 部分及所有未决细节按用户指示「全部按推荐来」定稿
@@ -8,20 +8,20 @@
 
 | 项 | 决定 |
 |----|------|
-| 目标 | 层内算子与整体框架完整对齐 DeepSeek-V4.1-Flash（arXiv:2609.19969）；宽度、层数、专家数、表大小可缩小 |
+| 目标 | 层内算子与整体框架完整对齐 DeepSeek-M（arXiv:2609.19969）；宽度、层数、专家数、表大小可缩小 |
 | 范围（做） | 文本主干（CED + SWA/CSA2 三模式 + 分层稀疏索引 + Single-Pass mHC + MoE + Engram）、训练配方、推理侧（KV cache、CED 预填充、Bounded Replay、前缀缓存）、DSpark |
 | 范围（不做，后续阶段） | 多模态（DeepSeek-ViT + Aligner + 图文分开的路由 bias） |
 | 硬件 | 单卡 RTX 3090（Ampere，24GB）。全部 BF16；KV / indexer 的 FP4、FP8 与 QAT **不做**（用户确认保留此差异） |
 | 参数预算 | 主干 + Engram 表合计 ≤ 200M；DSpark 草稿头另算 |
 | 预训练长度 | 1024 |
 | 兼容 | 不保留旧版兼容：M0.1 `MoELM` 删除，旧 MoE checkpoint 不再可加载 |
-| 产品名 | arch id `v41`，`MiniSeek-F0.1`（F = Flash）；Dense / Tiny 两档保持不动作为对照 |
+| 产品名 | arch id `v41`，`MiniSeek-M0.1`（F = Flash）；Dense / Tiny 两档保持不动作为对照 |
 
 ## 1. 依据与优先级
 
-1. 官方参考实现（MIT）：HF `deepseek-ai/DeepSeek-V4.1-Flash` 的 `inference/model.py`、`engram.py`、`kernel.py`、`config.json`。**逐算子以此为准。**
-2. V4.1 论文 arXiv:2609.19969（§2 架构、§2.5 优化、§3.2.2 Bounded Replay、§4.2 配置）。
-3. V4.1 声明沿用或引用的原文：V4 arXiv:2606.19348（CSA、mHC 参数化、Muon 算法）、V3.2 arXiv:2512.02556（DSA indexer 的 KL 训练）、mHC arXiv:2512.24880（α 初值 0.01）、Engram arXiv:2601.07372、DSpark arXiv:2607.05147、DeepSeek-V3（序列均衡损失公式）。
+1. 官方参考实现（MIT）：HF `deepseek-ai/DeepSeek-M` 的 `inference/model.py`、`engram.py`、`kernel.py`、`config.json`。**逐算子以此为准。**
+2. M 论文 arXiv:2609.19969（§2 架构、§2.5 优化、§3.2.2 Bounded Replay、§4.2 配置）。
+3. M 声明沿用或引用的原文：V4 arXiv:2606.19348（CSA、mHC 参数化、Muon 算法）、V3.2 arXiv:2512.02556（DSA indexer 的 KL 训练）、mHC arXiv:2512.24880（α 初值 0.01）、Engram arXiv:2601.07372、DSpark arXiv:2607.05147、DeepSeek-V3（序列均衡损失公式）。
 4. 以上都没写的，由本设计决定，统一标「推断」，汇总在 §13。
 
 ## 2. 与论文的已知差异（有意保留）
@@ -39,7 +39,7 @@
 
 ### 3.1 代码组织
 
-新包 `algo/model/v41/`，按官方 `model.py` 的模块边界拆分：
+新包 `algo/model/miniseek_m/`，按官方 `model.py` 的模块边界拆分：
 
 | 文件 | 内容 |
 |------|------|
@@ -55,9 +55,9 @@
 
 优化器放 `algo/optim/`（`muon.py`、`sinkhorn.py`、`param_groups.py`）。`build_model` 按 `arch` 派发。
 
-### 3.2 配置取值（`FlashConfig` 默认值 = MiniSeek-F0.1）
+### 3.2 配置取值（`FlashConfig` 默认值 = MiniSeek-M0.1）
 
-| 字段 | F0.1 | 官方 V4.1-Flash |
+| 字段 | M0.1 | 官方 DeepSeek-M |
 |------|------|-----------------|
 | `vocab_size` | 6400（MiniMind tokenizer） | 129280 |
 | `dim` / `n_layers` | 512 / 8（编码 0–3，解码 4–7） | 5120 / 40 |
@@ -144,13 +144,13 @@ BF16 autocast。以下保持 fp32（与官方一致）：路由打分、mHC 系�
 - 候选池（仅后训练）：第 4 层把分数补齐到 8 的倍数、按块取最大值，钉住含最新可见条目的块，取前 32 块，展开成位置掩码；第 6 层把候选外的分数置 −inf。
 - `topk = min(64, 可见上限)`；`topk(...).indices.sort()`；不可见的置 −1。严格照官方语义（包括 −inf 条目在可见范围内仍会被保留这一行为）。
 
-### 4.5 Indexer 训练（沿用 V3.2 DSA，V4/V4.1 继承）
+### 4.5 Indexer 训练（沿用 V3.2 DSA，V4/M 继承）
 
 - 目标：本层主注意力在其选中压缩条目上的概率，16 头相加后在选中集合内 L1 归一化，`detach`。
 - 预测：indexer 分数在选中集合上的 softmax。
 - 损失：`KL(target ‖ pred)`，对有选中条目的 token 求平均；三个来源层（2、4、6）再取平均（推断：Reuse 层使用的 top-k 也算在来源层名下，目标只用来源层自己的注意力）。
 - indexer 的输入 `x`、`qr`、压缩 latent 全部 `detach`：indexer 只吃 KL 梯度，主模型只吃 LM 与均衡损失。
-- 从头就稀疏训练，无稠密 warmup（V4.1 §1）。
+- 从头就稀疏训练，无稠密 warmup（M §1）。
 
 ### 4.6 训练实现
 
@@ -183,15 +183,15 @@ BF16 autocast。以下保持 fp32（与官方一致）：路由打分、mHC 系�
 - `Expert`：`w1`（gate）、`w3`（up）、`w2`（down），无 bias；`gate.clamp(max=10)`、`up.clamp(-10,10)`；`silu(gate)·up` 用 fp32；路由权重在 `w2` 之前相乘。
 - 输出：路由专家加权和 + 共享专家（不加权），fp32 累加。
 - 序列均衡损失（V3 公式）：`f_i = N/(K·T)·count_i`，`P_i = mean_t s′_{i,t}`，`s′ = s / Σ_j s_j`（用不带 bias 的 `s`）；每层 `Σ_i f_i P_i` 对 batch 取平均；跨层求和（推断）；权重 1e-4。
-- 不做：V4 前几层 Hash 路由（V4.1 已去掉）、图像专用 bias、V4 的 Anticipatory Routing（V4.1 未提）。
+- 不做：V4 前几层 Hash 路由（M 已去掉）、图像专用 bias、V4 的 Anticipatory Routing（M 未提）。
 - 分发沿用排序 + 每专家一次 GEMM + `index_add_`；保留 `begin_expert_usage` / `end_expert_usage` / `probe_expert_load` 探针接口。
 
 ## 8. Engram
 
 - 压缩 token 表（官方 `build_compressed_token_map`）：逐 token 解码，`NFKC → NFD → StripAccents → Lowercase → 合并空白 → 单空格哨兵 → Strip`；规范化结果相同者共用 id；含 `\ufffd` 的半字节 token 用原始 token 字符串作 key。压缩词表大小写入配置并在加载时断言。
-- 哈希（官方 `NgramHashState`）：每位置取当前及前 3 个压缩 id；回看遇序列开头或文档边界停止，空位填 tokenizer pad token 的压缩 id；每层乘子由 `np.random.default_rng(10007·layer_id)` 生成、奇数、受 int64 溢出上界约束；逐次异或得到 2/3/4-gram 哈希；每个（阶，头）用互不重复的质数取模并加偏移；每层 24 个桶区间拼成一张表。质数从 `engram_vocab_size − 1` 往上依次取（F0.1 取 16000），自写判质函数，不依赖 sympy。
-- 写入（官方 `Engram.forward`，在 block 之前，作用于 4 条流）：查表 `[B,T,24,32]` → 展平 768 → `wkv` 投影出 4 个 key（每流一个）+ 1 个共享 value；`weight = q_weight ⊙ k_weight`；`dot_m = Σ(h_m ⊙ weight_m ⊙ key_m) · rsqrt(mean h_m²+eps) · rsqrt(mean key_m²+eps) / √d`；`gate_m = σ(sign(dot)·√max(|dot|, 1e-6))`；`X_m += gate_m·value`（fp32）。无短卷积（V4.1 去掉）。
-- 初始化（推断）：表与 `wkv` 均 N(0, 0.02)，`q_weight`、`k_weight` 为 1，不做任何置零。原版 Engram 只把短卷积置 0（卷积分支恒等，门控值从第一步就写入残差）；V4.1 去掉了卷积，所以没有对应的置零项。
+- 哈希（官方 `NgramHashState`）：每位置取当前及前 3 个压缩 id；回看遇序列开头或文档边界停止，空位填 tokenizer pad token 的压缩 id；每层乘子由 `np.random.default_rng(10007·layer_id)` 生成、奇数、受 int64 溢出上界约束；逐次异或得到 2/3/4-gram 哈希；每个（阶，头）用互不重复的质数取模并加偏移；每层 24 个桶区间拼成一张表。质数从 `engram_vocab_size − 1` 往上依次取（M0.1 取 16000），自写判质函数，不依赖 sympy。
+- 写入（官方 `Engram.forward`，在 block 之前，作用于 4 条流）：查表 `[B,T,24,32]` → 展平 768 → `wkv` 投影出 4 个 key（每流一个）+ 1 个共享 value；`weight = q_weight ⊙ k_weight`；`dot_m = Σ(h_m ⊙ weight_m ⊙ key_m) · rsqrt(mean h_m²+eps) · rsqrt(mean key_m²+eps) / √d`；`gate_m = σ(sign(dot)·√max(|dot|, 1e-6))`；`X_m += gate_m·value`（fp32）。无短卷积（M 去掉）。
+- 初始化（推断）：表与 `wkv` 均 N(0, 0.02)，`q_weight`、`k_weight` 为 1，不做任何置零。原版 Engram 只把短卷积置 0（卷积分支恒等，门控值从第一步就写入残差）；M 去掉了卷积，所以没有对应的置零项。
 - 尺寸：两层合计约 29M（表约 25M）。
 
 ## 9. 训练配方
@@ -200,13 +200,13 @@ BF16 autocast。以下保持 fp32（与官方一致）：路由打分、mHC 系�
 
 `total = ce + 1e-4 × Σ_layers balance + indexer_kl`。indexer 与主模型梯度不相交，KL 直接相加。不做 MTP。日志三项分开打印。
 
-### 9.2 优化器（V4.1 §2.5、§4.2.2；Muon 算法见 V4 Algorithm 1）
+### 9.2 优化器（M §2.5、§4.2.2；Muon 算法见 V4 Algorithm 1）
 
 | 组 | 参数 | 规则 |
 |----|------|------|
 | Muon | 所有线性层权重矩阵：注意力（`wq_a`、`wq_b`、`wkv`、`wo_a`、`wo_b`）、压缩器、indexer（`wq_b`、`weights_proj`、`wk`）、路由器、专家、mHC `fn`、Engram `wkv` | `M = μM + G`；`O′ = HybridNS(μM + G)`；`O = O′·√max(n,m)·0.18`；`W ← W(1−ηλ) − ηO`；μ=0.95，λ=0.1；HybridNS：`M₀ = M/‖M‖_F`，10 轮 `aM + b(MMᵀ)M + c(MMᵀ)²M`，前 8 轮 (3.4445, −4.7750, 2.0315)，后 2 轮 (2, −1.5, 0.5) |
 | AdamW | RMSNorm 权重、`attn_sink`、mHC `base`/`scale`、Engram `q_weight`/`k_weight` | β=(0.9, 0.95)，eps=1e-20；仅 norm 权重 wd=0.1，其余 wd=0 |
-| Sinkhorn 动量 | embedding、head、Engram 表（DSpark 的 Markov 表同理） | V4.1 Algorithm 1：`M = βM + (1−β)G`，`Ĝ = βM + (1−β)G`；`ρ_i ≤ τρ̄` 的行置零（τ=1e-3）；奇数步行 ℓ2 归一化、偶数步列 ℓ2 归一化，共 K=11 次（分母 +1e-20）；`Δ = √n·U`；`W ← W − γηΔ`，γ=0.18，β=0.95，无 wd；Engram 表 lr ×5 |
+| Sinkhorn 动量 | embedding、head、Engram 表（DSpark 的 Markov 表同理） | M Algorithm 1：`M = βM + (1−β)G`，`Ĝ = βM + (1−β)G`；`ρ_i ≤ τρ̄` 的行置零（τ=1e-3）；奇数步行 ℓ2 归一化、偶数步列 ℓ2 归一化，共 K=11 次（分母 +1e-20）；`Δ = √n·U`；`W ← W − γηΔ`，γ=0.18，β=0.95，无 wd；Engram 表 lr ×5 |
 
 Muon「逻辑独立矩阵」拆分：`wq_b` 按 16 头拆、indexer `wq_b` 按 8 头拆（head-wise Muon；K 为单头无需拆）；每个专家各自独立；`wo_a` 按组拆；Engram `wkv` 拆成 4 个 key + 1 个 value（推断）。同形状矩阵堆叠做批量 Newton–Schulz。学习率调度沿用仓库 warmup + cosine。
 
@@ -247,7 +247,7 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 3. 超出 `max_seq_len`：用最后 `max_seq_len` 个 token 重新预填充。
 4. 对外接口不变：`generate`、`generate_stream`、`generate_stream_debug`；停止机制沿用 `/api/infer/stop`。
 
-### 10.3 多轮前缀缓存（V4.1 部署策略）
+### 10.3 多轮前缀缓存（M 部署策略）
 
 推理引擎保留一个槽位：上一轮的 token、全局 KV、indexer K、压缩器状态、Engram 历史；**不保留滑窗缓存**（对应论文「持久缓存不存 SWA KV」）。新请求 token 前缀完全一致时复用全局 KV，用 Encoder SWA Bounded Replay（只重放前缀最后 128 个 token、只重建滑窗 KV、不覆盖全局 KV）恢复编码器滑窗缓存，再对新增后缀做 CED 预填充；不一致则清空重来。
 
@@ -265,7 +265,7 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 - 输出：最后一个 block 后 `hc_pre` → `norm` → 主干 head（冻结、共享）得到 5 个位置的基础 logits；Markov 头（rank 64：`embed[6400,64]`、`head[6400,64]`）按上一个 token 加转移偏置，逐位采样；置信度头 `Linear(512+64→1)`（fp32），`c_k = σ(w·[h_k; W1[x_{k−1}]])`。
 - 参数约 19M，不计入 200M。
 
-### 11.2 训练（DSpark 论文 §3.3；V4.1 §2.4.3）
+### 11.2 训练（DSpark 论文 §3.3；M §2.4.3）
 
 - 独立阶段（`algo/train_dspark.py`）：预训练后，主干冻结；数据用预训练数据（打包 1024）；主干 no-grad forward 得到目标层隐状态与目标分布；每条序列随机采样多个 anchor（默认 32）组成草稿块；Markov 偏置用真实前一个 token（teacher forcing）。
 - 损失：`0.1·L_ce + 0.9·L_tv + 1.0·L_conf`，位置权重 `w_k = exp(−(k−1)/γ)`；`L_tv = Σ w_k‖p_d − p_t‖₁`；`L_conf` 为 BCE，目标 `c*_k = 1 − ½‖p_d − p_t‖₁`（detach）。
@@ -284,17 +284,17 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 
 ### 12.1 接入
 
-- 删除 `algo/model/moe.py`（M0.1）及 `arch="moe"` 预设；新增 `arch="v41"`；Dense / Tiny 不动。
-- checkpoint：`{"model", "config"(含 arch="v41"), ...}`，加载按 `config.arch` 派发；DSpark 单独存 `dspark.pt`。
-- `train_pretrain.py` / `train_sft.py`：`--arch v41`；损失组合；优化器工厂；bias 按 step 累计更新；打包对齐 + `doc_ids`；SFT 回答起点；新增开关 `--candidate-pool`、`--bounded-replay`、`--act-ckpt`；`--flash-attn` 对 v41 无效。
+- 删除 `algo/model/moe.py`（M0.1）及 `arch="moe"` 预设；新增 `arch="miniseek-m"`；Dense / Tiny 不动。
+- checkpoint：`{"model", "config"(含 arch="miniseek-m"), ...}`，加载按 `config.arch` 派发；DSpark 单独存 `dspark.pt`。
+- `train_pretrain.py` / `train_sft.py`：`--arch miniseek-m`；损失组合；优化器工厂；bias 按 step 累计更新；打包对齐 + `doc_ids`；SFT 回答起点；新增开关 `--candidate-pool`、`--bounded-replay`、`--act-ckpt`；`--flash-attn` 对 v41 无效。
 - `generate.py`、`api/app.py`：v41 加载、带缓存生成、前缀缓存、有草稿头时可开投机解码。
 - `algo/eval/`（`valid_ppl`、`miniseek_lm` 等）：适配 `(logits, ce, extras)` 返回值。
-- Web UI：训练表单架构选项 Tiny / Dense / V4.1（F0.1）；架构页新增 `v41` 可训练预设，沿用自下而上括号图，画出 CED 分区、逐层模式（SWA / Full / Reuse / Reindex）、mHC 4 流、Engram（L1、L3）与 KV 流转（L2→L3；编码器输出→L4→L5–7；L4 候选池→L6；L6 top-k→L7）；专家负载页适配 64 专家 top-6。
+- Web UI：训练表单架构选项 Tiny / Dense / M（M0.1）；架构页新增 `v41` 可训练预设，沿用自下而上括号图，画出 CED 分区、逐层模式（SWA / Full / Reuse / Reindex）、mHC 4 流、Engram（L1、L3）与 KV 流转（L2→L3；编码器输出→L4→L5–7；L4 候选池→L6；L6 top-k→L7）；专家负载页适配 64 专家 top-6。
 - 文档：`docs/STAGE_PLAN.md`、`README.md`、`README_en.md`、`AGENTS.md`（改正「sigmoid 选专家」为 sqrt(softplus)；更新架构状态与绘图规则；训练默认 1024、Muon 等）。
 
 ### 12.2 测试（CPU 可跑；用小尺寸配置）
 
-在 `tests/v41_ref/` 把官方函数的语义移植成纯 torch 参考实现（注明来源与 MIT 许可），逐元素对拍：
+在 `tests/miniseek_m_ref/` 把官方函数的语义移植成纯 torch 参考实现（注明来源与 MIT 许可），逐元素对拍：
 
 | 对象 | 断言 |
 |------|------|
@@ -309,7 +309,7 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 | 打包 | 文档段都从偶数位置开始；`doc_ids` 掩码正确 |
 | 推理 | P ≤ 128 时缓存生成与全量 forward 逐 token 一致；P > 128 时与带重放掩码的训练 forward 一致；环形缓存绕回正确；m=2 跨组正确；前缀缓存命中不重算全局 KV |
 | DSpark | 草稿块注意力索引与官方一致；损失数学；温度 0 时投机解码输出与普通贪心完全一致；拒绝后缓存与普通解码一致 |
-| 规模 | F0.1 主干 + Engram 的 `numel()` ≤ 200M（meta device 构建） |
+| 规模 | M0.1 主干 + Engram 的 `numel()` ≤ 200M（meta device 构建） |
 
 ### 12.3 实施阶段（每阶段测试通过后提交）
 
@@ -335,6 +335,6 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 ## 14. 验收
 
 1. §12.2 全部单测在 CPU 上通过。
-2. F0.1 `numel()`（主干 + Engram）≤ 200M，启动时打印。
+2. M0.1 `numel()`（主干 + Engram）≤ 200M，启动时打印。
 3. 3090 冒烟预训练（1024 × 8，几百步）不 OOM，三项损失与 tokens/s 正常输出，loss 下降。
 4. 贪心解码：缓存生成 = 全量生成（P ≤ 128）；投机解码 = 普通解码。

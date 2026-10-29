@@ -106,7 +106,7 @@ expert_load={"step":1234,"window_steps":10,"n_routed":32,"top_k":2,"n_layers":8,
 ## Testing smoke
 
 1. **单元**：`begin_expert_usage` → 若干 `forward` → `end_expert_usage`，`sum(counts) == n_layers * B * T * top_k`（与现有 `test_probe_expert_load_counts_sum` 同口径）；可选断言一行 `expert_load=` JSON 可被 `json.loads` 且长度 32。
-2. **训练烟测**：`python train_pretrain.py --arch moe --max-steps 2 --log-every 1 ...`，stdout 在 step 行后出现 `expert_load={`，且 `len(fractions)==32`。
+2. **训练烟测**：`python train_pretrain.py --arch miniseek-moe --max-steps 2 --log-every 1 ...`，stdout 在 step 行后出现 `expert_load={`，且 `len(fractions)==32`。
 3. **Dense 烟测**：`--arch dense --max-steps 2`，stdout **无** `expert_load=`。
 4. **UI**：启动/重启 `web_ui.py`，训练页 MoE 跑烟测或 attach 带新日志的进程，Loss 下柱图随 log 更新；切 Dense 表单时实时块隐藏；「专家负载」页探针仍可用。
 5. **回归**：现有 MoE/step 日志的 loss SSE 解析不被 `expert_load` 行打断（STEP_RE 仍只匹配 step 行）。

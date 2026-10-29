@@ -1,8 +1,8 @@
 import torch
 
-from algo.model.v41.config import FlashConfig
-from algo.model.v41.moe import Gate, MoE, sequence_balance_loss
-from tests.v41_ref import official as ref
+from algo.model.miniseek_m.config import FlashConfig
+from algo.model.miniseek_m.moe import Gate, MoE, sequence_balance_loss
+from tests.miniseek_m_ref import official as ref
 
 
 def _moe(seed=0):

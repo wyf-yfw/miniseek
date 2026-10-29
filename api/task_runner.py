@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 from api import tasks_store as ts
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# 可训练架构：Dense（D0.1）/ Tiny（冒烟）/ v41（MiniSeek-F0.1，DeepSeek-V4.1-Flash 全架构）
-TRAIN_ARCHS = frozenset({"dense", "tiny", "v41"})
+# 可训练架构：D（DenseLM）/ Tiny / M（MiniSeek-M0.1，DeepSeek-M 全架构）；v41 为旧名
+TRAIN_ARCHS = frozenset({"dense", "tiny", "miniseek-m", "m", "v41"})
 
 STEP_RE = re.compile(
     r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?(?:\s+kl=[0-9.eE+-]+)?"
@@ -145,8 +145,8 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         raise ValueError(f"未知训练模式: {mode}")
     if arch not in TRAIN_ARCHS:
         raise ValueError(f"未知架构: {arch}")
-    # v41：MoE 分发与稀疏索引在 torch.compile 下会 graph-break，默认不编译
-    if arch == "v41":
+    # M：MoE 分发与稀疏索引在 torch.compile 下会 graph-break，默认不编译
+    if arch in ("miniseek-m", "m", "v41"):
         hp.setdefault("compile", False)
     # Tiny defaults for smoke-friendly CPU runs
     if arch == "tiny":
@@ -203,7 +203,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
 
     # arch / aux_coef apply to both pretrain and SFT
     cmd.extend(["--arch", arch, "--aux-coef", str(float(_hp(hp, "aux_coef", 0.0001)))])
-    if arch == "v41":
+    if arch in ("miniseek-m", "m", "v41"):
         # 后训练开关：SFT 默认开候选池与 Decoder Bounded Replay 模拟，预训练默认关
         for key, flag in (("candidate_pool", "candidate-pool"), ("bounded_replay", "bounded-replay"), ("act_ckpt", "act-ckpt")):
             if key == "bounded_replay" and mode != "sft":

@@ -3,8 +3,8 @@
 架构线：
 - dense → MiniSeek-D*（稠密 Decoder-only）
 - tiny  → MiniSeek-D 冒烟档（同 DenseLM，极小超参）
-- v41   → MiniSeek-F*（DeepSeek-V4.1-Flash 全架构），配置见 model/v41/config.py 的 FlashConfig
-版本号写在 model_family / model_version（如 D0.1）。旧的 M0.1 MoE 已移除。
+- m     → MiniSeek-M*（DeepSeek-M 全架构），配置见 model/miniseek_m/config.py 的 FlashConfig
+版本号写在 model_family / model_version（如 D0.1 / M0.1）。旧的独立 MoELM 已移除。
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class ModelConfig:
     num_experts_per_tok: int = 3
     # 1+64 专家把中间维收到 256。总参约 216.4M，比 h=512 的 1+32 略小。
     moe_intermediate_size: int = 256
-    # V4.1 MoE：SwiGLU clamp 阈值；bias 每步按负载更新的步长。不计入可训练参数。
+    # DeepSeek-M MoE：SwiGLU clamp 阈值；bias 每步按负载更新的步长。不计入可训练参数。
     swiglu_clamp: float = 10.0
     expert_bias_speed: float = 0.001
 

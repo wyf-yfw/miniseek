@@ -188,7 +188,7 @@ model = build_model(cfg).to(device)
 # If MoE training needs aux_coef, pass into train loop the same way existing MoE code expects (match wyf/main if present).
 ```
 
-If MoE train loop is not on this branch yet, keep `moe` choice but raise a clear error until MoE train path exists — or port the MoE branch from the machine that already trains MoE. Do not silently ignore `--arch moe`.
+If MoE train loop is not on this branch yet, keep `moe` choice but raise a clear error until MoE train path exists — or port the MoE branch from the machine that already trains MoE. Do not silently ignore `--arch miniseek-moe`.
 
 - [ ] **Step 3: CPU smoke 2 steps**
 
@@ -674,6 +674,6 @@ git commit -m "chore: ignore tasks/; add tiny task smoke script"
 
 ## Self-review notes
 
-- No TBD left for required behavior; MoE train path on this branch may need porting when `--arch moe` is selected — Task 2 calls that out explicitly.
+- No TBD left for required behavior; MoE train path on this branch may need porting when `--arch miniseek-moe` is selected — Task 2 calls that out explicitly.
 - Names aligned: `create_task`, `start_task`, `reconcile_task`, `ModelConfig.tiny()`.
 - UI SSE may temporarily poll metrics if extracting SSE is large; still must show loss for the selected task.

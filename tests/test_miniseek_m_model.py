@@ -2,8 +2,8 @@ import torch
 
 from algo.model import ModelConfig, build_model, config_from_dict
 from algo.model.dense import DenseLM
-from algo.model.v41 import FlashConfig, Transformer, bounded_replay_floor
-from algo.model.v41.mhc import hc_pre
+from algo.model.miniseek_m import FlashConfig, Transformer, bounded_replay_floor
+from algo.model.miniseek_m.mhc import hc_pre
 
 
 def _model(cfg=None, seed=0):
@@ -128,7 +128,7 @@ def test_f01_param_budget():
     with torch.device("meta"):
         model = Transformer(FlashConfig())
     n = model.num_params()
-    print(f"MiniSeek-F0.1 params = {n:,}")
+    print(f"MiniSeek-M0.1 params = {n:,}")
     assert n <= 200_000_000
 
 

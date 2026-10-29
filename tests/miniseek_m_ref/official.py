@@ -1,4 +1,4 @@
-"""DeepSeek-V4.1-Flash 官方 inference 代码的纯 torch / numpy 语义移植，仅供对拍测试。
+"""DeepSeek-M 官方 inference 代码的纯 torch / numpy 语义移植，仅供对拍测试。
 
 来源：https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/tree/main/inference
 （model.py / kernel.py / engram.py；MIT License, Copyright (c) 2023 DeepSeek）。

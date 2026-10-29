@@ -33,7 +33,7 @@ from algo.model.attn_backend import configure_attn_backend
 from algo.model.config import ModelConfig
 from algo.model.dense import DenseLM
 from algo.model.tokenizer import load_tokenizer
-from algo.model.v41.cache import PrefixCache
+from algo.model.miniseek_m.cache import PrefixCache
 from api import tasks_store as ts
 from api import bench_store as bs
 from api import clean_store as cs
@@ -316,7 +316,7 @@ class InferenceEngine:
             blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         model, cfg = load_model_from_blob(blob)
         configure_attn_backend(bool(getattr(cfg, "use_flash_attn", True)))
-        # v41：多轮对话复用上一轮的全局 KV（单槽前缀缓存）；换权重时清空
+        # M：多轮对话复用上一轮的全局 KV（单槽前缀缓存）；换权重时清空
         self.prefix_cache = PrefixCache() if getattr(model, "supports_prefix_cache", False) else None
         device = torch.device("cpu")
         if torch.cuda.is_available():
@@ -349,13 +349,13 @@ class InferenceEngine:
         return f"已加载 {Path(ckpt_path).name} (Step: {step}, Loss: {loss}, {where}){dspark_note}"
 
     def _load_sibling_drafter(self, path: Path, cfg, device: torch.device) -> str:
-        """v41：checkpoint 同目录有 dspark.pt 时加载草稿头，对话/续写走 DSpark 投机解码。"""
+        """M：checkpoint 同目录有 dspark.pt 时加载草稿头，对话/续写走 DSpark 投机解码。"""
         self.drafter, self.sps = None, None
         dpath = path.with_name("dspark.pt") if path.is_file() else None
         if dpath is None or not dpath.exists() or not getattr(self.model, "supports_prefix_cache", False):
             return ""
         try:
-            from algo.model.v41.dspark import measure_sps
+            from algo.model.miniseek_m.dspark import measure_sps
             from algo.train_dspark import load_drafter
 
             dblob = torch.load(dpath, map_location="cpu", weights_only=False)
@@ -428,7 +428,7 @@ class InferenceEngine:
 
         cfg = getattr(self.model, "cfg", None)
         arch = getattr(cfg, "arch", "dense") if cfg is not None else "dense"
-        use_moe = arch == "v41" or bool(getattr(cfg, "use_moe", False))
+        use_moe = arch in ("miniseek-m", "m", "v41") or bool(getattr(cfg, "use_moe", False))  # m=MiniSeek-M
         if not use_moe:
             return {
                 "arch": "dense",
@@ -909,7 +909,7 @@ class ArchInspectRequest(BaseModel):
 
 
 class ArchDesignRequest(BaseModel):
-    arch: str = "dense"  # tiny | dense | v41 | v41-flash (reference)
+    arch: str = "dense"  # tiny | dense | m | m-ref (reference; v41 alias ok)
 
 
 class BenchCreate(BaseModel):
@@ -1217,8 +1217,38 @@ def defaults() -> dict:
             "resume": "",
             "aux_coef": 0.0001,
         },
+        "miniseek-m": {
+            "arch": "miniseek-m",
+            "mode": "pretrain",
+            "data_path": DEFAULT_PRETRAIN_DATA,
+            "batch_size": 8,
+            "max_seq_len": 1024,
+            "lr": 3e-4,
+            "min_lr": 3e-5,
+            "warmup_steps": 200,
+            "epochs": 1,
+            "max_steps": 0,
+            "grad_clip": 1.0,
+            "save_loss_thresholds": "",
+            "stable_steps": 50,
+            "save_every": 0,
+            "log_every": 1,
+            "batch_mode": "pack",
+            "compile": False,
+            "fused_adamw": True,
+            "flash_attn": False,
+            "plot_every": 500,
+            "valid_every": 500,
+            "valid_max_samples": 512,
+            "valid_ratio": 0.01,
+            "valid_seed": 42,
+            "init_ckpt": "",
+            "resume": "",
+            "aux_coef": 0.0001,
+        },
+        # 旧 UI / 脚本别名
         "v41": {
-            "arch": "v41",
+            "arch": "miniseek-m",
             "mode": "pretrain",
             "data_path": DEFAULT_PRETRAIN_DATA,
             "batch_size": 8,
@@ -1294,8 +1324,8 @@ def defaults() -> dict:
             "resume": "",
             "aux_coef": 0.0001,
         },
-        "pretrain_v41": {
-            "arch": "v41",
+        "pretrain_miniseek_m": {
+            "arch": "miniseek-m",
             "data_path": DEFAULT_PRETRAIN_DATA,
             "out_dir": DEFAULT_V41_OUT,
             "batch_size": 8,

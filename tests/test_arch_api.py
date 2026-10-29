@@ -52,7 +52,7 @@ def test_arch_inspect_tiny(tmp_path: Path):
 
 def test_arch_design_v41_flash():
     client = TestClient(app)
-    r = client.get("/api/arch/design", params={"arch": "v41-flash"})
+    r = client.get("/api/arch/design", params={"arch": "m-ref"})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["meta"]["source"] == "reference"

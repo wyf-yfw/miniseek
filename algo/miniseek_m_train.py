@@ -1,4 +1,4 @@
-"""v41（MiniSeek-F）训练接入：train_pretrain / train_sft 共用。
+"""v41（MiniSeek-M）训练接入：train_pretrain / train_sft 共用。
 
 - 构建：FlashConfig + tokenizer 压缩表（Engram）+ Transformer
 - 组批：打包时文档对齐到压缩比的公倍数，并带逐 token 文档编号
@@ -15,12 +15,12 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 
 from algo.model import build_model
-from algo.model.v41 import FlashConfig, bounded_replay_floor
-from algo.model.v41.engram import build_compressed_token_map
-from algo.optim import build_v41_optimizer
+from algo.model.miniseek_m import FlashConfig, bounded_replay_floor
+from algo.model.miniseek_m.engram import build_compressed_token_map
+from algo.optim import build_miniseek_m_optimizer
 
-V41_DEFAULT_LR = 3e-4
-V41_DEFAULT_SEQ_LEN = 1024
+MM_DEFAULT_LR = 3e-4
+MM_DEFAULT_SEQ_LEN = 1024
 
 
 def unwrap(model: torch.nn.Module) -> torch.nn.Module:
@@ -42,10 +42,10 @@ def state_for_ckpt(model: torch.nn.Module) -> Dict[str, torch.Tensor]:
     return out
 
 
-def build_v41(tok, vocab: int, pad_id: int, max_seq_len: int, device: torch.device):
-    """F0.1；环境变量 MINISEEK_V41_PRESET=tiny 时换成同层模式的极小宽度（仅冒烟测试用）。"""
+def build_miniseek_m(tok, vocab: int, pad_id: int, max_seq_len: int, device: torch.device):
+    """M0.1；环境变量 MINISEEK_M_PRESET=tiny 时换成同层模式的极小宽度（仅冒烟测试用）。"""
     token_map, compressed = build_compressed_token_map(tok)
-    preset = (os.environ.get("MINISEEK_V41_PRESET") or "").strip().lower()
+    preset = (os.environ.get("MINISEEK_M_PRESET") or "").strip().lower()
     base = (FlashConfig.tiny() if preset == "tiny" else FlashConfig()).to_dict()
     base.update(
         vocab_size=int(vocab),
@@ -111,7 +111,7 @@ def forward_loss(
 
 
 def build_optimizer(model: torch.nn.Module, lr: float, *, fused: bool):
-    return build_v41_optimizer(model, lr=lr, fused_adamw=fused)
+    return build_miniseek_m_optimizer(model, lr=lr, fused_adamw=fused)
 
 
 def log_line(epoch: int, step: int, loss: float, ce: torch.Tensor, extras: Dict[str, torch.Tensor], lr: float) -> str:

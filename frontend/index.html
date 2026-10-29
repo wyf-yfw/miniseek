@@ -712,7 +712,7 @@
       font-weight: 500;
     }
 
-    /* DeepSeek-V4.1-Flash Fig.3: bottom-up stacks, right-side repeats, wires on the blocks */
+    /* DeepSeek-M Fig.3: bottom-up stacks, right-side repeats, wires on the blocks */
     .fig3-wrap {
       width: 100%;
       max-width: 1080px;
@@ -1203,7 +1203,7 @@
   <header>
     <div>
       <h1>MiniSeek</h1>
-      <p>Task 驱动训练 · Tiny / Dense / V4.1（MiniSeek-F）</p>
+      <p>Task 驱动训练 · Tiny / D / MiniSeek-M</p>
     </div>
     <div class="hdr-right">
       <div class="live">
@@ -1248,12 +1248,12 @@
                 <button type="button" id="mode-sft" data-mode="sft">SFT</button>
               </div>
               <div class="mode-row" id="arch-row">
-                <button type="button" id="arch-dense" class="active" data-arch="dense">Dense</button>
-                <button type="button" id="arch-v41" data-arch="v41">V4.1</button>
+                <button type="button" id="arch-dense" class="active" data-arch="dense">D</button>
+                <button type="button" id="arch-miniseek-m" data-arch="miniseek-m">MiniSeek-M</button>
                 <button type="button" id="arch-tiny" data-arch="tiny">Tiny</button>
               </div>
               <p id="mode-hint" class="mode-hint">Pretrain：从零/续训语言模型；数据为每行 text 的 jsonl。</p>
-              <p id="arch-hint" class="mode-hint">Dense：标准 DenseLM；V4.1：MiniSeek-F0.1（DeepSeek-V4.1-Flash 全架构）；Tiny：d=64 L=2 冒烟档。</p>
+              <p id="arch-hint" class="mode-hint">D：标准 DenseLM；MiniSeek-M：MiniSeek-M0.1（DeepSeek-M 全架构）；Tiny：d=64 L=2 冒烟档。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
 
               <div class="param-group" id="group-data">
@@ -1299,8 +1299,8 @@
               </div>
 
               <div class="param-group mode-moe" id="group-moe-only" hidden>
-                <div class="group-title">V4.1 专属</div>
-                <p class="group-desc">仅 arch=V4.1 时写入 train_* --aux-coef；Dense/Tiny 隐藏。SFT 默认开候选池与 Decoder Bounded Replay 模拟。</p>
+                <div class="group-title">M 专属</div>
+                <p class="group-desc">仅 arch=MiniSeek-M 时写入 train_* --aux-coef；D/Tiny 隐藏。SFT 默认开候选池与 Decoder Bounded Replay 模拟。</p>
                 <div class="grid">
                   <label><span class="field-title">Aux Coef</span><span class="field-hint">序列级均衡损失权重，默认 0.0001。专家选择的 bias 另按负载更新。</span><input id="aux-coef" type="number" step="any" /></label>
                 </div>
@@ -1311,7 +1311,7 @@
                 <p class="group-desc">Resume 含优化器；与 SFT 的 Init Ckpt 不同。Compile / Fused / FlashAttention 对 PT 与 SFT 都可用。</p>
                 <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态）。数据会重新打乱；步数预算从起点累加。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
                 <div class="grid">
-                  <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；V4.1 默认关（MoE 分发与稀疏索引会 graph-break）。</span>
+                  <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；MiniSeek-M 默认关（MoE 分发与稀疏索引会 graph-break）。</span>
                     <select id="compile">
                       <option value="true">开（默认）</option>
                       <option value="false">关</option>
@@ -1519,12 +1519,12 @@
           <h2>模型规格</h2>
           <p class="field-hint" style="margin:0 0 10px">按本仓库设计直接出图，无需加载 checkpoint。</p>
           <div class="mode-row" id="arch-preset-row">
-            <button type="button" id="arch-preset-v41" class="active" data-arch-preset="v41">V4.1 (F0.1)</button>
-            <button type="button" id="arch-preset-v41-flash" data-arch-preset="v41-flash">V4.1-Flash</button>
-            <button type="button" id="arch-preset-dense" data-arch-preset="dense">Dense</button>
+            <button type="button" id="arch-preset-miniseek-m" class="active" data-arch-preset="miniseek-m">MiniSeek-M</button>
+            <button type="button" id="arch-preset-m-ref" data-arch-preset="m-ref">DeepSeek-M</button>
+            <button type="button" id="arch-preset-dense" data-arch-preset="dense">D</button>
             <button type="button" id="arch-preset-tiny" data-arch-preset="tiny">Tiny</button>
           </div>
-          <p id="arch-preset-hint" class="mode-hint">V4.1 (F0.1)：MiniSeek-F0.1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版。</p>
+          <p id="arch-preset-hint" class="mode-hint">MiniSeek-M：MiniSeek-M0.1，DeepSeek-M 全架构的可训练小尺寸版。</p>
           <p id="arch-msg" class="arch-msg"></p>
           <div id="arch-summary" class="arch-summary" style="display:none"></div>
         </aside>
@@ -1542,7 +1542,7 @@
           </div>
           <div class="arch-canvas-wrap">
             <div id="arch-canvas" class="arch-canvas">
-              <span class="chat-empty" id="arch-empty">点左侧 Tiny / Dense / V4.1 (F0.1) / V4.1-Flash 查看设计或参考架构。</span>
+              <span class="chat-empty" id="arch-empty">点左侧 Tiny / D / MiniSeek-M / DeepSeek-M 查看设计或参考架构。</span>
             </div>
             <aside id="arch-drawer" class="arch-drawer" hidden>
               <div class="arch-drawer-head">
@@ -1753,7 +1753,7 @@
           <div class="actions">
             <button type="button" id="btn-moe-probe">跑验证探针</button>
           </div>
-          <p id="moe-msg" class="caption">先选 V4.1 checkpoint，再点「跑验证探针」。数据用训练 jsonl，不读独立 valid 文件。训练占 GPU 时会自动用 CPU。</p>
+          <p id="moe-msg" class="caption">先选 MiniSeek-M checkpoint，再点「跑验证探针」。数据用训练 jsonl，不读独立 valid 文件。训练占 GPU 时会自动用 CPU。</p>
         </div>
         <div class="card">
           <h2>调用占比</h2>
@@ -2063,7 +2063,7 @@
       $("mode-pretrain").disabled = !editable;
       $("mode-sft").disabled = !editable;
       $("arch-dense").disabled = !editable;
-      $("arch-v41").disabled = !editable;
+      $("arch-miniseek-m").disabled = !editable;
       $("arch-tiny").disabled = !editable;
       $("btn-save").disabled = !editable && currentTask && currentTask.status !== "draft";
       // name always patchable
@@ -2072,7 +2072,7 @@
 
     function syncParamVisibility() {
       const isSft = trainMode === "sft";
-      const isMoe = trainArch === "v41";
+      const isMoe = trainArch === "miniseek-m";
       const gSft = $("group-sft-only");
       const gPt = $("group-pretrain-only");
       const gMoe = $("group-moe-only");
@@ -2142,12 +2142,12 @@
     function applyArchUI(arch) {
       trainArch = arch;
       $("arch-dense").classList.toggle("active", arch === "dense");
-      $("arch-v41").classList.toggle("active", arch === "v41");
+      $("arch-miniseek-m").classList.toggle("active", arch === "miniseek-m");
       $("arch-tiny").classList.toggle("active", arch === "tiny");
       $("arch-hint").textContent =
         arch === "tiny" ? "Tiny：DenseLM d=64 L=2，CPU 冒烟。"
-        : arch === "v41" ? "V4.1：MiniSeek-F0.1（CED 4+4、SWA/CSA2、Single-Pass mHC、Engram、MoE 1+64 top-6，≈187M；Pretrain/SFT 均可）。"
-        : "Dense：MiniSeek-D DenseLM。";
+        : arch === "miniseek-m" ? "MiniSeek-M：MiniSeek-M0.1（CED 4+4、SWA/CSA2、Single-Pass mHC、Engram、MoE 1+64 top-6，≈187M；Pretrain/SFT 均可）。"
+        : "D：MiniSeek-D DenseLM。";
       syncParamVisibility();
     }
 
@@ -2155,9 +2155,9 @@
       trainMode = mode;
       $("mode-pretrain").classList.toggle("active", mode === "pretrain");
       $("mode-sft").classList.toggle("active", mode === "sft");
-      // V4.1 SFT is supported; keep arch selection when switching mode
+      // M SFT is supported; keep arch selection when switching mode
       if (currentTask && currentTask.status !== "draft") {
-        $("arch-v41").disabled = true;
+        $("arch-miniseek-m").disabled = true;
       }
       syncParamVisibility();
     }
@@ -2828,7 +2828,7 @@
       if (mode === "sft") {
         rows.splice(4, 0, ["init_ckpt", hp.init_ckpt || ""]);
       }
-      if (arch === "v41") {
+      if (arch === "miniseek-m") {
         rows.push(["aux_coef", hp.aux_coef]);
       }
       const dl = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v == null || v === "" ? "-" : v}</dd>`).join("");
@@ -3009,7 +3009,7 @@
       openNewTaskForm({ title: "新建 Task（未保存）" });
     });
 
-    ["arch-dense", "arch-v41", "arch-tiny"].forEach((id) => {
+    ["arch-dense", "arch-miniseek-m", "arch-tiny"].forEach((id) => {
       $(id).addEventListener("click", () => {
         if (currentTask && currentTask.status !== "draft") return;
         const arch = $(id).dataset.arch;
@@ -3832,13 +3832,13 @@
     let archData = null;
     let archSelectedLayer = null;
     let archViewMode = "standard";
-    let archPreset = "v41";
+    let archPreset = "miniseek-m";
 
     const ARCH_PRESET_HINT = {
       tiny: "Tiny：冒烟档 DenseLM，d=64 L=2，适合 CPU。",
-      dense: "Dense：MiniSeek-D0.1，d=512 L=8 FFN=2048。",
-      v41: "V4.1 (F0.1)：MiniSeek-F0.1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版：CED 编码 4 + 解码 4，SWA / CSA2(Full·Reuse·Reindex)，Single-Pass mHC，Engram@L1·L3，MoE 1+64 top-6，主干+Engram ≈187M。",
-      "v41-flash": "V4.1-Flash 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
+      dense: "D：MiniSeek-D0.1，d=512 L=8 FFN=2048。",
+      "miniseek-m": "MiniSeek-M：MiniSeek-M0.1，DeepSeek-M 全架构的可训练小尺寸版：CED 编码 4 + 解码 4，SWA / CSA2(Full·Reuse·Reindex)，Single-Pass mHC，Engram@L1·L3，MoE 1+64 top-6，主干+Engram ≈187M。",
+      "m-ref": "DeepSeek-M 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
     };
 
     function fmtParams(n) {
@@ -3867,13 +3867,13 @@
 
     function archNums() {
       const c = (archData && archData.config) || {};
-      const v41 = c.arch === "v41";
+      const isM = c.arch === "miniseek-m" || c.arch === "m" || c.arch === "v41";
       const theta = c.rope_theta === 1000000 || c.rope_theta === 1e6 ? "1e6" : (c.rope_theta != null ? String(c.rope_theta) : "1e6");
-      const eps = v41
+      const eps = isM
         ? String(c.norm_eps)
         : (c.rms_norm_eps === 1e-5 || c.rms_norm_eps == null ? "1e-5" : String(c.rms_norm_eps));
       const moeMid = c.moe_intermediate_size != null ? c.moe_intermediate_size : c.moe_inter_dim;
-      const isMoe = c.arch === "moe" || !!c.use_moe || v41;
+      const isMoe = c.arch === "moe" || !!c.use_moe || isM;
       return {
         d: c.d_model != null ? c.d_model : c.dim,
         heads: c.n_heads,
@@ -3887,7 +3887,7 @@
         eps,
         theta,
         isMoe,
-        v41,
+        isM,
       };
     }
 
@@ -3895,8 +3895,8 @@
       return (a != null && b != null) ? `[${a}, ${b}]` : "";
     }
 
-    // MiniSeek-F（arch=v41）各算子的作用与公式；数字取自当前 config。
-    function archV41ModuleInfo(id, n, rms) {
+    // MiniSeek-M（arch=m）各算子的作用与公式；数字取自当前 config。
+    function archMModuleInfo(id, n, rms) {
       const c = (archData && archData.config) || {};
       const d = n.d, V = n.vocab, H = c.n_heads, hd = c.head_dim, hc = c.hc_mult;
       const qr = c.q_lora_rank, rd = c.rope_head_dim, og = c.o_groups, orank = c.o_lora_rank, win = c.window_size;
@@ -3930,7 +3930,7 @@
           formula: rms,
         },
         attn: {
-          role: `DeepSeek-V4.1 注意力，同一套算子覆盖 SWA 与 CSA2 的三种模式。Q 走低秩；K 和 V 是同一份 ${hd} 维潜向量，所有头共享；只在最后 ${rd} 维加 RoPE，输出端再反向旋转；softmax 分母多一个每头可学习的 sink；输出先分 ${og} 组做低秩投影再合并。每层都看本层最近 ${win} 个位置的滑窗 KV。SWA 层只有滑窗；Full 层另外看本层压缩出的全局 KV 里 indexer 选中的 top-${itk}；Reuse 层直接复用来源层的全局 KV 和 top-k；Reindex 层复用全局 KV，在候选池里重选 top-k。`,
+          role: `DeepSeek-M 注意力，同一套算子覆盖 SWA 与 CSA2 的三种模式。Q 走低秩；K 和 V 是同一份 ${hd} 维潜向量，所有头共享；只在最后 ${rd} 维加 RoPE，输出端再反向旋转；softmax 分母多一个每头可学习的 sink；输出先分 ${og} 组做低秩投影再合并。每层都看本层最近 ${win} 个位置的滑窗 KV。SWA 层只有滑窗；Full 层另外看本层压缩出的全局 KV 里 indexer 选中的 top-${itk}；Reuse 层直接复用来源层的全局 KV 和 top-k；Reindex 层复用全局 KV，在候选池里重选 top-k。`,
           formula: `c_q = RMSNorm(W_qa · x)，W_qa: ${d}→${qr}\nq = W_qb · c_q，W_qb: ${qr}→${H}×${hd}\nkv = RMSNorm(W_kv · x)，W_kv: ${d}→${hd}（K = V，各头共享）\nq、kv 的后 ${rd} 维加 RoPE\nS_t = 滑窗 ${win} 个位置 ∪ top-k 全局压缩位置\na = softmax([q·k_s / √${hd}]_{s∈S_t} 加上 sink_h)，sink 那一项丢掉\no = Σ_s a_s · v_s，后 ${rd} 维反向 RoPE\nout = W_ob · [W_oa,g · o_g]_{g=1..${og}}\nW_oa,g: ${(H / og) * hd}→${orank}，W_ob: ${og * orank}→${d}`,
         },
         compressor: {
@@ -4001,7 +4001,7 @@
       const nExp = n.nRouted != null ? n.nRouted : "N";
       const k = n.topk != null ? n.topk : "k";
       const rms = `RMSNorm(x) = x * rsqrt(mean(x^2) + ε) * w\nε = ${n.eps}\nw 可学习，形状 [${d}]`;
-      if (n.v41) return archV41ModuleInfo(id, n, rms);
+      if (n.isM) return archMModuleInfo(id, n, rms);
       const gelu = "GELU(z) = 0.5 * z * (1 + erf(z / sqrt(2)))";
       const table = {
         embed: {
@@ -4082,7 +4082,7 @@
       const body = $("arch-drawer-body");
       const parts = (block.parts || []).filter((p) => p.kind !== "add" && !(p.id || "").startsWith("add_"));
       const isLayer = block.kind === "layer" || String(block.id || "").indexOf("layer-") === 0;
-      const layerInfo = isLayer && archNums().v41 ? {
+      const layerInfo = isLayer && archNums().isM ? {
         role: "先做注意力（SWA 或 CSA2），再做 MoE。残差是 Single-Pass mHC：多条残差流先按 pre 合成子层输入，子层输出按 post 写回各流，流之间再按 comb 混合。Engram 层在整个 block 之前先往各条流里写入。",
         formula: "(pre_a, post_a, comb_a) = mHC_attn(X)\nh = Σ_j p_j · X_j        p：上一子层给的 pre（L0 用恒等）\nX_k ← post_a,k · Attn(RMSNorm(h)) + Σ_j comb_a,jk · X_j\n(pre_f, post_f, comb_f) = mHC_ffn(X)\nh = Σ_j pre_a,j · X_j\nX_k ← post_f,k · MoE(RMSNorm(h)) + Σ_j comb_f,jk · X_j\npre_f 留给下一层注意力（最后一层留给输出端合流）",
       } : isLayer ? {
@@ -4396,7 +4396,7 @@
         </defs>${parts.join("")}`;
     }
 
-    // Trainable MiniSeek-F: a Fig.3 node opens the real per-layer / tail blocks instead of guessing by label.
+    // Trainable MiniSeek-M: a Fig.3 node opens the real per-layer / tail blocks instead of guessing by label.
     function fig3OwnBlock(data, nodeId, layersAttr) {
       const all = (data.blocks || []).concat(data.tail || []);
       const byId = (id) => all.find((b) => b.id === id);
@@ -4486,7 +4486,7 @@
         id: nodeId || "fig3-node",
         label: label || nodeId || "Fig.3",
         params: 0,
-        parts: parts.length ? parts : [{ id: "note", label: label || "Fig.3", params: 0, detail: extraDetail || { note: "DeepSeek-V4.1-Flash reference" } }],
+        parts: parts.length ? parts : [{ id: "note", label: label || "Fig.3", params: 0, detail: extraDetail || { note: "DeepSeek-M reference" } }],
       });
     }
 
@@ -4530,7 +4530,7 @@
       const decStack = [dsparkHtml, headHtml, joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
 
       wrap.innerHTML = `
-        <div class="fig3-title">${fig3Esc(fig.title || "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash")}</div>
+        <div class="fig3-title">${fig3Esc(fig.title || "Figure 3 | Overall architecture of DeepSeek-M")}</div>
         <div class="fig3-legend">${legend}</div>
         <div class="fig3-board">
           <div class="fig3-stage">
@@ -4917,10 +4917,10 @@
         paramLine +
         `<div class="field-hint">${srcHint} · 视图=${({compact:"简洁",standard:"标准",detailed:"详细"})[archViewMode] || archViewMode}</div>`;
 
-      // Dedicated Fig.3 schematic for DeepSeek-V4.1-Flash (CED regions + KV arrows).
+      // Dedicated Fig.3 schematic for DeepSeek-M (CED regions + KV arrows).
       if (meta.diagram === "fig3" || data.fig3) {
         renderFig3Arch(data);
-        $("arch-status-text").textContent = meta.trainable ? "已加载 F0.1 架构图（可训练）" : "已加载 Fig.3 参考图";
+        $("arch-status-text").textContent = meta.trainable ? "已加载 MiniSeek-M 架构图（可训练）" : "已加载 Fig.3 参考图";
         $("arch-dot").className = "dot finished";
         closeArchDrawer();
         return;

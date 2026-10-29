@@ -1,12 +1,16 @@
-"""MiniSeek-F 配置。字段名与 DeepSeek-V4.1-Flash 官方 inference/model.py 的 ModelArgs 一致。
+"""MiniSeek-M 配置。字段名与 DeepSeek-M 官方 inference/model.py 的 ModelArgs 一致。
 
-默认值即 MiniSeek-F0.1：8 层（编码 0–3 / 解码 4–7），d=512，1+64 专家 top-6。
+默认值即 MiniSeek-M0.1：8 层（编码 0–3 / 解码 4–7），d=512，1+64 专家 top-6。
+产品线 arch 代号是 miniseek-m；旧 checkpoint / CLI 里的 m、v41 加载时归一成 miniseek-m。
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
 from typing import Any, Dict, Tuple
+
+# 对外 arch="miniseek-m"；m / v41 只作旧名兼容。
+FLASH_ARCHS = frozenset({"miniseek-m", "m", "v41"})
 
 _TUPLE_FIELDS = (
     "compress_ratios",
@@ -17,10 +21,21 @@ _TUPLE_FIELDS = (
 )
 
 
+def is_flash_arch(arch: Any) -> bool:
+    return str(arch or "").strip().lower() in FLASH_ARCHS
+
+
+def normalize_flash_arch(arch: Any) -> str:
+    a = str(arch or "").strip().lower()
+    if a in FLASH_ARCHS:
+        return "miniseek-m"
+    return a
+
+
 @dataclass
 class FlashConfig:
-    arch: str = "v41"
-    model_family: str = "MiniSeek-F"
+    arch: str = "miniseek-m"
+    model_family: str = "MiniSeek-M"
     model_version: str = "0.1"
 
     vocab_size: int = 6400
@@ -97,6 +112,10 @@ class FlashConfig:
     tie_word_embeddings: bool = False
 
     def __post_init__(self) -> None:
+        if self.arch in ("v41", "f", "flash", "m"):
+            self.arch = "miniseek-m"
+        if self.model_family in ("MiniSeek-F",):
+            self.model_family = "MiniSeek-M"
         for name in _TUPLE_FIELDS:
             setattr(self, name, tuple(int(v) for v in getattr(self, name)))
         self._validate()
@@ -163,11 +182,13 @@ class FlashConfig:
 
     @property
     def release_name(self) -> str:
-        return f"MiniSeek-F{self.model_version}"
+        return f"MiniSeek-M{self.model_version}"
 
     # --- 序列化 ---
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
+        d["arch"] = "miniseek-m"
+        d["model_family"] = "MiniSeek-M"
         for name in _TUPLE_FIELDS:
             d[name] = list(d[name])
         return d
@@ -175,11 +196,16 @@ class FlashConfig:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "FlashConfig":
         known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in d.items() if k in known})
+        raw = {k: v for k, v in d.items() if k in known}
+        if raw.get("arch") in ("v41", "f", "flash", "m"):
+            raw["arch"] = "miniseek-m"
+        if raw.get("model_family") in ("MiniSeek-F",):
+            raw["model_family"] = "MiniSeek-M"
+        return cls(**raw)
 
     @classmethod
     def tiny(cls) -> "FlashConfig":
-        """与 F0.1 同样的 8 层模式，只把宽度缩到 CPU 单测可跑。"""
+        """与 M0.1 同样的 8 层模式，只把宽度缩到 CPU 单测可跑。"""
         return cls(
             model_version="0.0-tiny",
             vocab_size=97,

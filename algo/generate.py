@@ -47,7 +47,7 @@ def main() -> None:
 
     if Path(args.ckpt).exists():
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-        # 按 config.arch 建模型：Dense / MoE / v41（MiniSeek-F*）权重都能直接跑
+        # 按 config.arch 建模型：Dense / MoE / v41（MiniSeek-M*）权重都能直接跑
         model, cfg = load_model_from_blob(ckpt)
         configure_attn_backend(bool(getattr(cfg, "use_flash_attn", True)))
         print(f"[generate] loaded {args.ckpt} arch={getattr(cfg, 'arch', 'dense')}")
