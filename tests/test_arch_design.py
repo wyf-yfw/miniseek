@@ -4,8 +4,8 @@ from api.arch_inspect import inspect_design
 
 
 def test_design_miniseek_m_fig3():
-    out = inspect_design("miniseek-m")
-    assert out["config"]["arch"] == "miniseek-m"
+    out = inspect_design("miniseek-v")
+    assert out["config"]["arch"] == "miniseek-v"
     assert out["meta"]["diagram"] == "fig3" and out["meta"]["trainable"] is True
     assert out["total_params"] <= 200_000_000
     fig = out["fig3"]

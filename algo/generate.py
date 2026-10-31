@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""固定 seed 采样生成（仅 MiniSeek-M）。"""
+"""固定 seed 采样生成（仅 MiniSeek-V）。"""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def main() -> None:
         raise SystemExit(f"缺少 checkpoint: {args.ckpt}（main 不再提供随机 Dense 初始化）")
     ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     model, cfg = load_model_from_blob(ckpt)
-    print(f"[generate] loaded {args.ckpt} arch={getattr(cfg, 'arch', 'miniseek-m')}")
+    print(f"[generate] loaded {args.ckpt} arch={getattr(cfg, 'arch', 'miniseek-v')}")
 
     model.to(device).eval()
     ids = tok.encode(args.prompt, add_special_tokens=True)

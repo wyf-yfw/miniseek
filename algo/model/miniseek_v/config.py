@@ -1,7 +1,8 @@
-"""MiniSeek-M 配置。字段名与 DeepSeek-V4.1-Flash 官方 inference/model.py 的 ModelArgs 一致。
+"""MiniSeek-V 配置。字段名与 DeepSeek-V4.1-Flash 官方 inference/model.py 的 ModelArgs 一致。
 
-默认值即 MiniSeek-M0.1：8 层（编码 0–3 / 解码 4–7），d=512，1+64 专家 top-6。
-产品线 arch 代号是 miniseek-m；旧 checkpoint / CLI 里的 m、v41 加载时归一成 miniseek-m。
+默认值即 MiniSeek-V1：8 层（编码 0–3 / 解码 4–7），d=512，1+64 专家 top-6。
+产品线 arch 代号是 miniseek-v；旧 checkpoint / CLI 里的 miniseek-m、m、v41、f、flash
+加载时归一成 miniseek-v。
 """
 
 from __future__ import annotations
@@ -9,8 +10,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, fields
 from typing import Any, Dict, Tuple
 
-# 对外 arch="miniseek-m"；m / v41 只作旧名兼容。
-FLASH_ARCHS = frozenset({"miniseek-m", "m", "v41"})
+# 对外 arch="miniseek-v"；旧名只作加载兼容。
+FLASH_ARCHS = frozenset({"miniseek-v", "miniseek-m", "m", "v41", "f", "flash"})
+_LEGACY_ARCHS = frozenset({"miniseek-m", "m", "v41", "f", "flash"})
+_LEGACY_FAMILIES = frozenset({"MiniSeek-M", "MiniSeek-F"})
 
 _TUPLE_FIELDS = (
     "compress_ratios",
@@ -28,15 +31,22 @@ def is_flash_arch(arch: Any) -> bool:
 def normalize_flash_arch(arch: Any) -> str:
     a = str(arch or "").strip().lower()
     if a in FLASH_ARCHS:
-        return "miniseek-m"
+        return "miniseek-v"
     return a
+
+
+def normalize_model_family(family: Any) -> str:
+    f = str(family or "").strip()
+    if not f or f in _LEGACY_FAMILIES:
+        return "MiniSeek-V"
+    return f
 
 
 @dataclass
 class FlashConfig:
-    arch: str = "miniseek-m"
-    model_family: str = "MiniSeek-M"
-    model_version: str = "0.1"
+    arch: str = "miniseek-v"
+    model_family: str = "MiniSeek-V"
+    model_version: str = "1"
 
     vocab_size: int = 6400
     dim: int = 512
@@ -112,10 +122,12 @@ class FlashConfig:
     tie_word_embeddings: bool = False
 
     def __post_init__(self) -> None:
-        if self.arch in ("v41", "f", "flash", "m"):
-            self.arch = "miniseek-m"
-        if self.model_family in ("MiniSeek-F",):
-            self.model_family = "MiniSeek-M"
+        if str(self.arch or "").strip().lower() in FLASH_ARCHS:
+            self.arch = "miniseek-v"
+        self.model_family = normalize_model_family(self.model_family)
+        if str(self.model_version or "").strip() in ("0.1", "0.1.0"):
+            # 旧全架构 checkpoint（曾标 model_version=0.1）抬到 V1
+            self.model_version = "1"
         for name in _TUPLE_FIELDS:
             setattr(self, name, tuple(int(v) for v in getattr(self, name)))
         self._validate()
@@ -182,13 +194,13 @@ class FlashConfig:
 
     @property
     def release_name(self) -> str:
-        return f"MiniSeek-M{self.model_version}"
+        return f"MiniSeek-V{self.model_version}"
 
     # --- 序列化 ---
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
-        d["arch"] = "miniseek-m"
-        d["model_family"] = "MiniSeek-M"
+        d["arch"] = "miniseek-v"
+        d["model_family"] = "MiniSeek-V"
         for name in _TUPLE_FIELDS:
             d[name] = list(d[name])
         return d
@@ -197,15 +209,18 @@ class FlashConfig:
     def from_dict(cls, d: Dict[str, Any]) -> "FlashConfig":
         known = {f.name for f in fields(cls)}
         raw = {k: v for k, v in d.items() if k in known}
-        if raw.get("arch") in ("v41", "f", "flash", "m"):
-            raw["arch"] = "miniseek-m"
-        if raw.get("model_family") in ("MiniSeek-F",):
-            raw["model_family"] = "MiniSeek-M"
+        arch = str(raw.get("arch") or "").strip().lower()
+        if arch in FLASH_ARCHS:
+            raw["arch"] = "miniseek-v"
+        if raw.get("model_family") in _LEGACY_FAMILIES or not raw.get("model_family"):
+            raw["model_family"] = "MiniSeek-V"
+        if str(raw.get("model_version") or "").strip() in ("0.1", "0.1.0"):
+            raw["model_version"] = "1"
         return cls(**raw)
 
     @classmethod
     def tiny(cls) -> "FlashConfig":
-        """与 M0.1 同样的 8 层模式，只把宽度缩到 CPU 单测可跑。"""
+        """与 V1 同样的 8 层模式，只把宽度缩到 CPU 单测可跑。"""
         return cls(
             model_version="0.0-tiny",
             vocab_size=97,

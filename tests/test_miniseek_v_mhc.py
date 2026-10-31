@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
 
-from algo.model.miniseek_m.mhc import hc_mixes, hc_post, hc_pre, hc_split_sinkhorn, identity_pre_mix
-from tests.miniseek_m_ref import official as ref
+from algo.model.miniseek_v.mhc import hc_mixes, hc_post, hc_pre, hc_split_sinkhorn, identity_pre_mix
+from tests.miniseek_v_ref import official as ref
 
 
 def test_sinkhorn_matches_official():

@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from algo.model import build_model
-from algo.model.miniseek_m import FlashConfig
+from algo.model.miniseek_v import FlashConfig
 from algo.train_pretrain import evaluate_valid
 from api import tasks_store as ts
 from api import task_runner as tr
@@ -66,7 +66,7 @@ def test_parse_valid_line_appends(tasks_root):
 def test_build_train_cmd_includes_valid_flags(tasks_root):
     t = ts.create_task(
         name="valid-cmd",
-        arch="miniseek-m",
+        arch="miniseek-v",
         mode="pretrain",
         hparams={
             "batch_size": 2,
@@ -78,5 +78,5 @@ def test_build_train_cmd_includes_valid_flags(tasks_root):
         },
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
-    assert cmd[cmd.index("--arch") + 1] == "miniseek-m"
+    assert cmd[cmd.index("--arch") + 1] == "miniseek-v"
     assert "--valid-ratio" in cmd

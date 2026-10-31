@@ -40,9 +40,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from algo import miniseek_m_train as mmt
+from algo import miniseek_v_train as mvt
 from algo.batching import LengthBucketBatchSampler, PackedTextBatchIter
-from algo.model.miniseek_m import FlashConfig, step_expert_bias
+from algo.model.miniseek_v import FlashConfig, step_expert_bias
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
 
 
@@ -299,7 +299,7 @@ def build_ckpt(
     loss: Optional[float],
 ) -> Dict[str, Any]:
     return {
-        "model": mmt.state_for_ckpt(model),
+        "model": mvt.state_for_ckpt(model),
         "optimizer": {k: v.cpu() if torch.is_tensor(v) else v for k, v in opt.state_dict().items()},
         "config": cfg.to_dict(),
         "step": global_step,
@@ -377,7 +377,7 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/PT/pretrain_mix_12g_clean.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_pretrain")
-    p.add_argument("--arch", choices=["miniseek-m", "m", "v41"], default="miniseek-m", help="MiniSeek-M architecture")
+    p.add_argument("--arch", choices=["miniseek-v", "miniseek-m", "m", "v41"], default="miniseek-v", help="MiniSeek-V architecture")
     p.add_argument(
         "--aux-coef",
         type=float,
@@ -530,14 +530,14 @@ def main() -> None:
     )
     args = p.parse_args()
     if args.arch in ("m", "v41"):
-        args.arch = "miniseek-m"
+        args.arch = "miniseek-v"
     is_mm = True
     if args.max_seq_len is None:
-        args.max_seq_len = mmt.MM_DEFAULT_SEQ_LEN
+        args.max_seq_len = mvt.MM_DEFAULT_SEQ_LEN
     if args.compile is None:
         args.compile = False
     if args.lr is None:
-        args.lr = mmt.MM_DEFAULT_LR
+        args.lr = mvt.MM_DEFAULT_LR
     if args.min_lr is None:
         args.min_lr = args.lr * 0.1
 
@@ -555,17 +555,19 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 权重保持 fp32；CUDA 上用 autocast，避免整模 .to(bfloat16) 弄坏 RoPE complex buffer
     print(f"[train] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
-    print("[train] flash_attn=n/a（MiniSeek-M 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
+    print("[train] flash_attn=n/a（MiniSeek-V 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
 
     tok = load_tokenizer(args.tokenizer, allow_fallback=True)
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    cfg, model = mmt.build_miniseek_m(tok, vocab, pad_id, args.max_seq_len, device)
-    mmt.unwrap(model).act_ckpt = bool(args.act_ckpt)
-    print(mmt.describe(cfg, model), flush=True)
+    cfg, model = mvt.build_miniseek_v(tok, vocab, pad_id, args.max_seq_len, device)
+    mvt.unwrap(model).act_ckpt = bool(args.act_ckpt)
+    print(mvt.describe(cfg, model), flush=True)
     if args.compile:
-        if device.type != "cuda":
+        if is_mm:
+            print("[train] WARN: MiniSeek-V 包含 MoE 动态路由与 CSA2 稀疏索引算子，PyTorch Inductor 尚不支持其符号循环简化，已自动跳过 torch.compile（以 eager 模式安全运行）")
+        elif device.type != "cuda":
             print("[train] WARN: --compile ignored (需要 CUDA)")
         else:
             try:
@@ -582,7 +584,7 @@ def main() -> None:
     if has_moe:
         _unwrap_model(model).begin_expert_usage()
     # M：样本级 attention mask 需要文档编号；文档对齐到压缩比，保证压缩组不跨文档
-    pack_kw = {"doc_align": mmt.doc_align(cfg), "with_doc_ids": True} if is_mm else {}
+    pack_kw = {"doc_align": mvt.doc_align(cfg), "with_doc_ids": True} if is_mm else {}
 
     if not Path(args.data).exists():
         print(f"[train] WARN: 缺少 {args.data}，使用内置中文占位样本做 smoke")
@@ -767,7 +769,7 @@ def main() -> None:
 
     opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
     if is_mm:
-        opt = mmt.build_optimizer(model, args.lr, fused=bool(args.fused_adamw) and device.type == "cuda")
+        opt = mvt.build_optimizer(model, args.lr, fused=bool(args.fused_adamw) and device.type == "cuda")
         print("[train] optimizer=Muon(矩阵)+AdamW(norm/标量)+Sinkhorn(embedding/head/Engram)", flush=True)
     elif bool(args.fused_adamw) and device.type == "cuda":
         try:
@@ -799,7 +801,7 @@ def main() -> None:
     if args.resume:
         resume_path = Path(args.resume)
         blob = torch.load(resume_path, map_location="cpu", weights_only=False)
-        _unwrap_model(model).load_state_dict(mmt.clean_state_dict(blob["model"]))
+        _unwrap_model(model).load_state_dict(mvt.clean_state_dict(blob["model"]))
         if "optimizer" in blob:
             try:
                 opt.load_state_dict(blob["optimizer"])
@@ -910,7 +912,7 @@ def main() -> None:
         for batch in epoch_iter:
             if _STOP["flag"] or (step_limit is not None and global_step >= step_limit):
                 break
-            input_ids, labels, doc_ids = mmt.unpack_batch(batch, device)
+            input_ids, labels, doc_ids = mvt.unpack_batch(batch, device)
 
             # schedule uses 1-indexed step after increment; set LR for upcoming step
             next_step = global_step + 1
@@ -927,7 +929,7 @@ def main() -> None:
 
             def _step_forward():
                 if is_mm:
-                    return mmt.forward_loss(
+                    return mvt.forward_loss(
                         model,
                         input_ids,
                         labels,
@@ -961,7 +963,7 @@ def main() -> None:
 
             if global_step % args.log_every == 0 or global_step == 1:
                 if is_mm:
-                    print(mmt.log_line(epoch, global_step, last_loss, ce_loss, aux_loss, cur_lr), flush=True)
+                    print(mvt.log_line(epoch, global_step, last_loss, ce_loss, aux_loss, cur_lr), flush=True)
                 elif aux_loss is not None:
                     print(
                         f"epoch={epoch} step={global_step} loss={last_loss:.4f} "

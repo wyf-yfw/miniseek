@@ -80,7 +80,7 @@ def named_trainable(model: nn.Module, skip_prefixes: Tuple[str, ...] = ()) -> It
             yield name, p
 
 
-def build_miniseek_m_optimizer(
+def build_miniseek_v_optimizer(
     model: nn.Module,
     lr: float,
     cfg=None,

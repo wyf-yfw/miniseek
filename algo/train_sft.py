@@ -42,8 +42,8 @@ from algo.batching import (
     PackedSFTBatchIter,
     truncate_keep_head_with_eos,
 )
-from algo import miniseek_m_train as mmt
-from algo.model.miniseek_m import FlashConfig, step_expert_bias
+from algo import miniseek_v_train as mvt
+from algo.model.miniseek_v import FlashConfig, step_expert_bias
 from algo.model.tokenizer import detect_vocab_size, load_tokenizer
 from algo.train_pretrain import (
     _emit_expert_load_line,
@@ -198,7 +198,7 @@ def build_ckpt(
     loss: Optional[float],
 ) -> Dict[str, Any]:
     return {
-        "model": mmt.state_for_ckpt(model),
+        "model": mvt.state_for_ckpt(model),
         "optimizer": {k: v.cpu() if torch.is_tensor(v) else v for k, v in opt.state_dict().items()},
         "config": cfg.to_dict(),
         "step": global_step,
@@ -257,7 +257,7 @@ def main() -> None:
     p.add_argument("--data", type=str, default="data/SFT/sft_miniseek_v5_10g.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_sft")
-    p.add_argument("--arch", choices=["miniseek-m", "m", "v41"], default="miniseek-m", help="MiniSeek-M architecture")
+    p.add_argument("--arch", choices=["miniseek-v", "miniseek-m", "m", "v41"], default="miniseek-v", help="MiniSeek-V architecture")
     p.add_argument(
         "--aux-coef",
         type=float,
@@ -372,7 +372,7 @@ def main() -> None:
     )
     args = p.parse_args()
     if args.arch in ("m", "v41"):
-        args.arch = "miniseek-m"
+        args.arch = "miniseek-v"
     is_mm = True
     if args.compile is None:
         args.compile = False
@@ -386,22 +386,24 @@ def main() -> None:
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[sft] device={device} weights=fp32 autocast={'bf16' if device.type == 'cuda' else 'off'}")
-    print("[sft] flash_attn=n/a（MiniSeek-M 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
+    print("[sft] flash_attn=n/a（MiniSeek-V 用按索引 gather 的稀疏注意力，与官方 sparse_attn 同语义）")
 
     tok = load_tokenizer(args.tokenizer, allow_fallback=True)
     vocab = detect_vocab_size(tok)
     pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
 
-    cfg, model = mmt.build_miniseek_m(tok, vocab, pad_id, args.max_seq_len, device)
-    mmt.unwrap(model).act_ckpt = bool(args.act_ckpt)
-    print(mmt.describe(cfg, model), flush=True)
+    cfg, model = mvt.build_miniseek_v(tok, vocab, pad_id, args.max_seq_len, device)
+    mvt.unwrap(model).act_ckpt = bool(args.act_ckpt)
+    print(mvt.describe(cfg, model), flush=True)
     print(
-        f"[sft] MiniSeek-M post-train: candidate_pool={bool(args.candidate_pool)} "
+        f"[sft] MiniSeek-V post-train: candidate_pool={bool(args.candidate_pool)} "
         f"bounded_replay={bool(args.bounded_replay)}",
         flush=True,
     )
     if args.compile:
-        if device.type != "cuda":
+        if is_mm:
+            print("[sft] WARN: MiniSeek-V 包含 MoE 动态路由与 CSA2 稀疏索引算子，PyTorch Inductor 尚不支持其符号循环简化，已自动跳过 torch.compile（以 eager 模式安全运行）")
+        elif device.type != "cuda":
             print("[sft] WARN: --compile ignored (需要 CUDA)")
         else:
             try:
@@ -417,7 +419,7 @@ def main() -> None:
     expert_window_steps = 0
     if has_moe:
         _unwrap_model(model).begin_expert_usage()
-    pack_kw = {"doc_align": mmt.doc_align(cfg), "with_doc_ids": True} if is_mm else {}
+    pack_kw = {"doc_align": mvt.doc_align(cfg), "with_doc_ids": True} if is_mm else {}
 
     if not Path(args.data).exists():
         raise SystemExit(f"[sft] 缺少数据文件: {args.data}")
@@ -559,7 +561,7 @@ def main() -> None:
 
     opt_kwargs = {"lr": args.lr, "weight_decay": 0.01}
     if is_mm:
-        opt = mmt.build_optimizer(model, args.lr, fused=bool(args.fused_adamw) and device.type == "cuda")
+        opt = mvt.build_optimizer(model, args.lr, fused=bool(args.fused_adamw) and device.type == "cuda")
         print("[sft] optimizer=Muon(矩阵)+AdamW(norm/标量)+Sinkhorn(embedding/head/Engram)", flush=True)
     elif bool(args.fused_adamw) and device.type == "cuda":
         try:
@@ -590,7 +592,7 @@ def main() -> None:
     if args.resume:
         resume_path = Path(args.resume)
         blob = torch.load(resume_path, map_location="cpu", weights_only=False)
-        _unwrap_model(model).load_state_dict(mmt.clean_state_dict(blob["model"]))
+        _unwrap_model(model).load_state_dict(mvt.clean_state_dict(blob["model"]))
         if "optimizer" in blob:
             try:
                 opt.load_state_dict(blob["optimizer"])
@@ -607,7 +609,7 @@ def main() -> None:
     elif args.init_ckpt:
         init_path = Path(args.init_ckpt)
         blob = torch.load(init_path, map_location="cpu", weights_only=False)
-        _unwrap_model(model).load_state_dict(mmt.clean_state_dict(blob["model"]), strict=True)
+        _unwrap_model(model).load_state_dict(mvt.clean_state_dict(blob["model"]), strict=True)
         print(f"[sft] init weights from {init_path} (pretrain step={blob.get('step', '?')})")
 
     total_steps, step_limit = resolve_step_budget(lifetime_base, args.max_steps, plan_steps)
@@ -676,7 +678,7 @@ def main() -> None:
         for batch in epoch_iter:
             if step_limit is not None and global_step >= step_limit:
                 break
-            input_ids, labels, doc_ids = mmt.unpack_batch(batch, device)
+            input_ids, labels, doc_ids = mvt.unpack_batch(batch, device)
 
             next_step = global_step + 1
             cur_lr = lr_at_step(
@@ -692,7 +694,7 @@ def main() -> None:
 
             def _step_forward():
                 if is_mm:
-                    return mmt.forward_loss(
+                    return mvt.forward_loss(
                         model,
                         input_ids,
                         labels,
@@ -728,7 +730,7 @@ def main() -> None:
 
             if global_step % args.log_every == 0 or global_step == 1:
                 if is_mm:
-                    print(mmt.log_line(epoch, global_step, last_loss, ce_loss, aux_loss, cur_lr), flush=True)
+                    print(mvt.log_line(epoch, global_step, last_loss, ce_loss, aux_loss, cur_lr), flush=True)
                 elif aux_loss is not None:
                     print(
                         f"epoch={epoch} step={global_step} loss={last_loss:.4f} "

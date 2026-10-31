@@ -8,11 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from algo.model.miniseek_m.config import FlashConfig
+from algo.model.miniseek_v.config import FlashConfig
 
 _LAYER_RE = re.compile(r"^layers\.(\d+)\.(.+)$")
 
-PRESET_ARCHS = ("miniseek-m", "m-ref")
+PRESET_ARCHS = ("miniseek-v", "m-ref")
 
 # Reference-only aliases（DeepSeek-V4.1-Flash 论文示意；不可训练）。
 _M_REF_ALIASES = frozenset({
@@ -27,10 +27,10 @@ _M_REF_ALIASES = frozenset({
 
 def preset_config(arch: str):
     a = (arch or "").strip().lower()
-    if a in ("miniseek-m", "m", "v41"):
-        return FlashConfig()  # MiniSeek-M0.1
+    if a in ("miniseek-v", "miniseek-m", "m", "v41"):
+        return FlashConfig()  # MiniSeek-V1
     raise ValueError(
-        f"未知架构: {arch}（可选: miniseek-m / m-ref）"
+        f"未知架构: {arch}（可选: miniseek-v / m-ref）"
     )
 
 
@@ -315,15 +315,15 @@ def inspect_design(arch: str) -> Dict[str, Any]:
     return inspect_v41_model(cfg, source="design")
 
 
-# ---------------------------------------------------------------- MiniSeek-M（m，可训练）----
+# ---------------------------------------------------------------- MiniSeek-V（miniseek-v，可训练）----
 
 _MODE_COLORS = {"Full": "#86efac", "Reuse": "#fde047", "Reindex": "#93c5fd", "SWA": "#fda4af"}
 
 
 def _v41_param_counts(cfg: FlashConfig) -> Tuple[Dict[str, Tuple[int, Tuple[int, ...]]], int]:
     """在 meta device 上构建主干与 DSpark，返回 {参数名: (numel, shape)} 与草稿头总参。"""
-    from algo.model.miniseek_m.dspark import DSparkDrafter
-    from algo.model.miniseek_m.model import Transformer
+    from algo.model.miniseek_v.dspark import DSparkDrafter
+    from algo.model.miniseek_v.model import Transformer
 
     with torch.device("meta"):
         model = Transformer(cfg)
@@ -424,7 +424,7 @@ def inspect_v41_model(
     step: Any = None,
     loss: Any = None,
 ) -> Dict[str, Any]:
-    """MiniSeek-M（DeepSeek-V4.1-Flash 全架构的小尺寸版）：Fig.3 风格示意 + 逐层参数。"""
+    """MiniSeek-V（DeepSeek-V4.1-Flash 全架构的小尺寸版）：Fig.3 风格示意 + 逐层参数。"""
     named, dspark_params = _v41_param_counts(cfg)
     d, V, E = cfg.dim, cfg.vocab_size, cfg.n_encoder_layers
     btd, bt = f"[b,t,{d}]", "[b,t]"
@@ -1295,7 +1295,7 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
     if not isinstance(cfg_raw, dict):
         cfg_raw = {}
     arch = cfg_raw.get("arch")
-    if arch in ("miniseek-m", "m", "v41"):
+    if arch in ("miniseek-v", "miniseek-m", "m", "v41"):
         return inspect_v41_model(
             FlashConfig.from_dict(cfg_raw),
             source=str(blob.get("source") or "training"),
@@ -1304,7 +1304,7 @@ def inspect_blob(blob: Dict[str, Any], *, path: str = "") -> Dict[str, Any]:
             loss=blob.get("loss"),
         )
     raise ValueError(
-        f"main 只支持 MiniSeek-M checkpoint（arch=miniseek-m），收到 arch={arch!r}；"
+        f"main 只支持 MiniSeek-V checkpoint（arch=miniseek-v），收到 arch={arch!r}；"
         "Dense / Tiny 见分支 archive/dense-tiny"
     )
 

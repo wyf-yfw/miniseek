@@ -36,7 +36,7 @@ def test_build_cmd_prefers_ratio(tmp_path, monkeypatch):
     monkeypatch.setattr(ts, "TASKS_ROOT", root)
     t = ts.create_task(
         name="ratio-cmd",
-        arch="tiny",
+        arch="miniseek-v",
         mode="pretrain",
         hparams={
             "batch_size": 2,
@@ -60,7 +60,7 @@ def test_build_cmd_ignores_path_when_ratio_zero(tmp_path, monkeypatch):
     monkeypatch.setattr(ts, "TASKS_ROOT", root)
     t = ts.create_task(
         name="path-cmd",
-        arch="tiny",
+        arch="miniseek-v",
         mode="pretrain",
         hparams={
             "valid_path": "data/valid_mix.jsonl",
@@ -81,7 +81,7 @@ def test_build_cmd_sft_uses_ratio(tmp_path, monkeypatch):
     ckpt.write_bytes(b"x")
     t = ts.create_task(
         name="sft-ratio",
-        arch="tiny",
+        arch="miniseek-v",
         mode="sft",
         hparams={
             "valid_path": "data/valid_mix.jsonl",

@@ -65,7 +65,7 @@ def cumulative_ece(logits: torch.Tensor, survive: torch.Tensor, temps: Sequence[
 @torch.no_grad()
 def collect(backbone, drafter, prompts: Sequence[torch.Tensor], *, max_new_tokens: int, temperature: float):
     """每轮验证整块（force_len=γ），收集 (置信度 logit [M,γ], 存活标记 [M,γ])。"""
-    from algo.model.miniseek_m.dspark import speculative_stream
+    from algo.model.miniseek_v.dspark import speculative_stream
 
     G = drafter.cfg.dspark_block_size
     rows_l: List[torch.Tensor] = []

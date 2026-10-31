@@ -8,9 +8,9 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from algo import miniseek_m_train as mmt
-from algo.model.miniseek_m import FlashConfig, Transformer
-from algo.model.miniseek_m.dspark import (
+from algo import miniseek_v_train as mvt
+from algo.model.miniseek_v import FlashConfig, Transformer
+from algo.model.miniseek_v.dspark import (
     DSparkAttention,
     DSparkDrafter,
     dspark_loss_terms,
@@ -18,8 +18,8 @@ from algo.model.miniseek_m.dspark import (
     position_weights,
     sample_anchors,
 )
-from algo.optim import build_miniseek_m_optimizer
-from tests.miniseek_m_ref import official as ref
+from algo.optim import build_miniseek_v_optimizer
+from tests.miniseek_v_ref import official as ref
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -100,13 +100,13 @@ def test_backbone_frozen_and_drafter_trains():
     for n in ("blocks.0.attn.wq_b.weight", "main_proj.weight", "markov_head.embed.weight", "confidence_head.proj.weight", "blocks.2.ffn.experts.0.w1.weight"):
         assert named[n].grad is not None, n
     assert torch.equal(head_before, backbone.head.weight)
-    opt = build_miniseek_m_optimizer(drafter, lr=1e-3, cfg=backbone.cfg)
+    opt = build_miniseek_v_optimizer(drafter, lr=1e-3, cfg=backbone.cfg)
     opt.step()
     assert 0.0 <= float(terms["accept"]) <= 1.0
 
 
 def test_scheduler_early_stop():
-    from algo.model.miniseek_m.dspark import schedule_prefix
+    from algo.model.miniseek_v.dspark import schedule_prefix
 
     sps = {1: 100, 2: 95, 3: 90, 4: 60, 5: 50, 6: 40}
     # Θ: 100 → 1.9·95=180.5 → 2.62·90=235.8 → 2.692·60=161.5（下降即停）
@@ -116,7 +116,7 @@ def test_scheduler_early_stop():
 
 
 def test_acceptance_preserves_target_distribution():
-    from algo.model.miniseek_m.dspark import accept_or_resample
+    from algo.model.miniseek_v.dspark import accept_or_resample
 
     g = torch.Generator().manual_seed(0)
     p_d = torch.tensor([0.6, 0.3, 0.1])
@@ -148,7 +148,7 @@ def test_greedy_spec_equals_greedy_with_rejections():
 
 
 def test_greedy_spec_all_accepted_path(monkeypatch):
-    import algo.model.miniseek_m.dspark as dsp
+    import algo.model.miniseek_v.dspark as dsp
 
     backbone, drafter = _spec_models(4)
     ids = torch.randint(1, 97, (1, 10))
@@ -171,8 +171,8 @@ def test_greedy_spec_all_accepted_path(monkeypatch):
 
 
 def test_snapshot_restore_roundtrip():
-    from algo.model.miniseek_m.cache import InferenceCache, ced_prefill, decode_chunk
-    from algo.model.miniseek_m.dspark import _restore, _snapshot
+    from algo.model.miniseek_v.cache import InferenceCache, ced_prefill, decode_chunk
+    from algo.model.miniseek_v.dspark import _restore, _snapshot
 
     backbone, _ = _spec_models(5)
     cache = InferenceCache.create(backbone, 1)
@@ -204,7 +204,7 @@ def test_sts_calibration_reduces_ece():
 def test_train_dspark_cli_smoke(tmp_path):
     backbone = Transformer(_cfg(vocab_size=6400, max_seq_len=64))
     ckpt = tmp_path / "pt.pt"
-    torch.save({"model": mmt.state_for_ckpt(backbone), "config": backbone.cfg.to_dict(), "step": 1}, ckpt)
+    torch.save({"model": mvt.state_for_ckpt(backbone), "config": backbone.cfg.to_dict(), "step": 1}, ckpt)
     data = tmp_path / "pt.jsonl"
     data.write_text("\n".join(json.dumps({"text": "深度学习是机器学习的分支。" * 4}, ensure_ascii=False) for _ in range(8)), encoding="utf-8")
     env = {**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "PYTHONIOENCODING": "utf-8"}

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from algo.model.miniseek_m import FlashConfig, Transformer
+from algo.model.miniseek_v import FlashConfig, Transformer
 from api.arch_inspect import inspect_blob, inspect_path, load_ckpt_blob
 
 
@@ -24,7 +24,7 @@ def _tiny_blob():
 def test_inspect_miniseek_m_fig3():
     blob = _tiny_blob()
     out = inspect_blob(blob, path="m.pt")
-    assert out["config"]["arch"] == "miniseek-m"
+    assert out["config"]["arch"] == "miniseek-v"
     assert out["meta"]["diagram"] == "fig3"
     assert out["fig3"]["encoder"]["n_layers"] == 4
 
@@ -47,5 +47,5 @@ def test_load_and_inspect_roundtrip(tmp_path: Path):
 
 def test_reject_dense_arch():
     blob = {"config": {"arch": "dense"}, "model": {"x": torch.zeros(1)}}
-    with pytest.raises(ValueError, match="MiniSeek-M"):
+    with pytest.raises(ValueError, match="MiniSeek-V"):
         inspect_blob(blob)

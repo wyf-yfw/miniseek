@@ -19,12 +19,13 @@ from typing import Any, Dict, List, Optional
 from api import tasks_store as ts
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# 可训练架构：仅 MiniSeek-M（arch=miniseek-m；m/v41 为旧名）
-TRAIN_ARCHS = frozenset({"miniseek-m", "m", "v41"})
+# 可训练架构：仅 MiniSeek-V（arch=miniseek-v；m/v41 为旧名）
+TRAIN_ARCHS = frozenset({"miniseek-v", "miniseek-m", "m", "v41"})
+TRAIN_MODES = frozenset({"pretrain", "sft", "dspark"})
 
 STEP_RE = re.compile(
     r"step=(\d+)\s+loss=([0-9.]+)(?:\s+ce=[0-9.]+)?(?:\s+aux=[0-9.]+)?(?:\s+kl=[0-9.eE+-]+)?"
-    r"\s+ppl=([0-9.]+)\s+lr=([0-9.eE+-]+)"
+    r"(?:\s+tv=[0-9.]+)?(?:\s+conf=[0-9.]+)?(?:\s+accept=[0-9.]+)?(?:\s+ppl=([0-9.]+))?\s+lr=([0-9.eE+-]+)"
 )
 RESUME_RE = re.compile(r"resumed from .* (?:lifetime_step|step)=(\d+)")
 VALID_RE = re.compile(
@@ -137,18 +138,94 @@ def validate_sft_init_ckpt(mode: str, hparams: Optional[Dict[str, Any]] = None, 
         raise ValueError(f"SFT Init Ckpt 路径不存在: {init_ckpt}")
 
 
+def validate_dspark_backbone(
+    mode: str,
+    hparams: Optional[Dict[str, Any]] = None,
+    *,
+    require_exists: bool = False,
+) -> None:
+    """DSpark drafter training requires a frozen backbone checkpoint."""
+    mode_l = (mode or "").strip().lower()
+    if mode_l != "dspark":
+        return
+    hp = dict(hparams or {})
+    backbone = str(hp.get("backbone") or "").strip()
+    if not backbone:
+        raise ValueError(
+            "DSpark 必须填写 Backbone Checkpoint（主干模型 .pt）；若无请先完成 Pretrain/SFT"
+        )
+    if require_exists and not Path(backbone).exists():
+        raise ValueError(f"DSpark Backbone Checkpoint 路径不存在: {backbone}")
+
+
 def build_train_cmd(task: Dict[str, Any]) -> List[str]:
     hp = dict(task.get("hparams") or {})
-    arch = (task.get("arch") or "miniseek-m").strip().lower()
-    if arch in ("m", "v41"):
-        arch = "miniseek-m"
+    arch = (task.get("arch") or "miniseek-v").strip().lower()
+    if arch in ("miniseek-m", "m", "v41", "f", "flash"):
+        arch = "miniseek-v"
     mode = (task.get("mode") or "pretrain").strip().lower()
-    if mode not in {"pretrain", "sft"}:
+    if mode not in TRAIN_MODES:
         raise ValueError(f"未知训练模式: {mode}")
     if arch not in TRAIN_ARCHS:
-        raise ValueError(f"未知架构: {arch}（main 仅 miniseek-m）")
-    # MiniSeek-M：MoE 分发与稀疏索引在 torch.compile 下会 graph-break，默认不编译
+        raise ValueError(f"未知架构: {arch}（main 仅 miniseek-v）")
+    # MiniSeek-V：MoE 分发与稀疏索引在 torch.compile 下会 graph-break，默认不编译
     hp.setdefault("compile", False)
+
+    if mode == "dspark":
+        validate_dspark_backbone(mode, hp, require_exists=True)
+        backbone = str(_hp(hp, "backbone", "")).strip()
+        data_path = str(_hp(hp, "data_path", PROJECT_ROOT / "data" / "PT" / "pretrain_mix_12g_clean.jsonl"))
+        out_dir = str(task["out_dir"])
+        cmd = [
+            sys.executable,
+            "-u",
+            "-m",
+            "algo.train_dspark",
+            "--backbone",
+            backbone,
+            "--data",
+            data_path,
+            "--out-dir",
+            out_dir,
+            "--batch-size",
+            str(int(_hp(hp, "batch_size", 8))),
+            "--lr",
+            str(float(_hp(hp, "lr", 3e-4))),
+            "--min-lr",
+            str(float(_hp(hp, "min_lr", 3e-5))),
+            "--warmup-steps",
+            str(int(_hp(hp, "warmup_steps", 100))),
+            "--epochs",
+            str(int(_hp(hp, "epochs", 1))),
+            "--grad-clip",
+            str(float(_hp(hp, "grad_clip", 1.0))),
+            "--log-every",
+            str(max(1, int(_hp(hp, "log_every", 10)))),
+        ]
+        max_steps = _hp(hp, "max_steps", 2000)
+        if max_steps is not None and int(max_steps) > 0:
+            cmd.extend(["--max-steps", str(int(max_steps))])
+        max_seq_len = _hp(hp, "max_seq_len", None)
+        if max_seq_len is not None and int(max_seq_len) > 0:
+            cmd.extend(["--max-seq-len", str(int(max_seq_len))])
+        anchors = _hp(hp, "anchors", 32)
+        if anchors is not None:
+            cmd.extend(["--anchors", str(int(anchors))])
+
+        cal_on = _hp(hp, "calibrate", True)
+        if isinstance(cal_on, str):
+            cal_on = cal_on.strip().lower() not in {"0", "false", "no", "off"}
+        cmd.append("--calibrate" if bool(cal_on) else "--no-calibrate")
+
+        sync_on = _hp(hp, "sync_to_backbone", True)
+        if isinstance(sync_on, str):
+            sync_on = sync_on.strip().lower() not in {"0", "false", "no", "off"}
+        cmd.append("--sync-to-backbone" if bool(sync_on) else "--no-sync-to-backbone")
+
+        resume = str(_hp(hp, "resume", "") or "").strip()
+        if resume and Path(resume).exists():
+            cmd.extend(["--resume", resume])
+        return cmd
 
     module = "algo.train_sft" if mode == "sft" else "algo.train_pretrain"
     _default_data = PROJECT_ROOT / "data" / (
@@ -195,7 +272,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
 
     # arch / aux_coef apply to both pretrain and SFT
     cmd.extend(["--arch", arch, "--aux-coef", str(float(_hp(hp, "aux_coef", 0.0001)))])
-    if arch in ("miniseek-m", "m", "v41"):
+    if arch in ("miniseek-v", "miniseek-m", "m", "v41"):
         # 后训练开关：SFT 默认开候选池与 Decoder Bounded Replay 模拟，预训练默认关
         for key, flag in (("candidate_pool", "candidate-pool"), ("bounded_replay", "bounded-replay"), ("act_ckpt", "act-ckpt")):
             if key == "bounded_replay" and mode != "sft":
@@ -239,7 +316,7 @@ def build_train_cmd(task: Dict[str, Any]) -> List[str]:
         )
 
     # Speed opts (bench-positive): defaults match train_pretrain / train_sft
-    compile_on = _hp(hp, "compile", True)
+    compile_on = _hp(hp, "compile", False)
     if isinstance(compile_on, str):
         compile_on = compile_on.strip().lower() not in {"0", "false", "no", "off"}
     cmd.append("--compile" if bool(compile_on) else "--no-compile")
@@ -536,6 +613,11 @@ def start_task(task_id: str) -> Dict[str, Any]:
         raise RuntimeError(f"task already running: {task_id}")
 
     validate_sft_init_ckpt(
+        str(task.get("mode") or ""),
+        task.get("hparams") or {},
+        require_exists=True,
+    )
+    validate_dspark_backbone(
         str(task.get("mode") or ""),
         task.get("hparams") or {},
         require_exists=True,

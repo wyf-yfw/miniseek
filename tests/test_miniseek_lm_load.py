@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from algo.model.miniseek_m import FlashConfig, Transformer
+from algo.model.miniseek_v import FlashConfig, Transformer
 from algo.eval.miniseek_lm import MiniSeekLM, load_miniseek_blob
 
 

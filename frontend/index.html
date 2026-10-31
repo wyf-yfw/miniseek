@@ -277,6 +277,10 @@
       border-color: #fcd34d;
       background: #fffbeb;
     }
+    .param-group.mode-dspark {
+      border-color: #c084fc;
+      background: #faf5ff;
+    }
     .param-group .grid { margin-top: 0; }
     details { margin-top: 8px; }
     summary { cursor: pointer; color: var(--muted); }
@@ -743,11 +747,12 @@
       border: 1.5px solid #334155;
       border-radius: 16px;
       background: #f8fafc;
-      padding: 12px 12px 14px;
+      padding: 12px 22px 14px 12px;
       display: flex;
       flex-direction: column;
       gap: 8px;
       min-height: 100%;
+      overflow: visible;
     }
     .fig3-region.encoder { grid-area: enc; }
     .fig3-region.decoder { grid-area: dec; }
@@ -773,10 +778,11 @@
     .fig3-bracket-body {
       border: 1.5px dashed #64748b;
       border-radius: 12px;
-      padding: 8px;
+      padding: 8px 18px 8px 8px;
       background: rgba(255,255,255,0.72);
       display: flex;
       flex-direction: column;
+      overflow: visible;
     }
     .fig3-repeat {
       font-weight: 800;
@@ -802,6 +808,52 @@
       font-size: 13px;
       font-weight: 700;
     }
+    /* mHC is the residual around each Attn/MoE pair — one loop is enough; ×N is in the label. */
+    .fig3-mhc-wrap {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 18px;
+      gap: 4px;
+      align-items: stretch;
+      margin: 2px 0;
+    }
+    .fig3-mhc-wrap > .fig3-pair { min-width: 0; }
+    .fig3-mhc-res {
+      position: relative;
+      cursor: pointer;
+      border-radius: 8px;
+    }
+    .fig3-mhc-res::before {
+      content: "";
+      position: absolute;
+      inset: 6px 0 6px 6px;
+      border: 2px solid #0f766e;
+      border-left: 0;
+      border-radius: 0 8px 8px 0;
+      pointer-events: none;
+    }
+    .fig3-mhc-res:hover,
+    .fig3-mhc-res.is-on {
+      background: rgba(15, 118, 110, 0.08);
+      box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.28);
+    }
+    .fig3-mhc-tag {
+      position: absolute;
+      right: -2px;
+      top: 50%;
+      writing-mode: vertical-rl;
+      transform: translate(70%, -50%) rotate(180deg);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      color: #0f766e;
+      background: #f8fafc;
+      padding: 4px 0;
+      line-height: 1;
+      white-space: nowrap;
+      user-select: none;
+      pointer-events: none;
+    }
     .fig3-chip {
       text-align: center;
       border: 1px solid #475569;
@@ -820,6 +872,9 @@
     .fig3-chip[data-clickable="1"]:hover,
     .fig3-node[data-clickable="1"]:hover,
     .fig3-input-chip[data-clickable="1"]:hover { box-shadow: 0 0 0 2px rgba(37,99,235,0.28); }
+    .fig3-chip.is-on,
+    .fig3-node.is-on,
+    .fig3-input-chip.is-on { box-shadow: 0 0 0 2px rgba(37,99,235,0.55); }
     .fig3-chip.swa { background: #fda4af; border-color: #e11d48; }
     .fig3-chip.csa2-full { background: #86efac; border-color: #15803d; }
     .fig3-chip.csa2-reuse { background: #fde047; border-color: #a16207; }
@@ -944,7 +999,7 @@
     }
     .fig3-notes li { margin: 4px 0; }
 
-    /* Own models: same bottom-up bracket drawing as Fig.3, from DenseLM (and legacy M0.1 MoE checkpoints). */
+    /* Own models: same bottom-up bracket drawing as Fig.3, from DenseLM (and legacy MiniSeek-M0.1 MoE checkpoints). */
     .own-stage { width: min(480px, 100%); margin: 0 auto; }
     .fig3-stem.own-stem { color: #334155; }
     .fig3-chip.attn { background: #86efac; border-color: #15803d; }
@@ -1203,7 +1258,7 @@
   <header>
     <div>
       <h1>MiniSeek</h1>
-      <p>Task 驱动训练 · MiniSeek-M</p>
+      <p>Task 驱动训练 · MiniSeek-V</p>
     </div>
     <div class="hdr-right">
       <div class="live">
@@ -1246,12 +1301,13 @@
               <div class="mode-row" id="mode-row">
                 <button type="button" id="mode-pretrain" class="active" data-mode="pretrain">Pretrain</button>
                 <button type="button" id="mode-sft" data-mode="sft">SFT</button>
+                <button type="button" id="mode-dspark" data-mode="dspark">DSpark 草稿头</button>
               </div>
               <div class="mode-row" id="arch-row">
-                <button type="button" id="arch-miniseek-m" class="active" data-arch="miniseek-m">MiniSeek-M</button>
+                <button type="button" id="arch-miniseek-v" class="active" data-arch="miniseek-v">MiniSeek-V</button>
               </div>
               <p id="mode-hint" class="mode-hint">Pretrain：从零/续训语言模型；数据为每行 text 的 jsonl。</p>
-              <p id="arch-hint" class="mode-hint">MiniSeek-M：DeepSeek-V4.1-Flash 全架构（CED / CSA2 / mHC / Engram / MoE）。</p>
+              <p id="arch-hint" class="mode-hint">MiniSeek-V：DeepSeek-V4.1-Flash 全架构（CED / CSA2 / mHC / Engram / MoE）。</p>
               <label><span class="field-title">名称</span><span class="field-hint">侧栏显示名，全局唯一；撞名会拒绝创建/改名。</span><input id="task-name" type="text" /></label>
 
               <div class="param-group" id="group-data">
@@ -1270,6 +1326,27 @@
                 <div class="group-title">SFT 专属</div>
                 <p class="group-desc" id="sft-group-desc">只对 SFT 生效。必须从预训练 .pt 微调（Init Ckpt）；若填了 Resume 则优先断点续训，Init 可空。</p>
                 <label><span class="field-title">Init Ckpt<span class="req-mark" id="init-ckpt-req" title="必填">*</span></span><span class="field-hint" id="init-ckpt-hint">必填：预训练 base 权重 .pt（须与上方架构一致）。填了 Resume 时可空。</span><div class="path-row"><input id="init-ckpt" type="text" placeholder="必填：预训练 .pt" required /><button type="button" class="btn-browse" data-for="init-ckpt">浏览</button></div></label>
+              </div>
+
+              <div class="param-group mode-dspark" id="group-dspark-only" hidden>
+                <div class="group-title">DSpark 专属</div>
+                <p class="group-desc" id="dspark-group-desc">投机解码草稿头训练（主干冻结）。必须指定训练好的主干权重（PT 或 SFT 的 .pt）。</p>
+                <label><span class="field-title">Backbone Ckpt<span class="req-mark" id="dspark-backbone-req" title="必填">*</span></span><span class="field-hint" id="dspark-backbone-hint">必填：已训练好的主干权重 .pt（例如 tasks/.../checkpoints/best.pt）。</span><div class="path-row"><input id="dspark-backbone" type="text" placeholder="必填：主干权重 .pt" /><button type="button" class="btn-browse" data-for="dspark-backbone">浏览</button></div></label>
+                <div class="grid" style="margin-top: 10px;">
+                  <label><span class="field-title">Anchors</span><span class="field-hint">每条序列随机采样的草稿起点数，默认 32。</span><input id="dspark-anchors" type="number" min="1" value="32" /></label>
+                  <label><span class="field-title">STS 自动校准</span><span class="field-hint">训练完成后自动计算并写入投机置信度温度。</span>
+                    <select id="dspark-calibrate">
+                      <option value="true">开（默认）</option>
+                      <option value="false">关</option>
+                    </select>
+                  </label>
+                  <label><span class="field-title">同步到主干目录</span><span class="field-hint">自动将产出的 dspark.pt 复制到主干同级目录，让 Web 对话立即可用。</span>
+                    <select id="dspark-sync">
+                      <option value="true">开（默认）</option>
+                      <option value="false">关</option>
+                    </select>
+                  </label>
+                </div>
               </div>
 
               <div class="param-group" id="group-train">
@@ -1298,7 +1375,7 @@
 
               <div class="param-group mode-moe" id="group-moe-only" hidden>
                 <div class="group-title">M 专属</div>
-                <p class="group-desc">仅 arch=MiniSeek-M 时写入 train_* --aux-coef；D/Tiny 隐藏。SFT 默认开候选池与 Decoder Bounded Replay 模拟。</p>
+                <p class="group-desc">仅 arch=MiniSeek-V 时写入 train_* --aux-coef；D/Tiny 隐藏。SFT 默认开候选池与 Decoder Bounded Replay 模拟。</p>
                 <div class="grid">
                   <label><span class="field-title">Aux Coef</span><span class="field-hint">序列级均衡损失权重，默认 0.0001。专家选择的 bias 另按负载更新。</span><input id="aux-coef" type="number" step="any" /></label>
                 </div>
@@ -1309,10 +1386,10 @@
                 <p class="group-desc">Resume 含优化器；与 SFT 的 Init Ckpt 不同。Compile / Fused / FlashAttention 对 PT 与 SFT 都可用。</p>
                 <label><span class="field-title">Resume</span><span class="field-hint">从已有 checkpoint 断点续训（含优化器状态）。数据会重新打乱；步数预算从起点累加。</span><div class="path-row"><input id="resume" type="text" placeholder="可选 .pt" /><button type="button" class="btn-browse" data-for="resume">浏览</button></div></label>
                 <div class="grid">
-                  <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；MiniSeek-M 默认关（MoE 分发与稀疏索引会 graph-break）。</span>
+                  <label><span class="field-title">Compile</span><span class="field-hint">CUDA 上 torch.compile；MiniSeek-V 默认关（MoE 分发与稀疏索引会 graph-break）。</span>
                     <select id="compile">
-                      <option value="true">开（默认）</option>
-                      <option value="false">关</option>
+                      <option value="false">关（默认）</option>
+                      <option value="true">开</option>
                     </select>
                   </label>
                   <label><span class="field-title">Fused AdamW</span><span class="field-hint">CUDA 融合 AdamW。</span>
@@ -1517,10 +1594,10 @@
           <h2>模型规格</h2>
           <p class="field-hint" style="margin:0 0 10px">按本仓库设计直接出图，无需加载 checkpoint。</p>
           <div class="mode-row" id="arch-preset-row">
-            <button type="button" id="arch-preset-miniseek-m" class="active" data-arch-preset="miniseek-m">MiniSeek-M</button>
+            <button type="button" id="arch-preset-miniseek-v" class="active" data-arch-preset="miniseek-v">MiniSeek-V</button>
             <button type="button" id="arch-preset-m-ref" data-arch-preset="m-ref">DeepSeek-V4.1-Flash</button>
           </div>
-          <p id="arch-preset-hint" class="mode-hint">MiniSeek-M：MiniSeek-M0.1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版。</p>
+          <p id="arch-preset-hint" class="mode-hint">MiniSeek-V：MiniSeek-V1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版。</p>
           <p id="arch-msg" class="arch-msg"></p>
           <div id="arch-summary" class="arch-summary" style="display:none"></div>
         </aside>
@@ -1538,7 +1615,7 @@
           </div>
           <div class="arch-canvas-wrap">
             <div id="arch-canvas" class="arch-canvas">
-              <span class="chat-empty" id="arch-empty">点左侧 MiniSeek-M / DeepSeek-V4.1-Flash 查看设计或参考架构。</span>
+              <span class="chat-empty" id="arch-empty">点左侧 MiniSeek-V / DeepSeek-V4.1-Flash 查看设计或参考架构。</span>
             </div>
             <aside id="arch-drawer" class="arch-drawer" hidden>
               <div class="arch-drawer-head">
@@ -1749,7 +1826,7 @@
           <div class="actions">
             <button type="button" id="btn-moe-probe">跑验证探针</button>
           </div>
-          <p id="moe-msg" class="caption">先选 MiniSeek-M checkpoint，再点「跑验证探针」。数据用训练 jsonl，不读独立 valid 文件。训练占 GPU 时会自动用 CPU。</p>
+          <p id="moe-msg" class="caption">先选 MiniSeek-V checkpoint，再点「跑验证探针」。数据用训练 jsonl，不读独立 valid 文件。训练占 GPU 时会自动用 CPU。</p>
         </div>
         <div class="card">
           <h2>调用占比</h2>
@@ -1790,7 +1867,7 @@
     let selectedId = null;
     let currentTask = null;
     let trainMode = "pretrain";
-    let trainArch = "miniseek-m";
+    let trainArch = "miniseek-v";
     let logLines = [];
     let lossPoints = [];
     let validPoints = [];
@@ -1830,6 +1907,7 @@
       "data-path": { title: "选择训练数据", filetypes: "JSONL|*.jsonl;All|*.*", kind: "file" },
       "resume": { title: "选择 Resume checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
       "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "dspark-backbone": { title: "选择 DSpark 主干 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
       "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
       "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
       "bench-ckpt": { title: "选择评测 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "any" },
@@ -2049,8 +2127,10 @@
        "max-steps","log-every","plot-every","grad-clip","batch-mode","compile","fused-adamw","flash-attn",
        "valid-ratio-pct","valid-seed","valid-every","valid-max-samples",
        "save-loss-thresholds","stable-steps",
-       "save-every","aux-coef","resume","init-ckpt"].forEach((id) => {
-        $(id).disabled = !editable && id !== "task-name";
+       "save-every","aux-coef","resume","init-ckpt",
+       "dspark-backbone","dspark-anchors","dspark-calibrate","dspark-sync"].forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = !editable && id !== "task-name";
       });
       $("task-name").disabled = false;
       document.querySelectorAll("#phase-config .btn-browse").forEach((btn) => {
@@ -2058,7 +2138,8 @@
       });
       $("mode-pretrain").disabled = !editable;
       $("mode-sft").disabled = !editable;
-      $("arch-miniseek-m").disabled = !editable;
+      $("mode-dspark").disabled = !editable;
+      $("arch-miniseek-v").disabled = !editable;
       $("btn-save").disabled = !editable && currentTask && currentTask.status !== "draft";
       // name always patchable
       $("btn-save").disabled = false;
@@ -2066,32 +2147,49 @@
 
     function syncParamVisibility() {
       const isSft = trainMode === "sft";
-      const isMoe = trainArch === "miniseek-m";
+      const isDspark = trainMode === "dspark";
+      const isPt = trainMode === "pretrain";
+      const isMoe = trainArch === "miniseek-v" && !isDspark;
       const gSft = $("group-sft-only");
+      const gDspark = $("group-dspark-only");
       const gPt = $("group-pretrain-only");
       const gMoe = $("group-moe-only");
       if (gSft) gSft.hidden = !isSft;
-      if (gPt) gPt.hidden = isSft;
+      if (gDspark) gDspark.hidden = !isDspark;
+      if (gPt) gPt.hidden = !isPt;
       if (gMoe) gMoe.hidden = !isMoe;
       const modeHint = $("mode-hint");
       if (modeHint) {
-        modeHint.textContent = isSft
-          ? "SFT：对话监督微调；数据为 conversations/messages jsonl。下方只显示 SFT 需要的字段（含 Init Ckpt）。"
-          : "Pretrain：语言模型预训练；数据为每行 text 的 jsonl。下方只显示 Pretrain 需要的字段（含 Batch Mode）。";
+        if (isDspark) {
+          modeHint.textContent = "DSpark：投机解码草稿头训练。主干权重冻结（选择已有的 PT 或 SFT .pt），仅训练 19M 投机草稿头。训完后自动校准 STS 温度并在 Web 对话中开启投机加速。";
+        } else if (isSft) {
+          modeHint.textContent = "SFT：对话监督微调；数据为 conversations/messages jsonl。下方只显示 SFT 需要的字段（含 Init Ckpt）。";
+        } else {
+          modeHint.textContent = "Pretrain：语言模型预训练；数据为每行 text 的 jsonl。下方只显示 Pretrain 需要的字段（含 Batch Mode）。";
+        }
       }
       const dataHint = $("data-path-hint");
       if (dataHint) {
-        dataHint.textContent = isSft
-          ? 'SFT：每行 {"conversations":[{"role","content"},...]}（或 messages）。'
-          : 'Pretrain：每行 {"text": "..."}；可含尾部 <|im_end|>。';
+        if (isDspark) {
+          dataHint.textContent = 'DSpark：文本语料 jsonl，用于拟合主干输出分布与校准 STS（推荐 pretrain_mix 或 SFT 语料）。';
+        } else if (isSft) {
+          dataHint.textContent = 'SFT：每行 {"conversations":[{"role","content"},...]}（或 messages）。';
+        } else {
+          dataHint.textContent = 'Pretrain：每行 {"text": "..."}；可含尾部 <|im_end|>。';
+        }
       }
       const dataDesc = $("data-group-desc");
       if (dataDesc) {
-        dataDesc.textContent = isSft
-          ? "SFT 训练路径自己填，验证从这份数据按比例抽。Init Ckpt 在「SFT 专属」区（无 Resume 时必填）；Resume 在「断点 / 速度」。"
-          : "Pretrain 训练路径自己填，验证从这份数据按比例抽。Batch Mode 在「Pretrain 专属」；Resume 在「断点 / 速度」。";
+        if (isDspark) {
+          dataDesc.textContent = "DSpark 训练语料路径；主干权重在「DSpark 专属」区必须填写。";
+        } else if (isSft) {
+          dataDesc.textContent = "SFT 训练路径自己填，验证从这份数据按比例抽。Init Ckpt 在「SFT 专属」区（无 Resume 时必填）；Resume 在「断点 / 速度」。";
+        } else {
+          dataDesc.textContent = "Pretrain 训练路径自己填，验证从这份数据按比例抽。Batch Mode 在「Pretrain 专属」；Resume 在「断点 / 速度」。";
+        }
       }
       syncInitCkptRequired();
+      syncDsparkBackboneRequired();
     }
 
     function syncInitCkptRequired() {
@@ -2122,6 +2220,19 @@
       }
     }
 
+    function syncDsparkBackboneRequired() {
+      const isDspark = trainMode === "dspark";
+      const req = $("dspark-backbone-req");
+      const inp = $("dspark-backbone");
+      if (req) req.hidden = !isDspark;
+      if (inp) {
+        if (isDspark) inp.setAttribute("required", "required");
+        else inp.removeAttribute("required");
+        const empty = !(inp.value || "").trim();
+        inp.classList.toggle("required-empty", isDspark && empty);
+      }
+    }
+
     function validateSftHparams() {
       if (trainMode !== "sft") return null;
       const resume = ($("resume") && $("resume").value.trim()) || "";
@@ -2133,11 +2244,21 @@
       return null;
     }
 
+    function validateDsparkHparams() {
+      if (trainMode !== "dspark") return null;
+      const backbone = ($("dspark-backbone") && $("dspark-backbone").value.trim()) || "";
+      syncDsparkBackboneRequired();
+      if (!backbone) {
+        return "DSpark 必须填写 Backbone Ckpt（主干模型 .pt）；若无请先完成 Pretrain/SFT";
+      }
+      return null;
+    }
+
     function applyArchUI(arch) {
       trainArch = arch;
-      $("arch-miniseek-m").classList.toggle("active", arch === "miniseek-m");
+      $("arch-miniseek-v").classList.toggle("active", arch === "miniseek-v");
       $("arch-hint").textContent =
-        "MiniSeek-M：MiniSeek-M0.1（CED 4+4、SWA/CSA2、Single-Pass mHC、Engram、MoE 1+64 top-6，≈187M；Pretrain/SFT 均可）。";
+        "MiniSeek-V：MiniSeek-V1（CED 4+4、SWA/CSA2、Single-Pass mHC、Engram、MoE 1+64 top-6，≈187M；Pretrain/SFT 均可）。";
       syncParamVisibility();
     }
 
@@ -2145,9 +2266,10 @@
       trainMode = mode;
       $("mode-pretrain").classList.toggle("active", mode === "pretrain");
       $("mode-sft").classList.toggle("active", mode === "sft");
+      $("mode-dspark").classList.toggle("active", mode === "dspark");
       // M SFT is supported; keep arch selection when switching mode
       if (currentTask && currentTask.status !== "draft") {
-        $("arch-miniseek-m").disabled = true;
+        $("arch-miniseek-v").disabled = true;
       }
       syncParamVisibility();
     }
@@ -2162,6 +2284,24 @@
 
     function modeDefaults(mode, arch) {
       const archBase = Object.assign({}, defaultsMap[arch] || defaultsMap.dense || {});
+      if (mode === "dspark") {
+        const dspark = defaultsMap.dspark || {};
+        return Object.assign({}, archBase, dspark, {
+          mode: "dspark",
+          arch: arch,
+          batch_size: dspark.batch_size != null ? dspark.batch_size : 8,
+          max_seq_len: dspark.max_seq_len != null ? dspark.max_seq_len : 512,
+          max_steps: dspark.max_steps != null ? dspark.max_steps : 2000,
+          lr: dspark.lr != null ? dspark.lr : 3e-4,
+          min_lr: dspark.min_lr != null ? dspark.min_lr : 3e-5,
+          warmup_steps: dspark.warmup_steps != null ? dspark.warmup_steps : 100,
+          anchors: dspark.anchors != null ? dspark.anchors : 32,
+          calibrate: dspark.calibrate !== undefined ? dspark.calibrate : true,
+          sync_to_backbone: dspark.sync_to_backbone !== undefined ? dspark.sync_to_backbone : true,
+          backbone: dspark.backbone || "",
+          data_path: dspark.data_path || archBase.data_path,
+        });
+      }
       if (mode === "sft") {
         const sft = defaultsMap.sft || {};
         return Object.assign({}, archBase, sft, {
@@ -2193,12 +2333,16 @@
       for (const k of ARCH_PRESET_KEYS) {
         if (base[k] !== undefined && base[k] !== null) next[k] = base[k];
       }
-      // Keep user/mode paths: data / valid / resume / init_ckpt
+      // Keep user/mode paths: data / valid / resume / init_ckpt / dspark
       next.data_path = cur.data_path;
       next.valid_ratio = cur.valid_ratio;
       next.valid_seed = cur.valid_seed;
       next.resume = cur.resume;
       next.init_ckpt = cur.init_ckpt;
+      next.backbone = cur.backbone;
+      next.anchors = cur.anchors;
+      next.calibrate = cur.calibrate;
+      next.sync_to_backbone = cur.sync_to_backbone;
       // If SFT and paths empty, fall back to SFT defaults (not pretrain mix)
       if (trainMode === "sft") {
         const sft = defaultsMap.sft || {};
@@ -2208,6 +2352,11 @@
         if (arch !== "tiny" && (cur.batch_size === 32 || cur.batch_size == null)) {
           next.batch_size = 4;
         }
+      }
+      if (trainMode === "dspark") {
+        const dspark = defaultsMap.dspark || {};
+        if (!next.data_path) next.data_path = dspark.data_path || "";
+        if (!next.backbone && dspark.backbone) next.backbone = dspark.backbone;
       }
       next.aux_coef = base.aux_coef != null ? base.aux_coef : (cur.aux_coef != null ? cur.aux_coef : 0.0001);
       fillHparams(next);
@@ -2245,7 +2394,12 @@
       set("aux-coef", hp.aux_coef);
       set("resume", hp.resume || "");
       set("init-ckpt", hp.init_ckpt || "");
+      set("dspark-backbone", hp.backbone || "");
+      set("dspark-anchors", hp.anchors != null ? hp.anchors : 32);
+      if (hp.calibrate !== undefined && hp.calibrate !== null) set("dspark-calibrate", String(!!hp.calibrate));
+      if (hp.sync_to_backbone !== undefined && hp.sync_to_backbone !== null) set("dspark-sync", String(!!hp.sync_to_backbone));
       syncInitCkptRequired();
+      syncDsparkBackboneRequired();
     }
 
     function collectHparams() {
@@ -2262,7 +2416,7 @@
         plot_every: num("plot-every"),
         grad_clip: num("grad-clip"),
         batch_mode: ($("batch-mode") && $("batch-mode").value) || "pack",
-        compile: (($("compile") && $("compile").value) || "true") === "true",
+        compile: (($("compile") && $("compile").value) || "false") === "true",
         fused_adamw: (($("fused-adamw") && $("fused-adamw").value) || "true") === "true",
         flash_attn: (($("flash-attn") && $("flash-attn").value) || "true") === "true",
         valid_ratio: (function () {
@@ -2279,6 +2433,10 @@
         aux_coef: num("aux-coef"),
         resume: $("resume").value.trim(),
         init_ckpt: $("init-ckpt").value.trim(),
+        backbone: ($("dspark-backbone") && $("dspark-backbone").value.trim()) || "",
+        anchors: num("dspark-anchors") || 32,
+        calibrate: (($("dspark-calibrate") && $("dspark-calibrate").value) || "true") === "true",
+        sync_to_backbone: (($("dspark-sync") && $("dspark-sync").value) || "true") === "true",
         arch: trainArch,
         mode: trainMode,
       };
@@ -2818,7 +2976,13 @@
       if (mode === "sft") {
         rows.splice(4, 0, ["init_ckpt", hp.init_ckpt || ""]);
       }
-      if (arch === "miniseek-m") {
+      if (mode === "dspark") {
+        rows.splice(4, 0, ["backbone", hp.backbone || ""]);
+        rows.push(["anchors", hp.anchors != null ? hp.anchors : 32]);
+        rows.push(["calibrate", hp.calibrate !== false]);
+        rows.push(["sync_to_backbone", hp.sync_to_backbone !== false]);
+      }
+      if (arch === "miniseek-v") {
         rows.push(["aux_coef", hp.aux_coef]);
       }
       const dl = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v == null || v === "" ? "-" : v}</dd>`).join("");
@@ -2847,7 +3011,7 @@
     }
 
     function openNewTaskForm(opts = {}) {
-      const arch = opts.arch || trainArch || "miniseek-m";
+      const arch = opts.arch || trainArch || "miniseek-v";
       const mode = opts.mode || "pretrain";
       const base = modeDefaults(mode, arch);
       selectedId = null;
@@ -2893,7 +3057,7 @@
       if (!opts.keepForm || !formDirty) {
         $("task-name").value = t.name || "";
         applyModeUI(t.mode || "pretrain");
-        applyArchUI(t.arch || "miniseek-m");
+        applyArchUI(t.arch || "miniseek-v");
         fillHparams(t.hparams || {});
         formDirty = false;
       }
@@ -2999,7 +3163,7 @@
       openNewTaskForm({ title: "新建 Task（未保存）" });
     });
 
-    ["arch-miniseek-m"].forEach((id) => {
+    ["arch-miniseek-v"].forEach((id) => {
       $(id).addEventListener("click", () => {
         if (currentTask && currentTask.status !== "draft") return;
         const arch = $(id).dataset.arch;
@@ -3020,17 +3184,23 @@
       fillHparams(modeDefaults("sft", trainArch));
       formDirty = true;
     });
+    $("mode-dspark").addEventListener("click", () => {
+      if (currentTask && currentTask.status !== "draft") return;
+      applyModeUI("dspark");
+      fillHparams(modeDefaults("dspark", trainArch));
+      formDirty = true;
+    });
 
-    ["resume", "init-ckpt"].forEach((id) => {
+    ["resume", "init-ckpt", "dspark-backbone"].forEach((id) => {
       const el = $(id);
       if (!el) return;
-      el.addEventListener("input", () => { syncInitCkptRequired(); formDirty = true; });
-      el.addEventListener("change", () => { syncInitCkptRequired(); formDirty = true; });
+      el.addEventListener("input", () => { syncInitCkptRequired(); syncDsparkBackboneRequired(); formDirty = true; });
+      el.addEventListener("change", () => { syncInitCkptRequired(); syncDsparkBackboneRequired(); formDirty = true; });
     });
 
     $("btn-save").addEventListener("click", async () => {
       if (unsavedNew || !selectedId) return;
-      const err = validateSftHparams();
+      const err = validateSftHparams() || validateDsparkHparams();
       if (err) { $("action-msg").textContent = err; return; }
       const body = { name: $("task-name").value.trim() };
       if (currentTask && currentTask.status === "draft") {
@@ -3053,8 +3223,8 @@
     });
 
     $("btn-start").addEventListener("click", async () => {
-      const sftErr = validateSftHparams();
-      if (sftErr) { $("action-msg").textContent = sftErr; return; }
+      const valErr = validateSftHparams() || validateDsparkHparams();
+      if (valErr) { $("action-msg").textContent = valErr; return; }
       if (unsavedNew || !selectedId) {
         const arch = trainArch;
         const mode = trainMode;
@@ -3144,7 +3314,7 @@
 
     $("btn-new-from-run").addEventListener("click", () => {
       if (!currentTask) return;
-      const arch = currentTask.arch || "miniseek-m";
+      const arch = currentTask.arch || "miniseek-v";
       const mode = currentTask.mode || "pretrain";
       openNewTaskForm({
         arch,
@@ -3636,8 +3806,8 @@
     });
     async function boot() {
       defaultsMap = await (await fetch("/api/defaults")).json();
-      trainArch = "miniseek-m";
-      applyArchUI("miniseek-m");
+      trainArch = "miniseek-v";
+      applyArchUI("miniseek-v");
       applyModeUI("pretrain");
       await refreshTasks();
       await refreshCheckpoints();
@@ -3822,10 +3992,10 @@
     let archData = null;
     let archSelectedLayer = null;
     let archViewMode = "standard";
-    let archPreset = "miniseek-m";
+    let archPreset = "miniseek-v";
 
     const ARCH_PRESET_HINT = {
-      "miniseek-m": "MiniSeek-M：MiniSeek-M0.1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版：CED 编码 4 + 解码 4，SWA / CSA2(Full·Reuse·Reindex)，Single-Pass mHC，Engram@L1·L3，MoE 1+64 top-6，主干+Engram ≈187M。",
+      "miniseek-v": "MiniSeek-V：MiniSeek-V1，DeepSeek-V4.1-Flash 全架构的可训练小尺寸版：CED 编码 4 + 解码 4，SWA / CSA2(Full·Reuse·Reindex)，Single-Pass mHC，Engram@L1·L3，MoE 1+64 top-6，主干+Engram ≈187M。",
       "m-ref": "DeepSeek-V4.1-Flash 参考（arXiv:2609.19969）：CED 20+20，CSA2，MoE 1+384 top-6，主干 552B / 激活 8B·16B，Engram 196B。不可训练。",
     };
 
@@ -3855,7 +4025,7 @@
 
     function archNums() {
       const c = (archData && archData.config) || {};
-      const isM = c.arch === "miniseek-m" || c.arch === "m" || c.arch === "v41";
+      const isM = c.arch === "miniseek-v" || c.arch === "miniseek-m" || c.arch === "m" || c.arch === "v41";
       const theta = c.rope_theta === 1000000 || c.rope_theta === 1e6 ? "1e6" : (c.rope_theta != null ? String(c.rope_theta) : "1e6");
       const eps = isM
         ? String(c.norm_eps)
@@ -3883,21 +4053,24 @@
       return (a != null && b != null) ? `[${a}, ${b}]` : "";
     }
 
-    // MiniSeek-M（arch=m）各算子的作用与公式；数字取自当前 config。
-    function archMModuleInfo(id, n, rms) {
+    // MiniSeek-V（arch=miniseek-v）各算子的作用与公式；数字取自当前 config。
+    function archVModuleInfo(id, n, rms) {
       const c = (archData && archData.config) || {};
-      const d = n.d, V = n.vocab, H = c.n_heads, hd = c.head_dim, hc = c.hc_mult;
+      const d = n.d, V = n.vocab, H = c.n_heads, hd = c.head_dim;
+      const hc = c.hc_mult != null ? c.hc_mult : 4;
+      const hcIters = c.hc_sinkhorn_iters != null ? c.hc_sinkhorn_iters : 20;
       const qr = c.q_lora_rank, rd = c.rope_head_dim, og = c.o_groups, orank = c.o_lora_rank, win = c.window_size;
       const ih = c.index_n_heads, ihd = c.index_head_dim, itk = c.index_topk;
       const cb = c.candidate_topk_blocks, cbs = c.candidate_block_size, csl = c.candidate_source_layer;
-      const nR = c.n_routed_experts, k = c.n_activated_experts, inter = c.moe_inter_dim, rs = c.route_scale;
-      const lim = c.swiglu_limit, bs = c.expert_bias_speed, G = c.dspark_block_size;
+      const nR = c.n_routed_experts, k = c.n_activated_experts != null ? c.n_activated_experts : c.num_experts_per_tok;
+      const inter = c.moe_inter_dim != null ? c.moe_inter_dim : c.moe_intermediate_size;
+      const rs = c.route_scale, lim = c.swiglu_limit, bs = c.expert_bias_speed, G = c.dspark_block_size;
       const E = Math.floor((c.n_layers || 0) / 2);
       const layerList = (ids) => (ids || []).map((i) => `L${i}`).join("、");
       const tgt = c.dspark_target_layer_ids || [];
       const hcInfo = (name, fn, preFrom) => ({
         role: `Single-Pass mHC 的系数（${name}子层）。残差不是单路相加，而是 ${hc} 条流：pre 把多条流加权合成子层输入，post 把子层输出写回各条流，comb 是 ${hc}×${hc} 的流间混合矩阵（Sinkhorn 归一成近似双随机）。子层输入用的 pre 由${preFrom}算好，一遍前向即可。`,
-        formula: `x̂ = flatten(X)，形状 [${hc}·${d}]\nm = (W_fn · x̂) · rsqrt(mean(x̂²) + ε)，W_fn: [${(2 + hc) * hc}, ${hc * d}]\npre  = σ(α₁·m_pre + b_pre) + ε\npost = 2·σ(α₂·m_post + b_post)\ncomb = Sinkhorn(α₃·m_comb + b_comb)，行列交替归一 ${c.hc_sinkhorn_iters} 次\nh = Σ_j p_j · X_j（p 来自${preFrom}）\nX_k ← post_k · ${fn}(RMSNorm(h)) + Σ_j comb_jk · X_j`,
+        formula: `x̂ = flatten(X)，形状 [${hc}·${d}]\nm = (W_fn · x̂) · rsqrt(mean(x̂²) + ε)，W_fn: [${(2 + hc) * hc}, ${hc * d}]\npre  = σ(α₁·m_pre + b_pre) + ε\npost = 2·σ(α₂·m_post + b_post)\ncomb = Sinkhorn(α₃·m_comb + b_comb)，行列交替归一 ${hcIters} 次\nh = Σ_j p_j · X_j（p 来自${preFrom}）\nX_k ← post_k · ${fn}(RMSNorm(h)) + Σ_j comb_jk · X_j`,
       });
       const embed = {
         role: `把 token id 查成向量，再复制成 ${hc} 条残差流，作为 mHC 堆栈的输入。不与 LM Head 共享权重；DSpark 草稿头也用这张表。`,
@@ -3907,6 +4080,10 @@
         embed,
         text_emb: embed,
         embedding: embed,
+        mhc: {
+          role: `Single-Pass mHC：整条主干的残差不是单路相加，而是并行的 ${hc} 条流。每个注意力 / MoE 子层都先用上一子层留下的 pre 把多条流加权合成单路输入，算完后再用 post 写回各流、用 comb（${hc}×${hc}，Sinkhorn ${hcIters} 次）做流间混合；一遍前向即可，不必先算完全层再改系数。Embedding 把 token 向量复制成 ${hc} 条流；输出端用最后一层 MoE 的 pre 合流进 LM Head。`,
+          formula: `X 形状 [b, t, ${hc}, ${d}]\n(pre, post, comb) = mHC_*(X)     * ∈ {attn, ffn}\nh = Σ_j p_j · X_j\nX_k ← post_k · SubLayer(RMSNorm(h)) + Σ_j comb_jk · X_j\nSinkhorn(comb) 行列交替归一 ${hcIters} 次`,
+        },
         hc_attn: hcInfo("注意力", "Attn", "上一个子层（L0 用恒等）"),
         hc_ffn: hcInfo("MoE", "MoE", "本层注意力子层"),
         attn_norm: {
@@ -3989,7 +4166,8 @@
       const nExp = n.nRouted != null ? n.nRouted : "N";
       const k = n.topk != null ? n.topk : "k";
       const rms = `RMSNorm(x) = x * rsqrt(mean(x^2) + ε) * w\nε = ${n.eps}\nw 可学习，形状 [${d}]`;
-      if (n.isM) return archMModuleInfo(id, n, rms);
+      const isFig3 = !!(archData && archData.meta && (archData.meta.diagram === "fig3" || archData.meta.source === "reference"));
+      if (n.isM || isFig3) return archVModuleInfo(id, n, rms);
       const gelu = "GELU(z) = 0.5 * z * (1 + erf(z / sqrt(2)))";
       const table = {
         embed: {
@@ -4070,19 +4248,46 @@
       const body = $("arch-drawer-body");
       const parts = (block.parts || []).filter((p) => p.kind !== "add" && !(p.id || "").startsWith("add_"));
       const isLayer = block.kind === "layer" || String(block.id || "").indexOf("layer-") === 0;
-      const layerInfo = isLayer && archNums().isM ? {
-        role: "先做注意力（SWA 或 CSA2），再做 MoE。残差是 Single-Pass mHC：多条残差流先按 pre 合成子层输入，子层输出按 post 写回各流，流之间再按 comb 混合。Engram 层在整个 block 之前先往各条流里写入。",
-        formula: "(pre_a, post_a, comb_a) = mHC_attn(X)\nh = Σ_j p_j · X_j        p：上一子层给的 pre（L0 用恒等）\nX_k ← post_a,k · Attn(RMSNorm(h)) + Σ_j comb_a,jk · X_j\n(pre_f, post_f, comb_f) = mHC_ffn(X)\nh = Σ_j pre_a,j · X_j\nX_k ← post_f,k · MoE(RMSNorm(h)) + Σ_j comb_f,jk · X_j\npre_f 留给下一层注意力（最后一层留给输出端合流）",
-      } : isLayer ? {
-        role: archNums().isMoe
-          ? "先做因果注意力，再做 MoE。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。"
-          : "先做因果注意力，再做 FFN。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。",
-        formula: archNums().isMoe
-          ? "x = x + Attn(RMSNorm(x))\nx = x + MoE(RMSNorm(x))\nMoE(h) = Shared(h) + Σ p_i Expert_i(h)"
-          : "x = x + Attn(RMSNorm(x))\nx = x + FFN(RMSNorm(x))",
-      } : null;
+      const focus = block.focus || null;
+      let layerInfo = null;
+      let overviewTitle = "这一层怎么算";
+      if (focus === "moe") {
+        overviewTitle = "MoE 怎么算";
+        layerInfo = archNums().isM ? {
+          role: "这一层的 FFN 位置是 MoE。mHC 先按注意力子层留下的 pre 合成单路输入，过 pre-MoE RMSNorm，再跑共享专家 + top-k 路由专家；输出按 post / comb 写回多条残差流。",
+          formula: "(pre_f, post_f, comb_f) = mHC_ffn(X)\nh = Σ_j pre_a,j · X_j\ny = MoE(RMSNorm(h))\nX_k ← post_f,k · y + Σ_j comb_f,jk · X_j\nMoE(h) = Shared(h) + Σ p_i Expert_i(h)",
+        } : {
+          role: archNums().isMoe
+            ? "这一层的 FFN 位置是 MoE：共享专家常开，路由专家只算 top-k，两边相加。残差加回去的是进 pre-MoE RMSNorm 之前分出去的那一路。"
+            : "这一层的 FFN。",
+          formula: archNums().isMoe
+            ? "x = x + MoE(RMSNorm(x))\nMoE(h) = Shared(h) + Σ p_i Expert_i(h)"
+            : "x = x + FFN(RMSNorm(x))",
+        };
+      } else if (focus === "attn") {
+        overviewTitle = "注意力怎么算";
+        layerInfo = archNums().isM ? {
+          role: "这一层的注意力子层（SWA 或 CSA2）。mHC 用上一子层的 pre 合成单路输入，过 pre-Attn RMSNorm，再跑注意力；输出按 post / comb 写回多条残差流。CSA2 的 Full / Reuse / Reindex 只改全局 KV 与 indexer 用法，本层滑窗 KV 始终保留。",
+          formula: "(pre_a, post_a, comb_a) = mHC_attn(X)\nh = Σ_j p_j · X_j        p：上一子层给的 pre（L0 用恒等）\ny = Attn(RMSNorm(h))\nX_k ← post_a,k · y + Σ_j comb_a,jk · X_j",
+        } : {
+          role: "这一层的因果注意力。残差加回去的是进 pre-Attn RMSNorm 之前分出去的那一路。",
+          formula: "x = x + Attn(RMSNorm(x))",
+        };
+      } else if (isLayer) {
+        layerInfo = archNums().isM ? {
+          role: "先做注意力（SWA 或 CSA2），再做 MoE。残差是 Single-Pass mHC：多条残差流先按 pre 合成子层输入，子层输出按 post 写回各流，流之间再按 comb 混合。Engram 层在整个 block 之前先往各条流里写入。",
+          formula: "(pre_a, post_a, comb_a) = mHC_attn(X)\nh = Σ_j p_j · X_j        p：上一子层给的 pre（L0 用恒等）\nX_k ← post_a,k · Attn(RMSNorm(h)) + Σ_j comb_a,jk · X_j\n(pre_f, post_f, comb_f) = mHC_ffn(X)\nh = Σ_j pre_a,j · X_j\nX_k ← post_f,k · MoE(RMSNorm(h)) + Σ_j comb_f,jk · X_j\npre_f 留给下一层注意力（最后一层留给输出端合流）",
+        } : {
+          role: archNums().isMoe
+            ? "先做因果注意力，再做 MoE。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。"
+            : "先做因果注意力，再做 FFN。两处都是 Pre-Norm 残差：加回去的 x 是进 RMSNorm 之前分出去的那一路。",
+          formula: archNums().isMoe
+            ? "x = x + Attn(RMSNorm(x))\nx = x + MoE(RMSNorm(x))\nMoE(h) = Shared(h) + Σ p_i Expert_i(h)"
+            : "x = x + Attn(RMSNorm(x))\nx = x + FFN(RMSNorm(x))",
+        };
+      }
       const layerHtml = layerInfo
-        ? `<div class="arch-part"><div class="lbl">这一层怎么算</div>${archExplainHtml(layerInfo)}</div>`
+        ? `<div class="arch-part"><div class="lbl">${overviewTitle}</div>${archExplainHtml(layerInfo)}</div>`
         : "";
       body.innerHTML = `<p class="arch-role">参数 ${fmtParams(block.params)}</p>` + layerHtml +
         parts.map((p) => {
@@ -4255,6 +4460,29 @@
       return chunks.filter(Boolean).join(fig3Arrow());
     }
 
+    function fig3MhcBlock(data) {
+      const c = (data && data.config) || {};
+      const hc = c.hc_mult != null ? c.hc_mult : 4;
+      const iters = c.hc_sinkhorn_iters != null ? c.hc_sinkhorn_iters : 20;
+      let params = 0;
+      (data.blocks || []).forEach((b) => (b.parts || []).forEach((p) => {
+        if (p.id === "hc_attn" || p.id === "hc_ffn" || p.id === "mhc") params += (p.params || 0);
+      }));
+      const parts = [
+        { id: "mhc", label: `Single-Pass mHC · ${hc} 流`, params, detail: { hc_mult: hc, sinkhorn_iters: iters } },
+        { id: "hc_attn", label: "注意力子层系数（每层一份）", params: 0 },
+        { id: "hc_ffn", label: "MoE 子层系数（每层一份）", params: 0 },
+        { id: "hc_merge", label: "输出端合流", params: 0 },
+      ];
+      return {
+        id: "mhc",
+        label: `Single-Pass mHC · ${hc} 条残差流`,
+        params,
+        kind: "module",
+        parts,
+      };
+    }
+
     function fig3LayerText(layers) {
       return layers.length > 1 ? `L${layers[0]}–L${layers[layers.length - 1]}` : `L${layers[0]}`;
     }
@@ -4264,13 +4492,58 @@
       const layers = Array.isArray(r.layers) ? r.layers : [];
       const layerAttr = layers.length ? ` data-layers="${layers.join(",")}"` : "";
       const tag = layers.length && r.type !== "moe" ? `<span class="fig3-ltag">${fig3LayerText(layers)}</span>` : "";
-      return `<div class="fig3-chip ${fig3ChipClass(r.type)}" data-node="${fig3Esc(r.id || "")}" data-mode="${fig3Esc(r.mode || "")}" data-label="${fig3Esc(r.label)}"${layerAttr} data-clickable="1">${tag}${fig3Esc(r.label)}</div>`;
+      return `<div class="fig3-chip ${fig3ChipClass(r.type)}" data-node="${fig3Esc(r.id || "")}" data-type="${fig3Esc(r.type || "")}" data-mode="${fig3Esc(r.mode || "")}" data-label="${fig3Esc(r.label)}"${layerAttr} data-clickable="1">${tag}${fig3Esc(r.label)}</div>`;
     }
 
-    function fig3PairHtml(rows) {
+    const FIG3_ATTN_PARTS = new Set([
+      "hc_attn", "attn_norm", "attn", "compressor", "indexer", "add_attn", "mhc",
+    ]);
+    const FIG3_MOE_PARTS = new Set([
+      "hc_ffn", "ffn_norm", "moe", "router", "shared_experts", "routed_experts", "add_ffn",
+    ]);
+
+    function fig3FocusFromChip(el) {
+      if (!el) return null;
+      const type = el.getAttribute("data-type") || "";
+      const nodeId = el.getAttribute("data-node") || "";
+      const cls = el.className || "";
+      if (type === "moe" || /(^|_)moe$/.test(nodeId) || /\bmoe\b/.test(cls)) return "moe";
+      if (
+        type === "swa" || type.indexOf("csa2") === 0
+        || /\b(swa|csa2-full|csa2-reuse|csa2-reindex)\b/.test(cls)
+        || /(^|_)(attn|swa|full|reuse|reindex)$/.test(nodeId)
+      ) return "attn";
+      return null;
+    }
+
+    function fig3FilterParts(parts, focus) {
+      if (!focus) return parts || [];
+      const allow = focus === "moe" ? FIG3_MOE_PARTS : FIG3_ATTN_PARTS;
+      return (parts || []).filter((p) => allow.has(p.id));
+    }
+
+    function fig3FocusLabel(baseLabel, focus, mode) {
+      const modeBit = mode ? ` · ${mode}` : "";
+      if (focus === "moe") return `${baseLabel}${modeBit} · MoE`;
+      if (focus === "attn") {
+        const attnName = mode === "SWA" ? "SWA" : (mode ? `CSA2 · ${mode}` : "注意力");
+        return `${baseLabel} · ${attnName}`;
+      }
+      return baseLabel;
+    }
+
+    function fig3PairHtml(rows, hc) {
       const attn = (rows || []).find((row) => row.type !== "moe");
       const moe = (rows || []).find((row) => row.type === "moe");
-      return `<div class="fig3-pair">${fig3ChipHtml(moe)}${fig3Arrow()}${fig3ChipHtml(attn)}</div>`;
+      const n = Math.max(2, Number(hc) || 4);
+      const pair = `<div class="fig3-pair">${fig3ChipHtml(moe)}${fig3Arrow()}${fig3ChipHtml(attn)}</div>`;
+      // One residual loop around the Attn+MoE pair; ×N in the label (not N parallel lines).
+      return `<div class="fig3-mhc-wrap">
+        ${pair}
+        <div class="fig3-mhc-res" data-node="mhc" data-clickable="1" title="Single-Pass mHC · ${n} 条残差流（绕过本层 Attn / MoE）">
+          <span class="fig3-mhc-tag">mHC×${n}</span>
+        </div>
+      </div>`;
     }
 
     function fig3BracketHtml(repeat, innerHtml, note) {
@@ -4280,11 +4553,11 @@
     }
 
     // Payload groups are bottom-up (first row is the earlier layer). Draw top-down.
-    function fig3GroupVisualHtml(g) {
-      const pair = fig3PairHtml(g.rows);
+    function fig3GroupVisualHtml(g, hc) {
+      const pair = fig3PairHtml(g.rows, hc);
       let body = pair;
       if (g.nested && g.nested.rows && g.nested.rows.length) {
-        body = fig3BracketHtml(g.nested.repeat || 1, fig3PairHtml(g.nested.rows), "") + fig3Arrow() + pair;
+        body = fig3BracketHtml(g.nested.repeat || 1, fig3PairHtml(g.nested.rows, hc), "") + fig3Arrow() + pair;
       }
       if ((g.repeat || 1) > 1) return fig3BracketHtml(g.repeat, body, g.note || "");
       return `<div class="fig3-once">${body}</div>`;
@@ -4384,8 +4657,26 @@
         </defs>${parts.join("")}`;
     }
 
-    // Trainable MiniSeek-M: a Fig.3 node opens the real per-layer / tail blocks instead of guessing by label.
-    function fig3OwnBlock(data, nodeId, layersAttr) {
+    // Fig.3 layer chips → real per-layer blocks. focus="moe"|"attn" keeps the side panel on one submodule.
+    function fig3FindLayerBlocks(data, layersAttr) {
+      if (!layersAttr) return [];
+      const idxs = layersAttr.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !Number.isNaN(n));
+      if (!idxs.length) return [];
+      const layers = (data.blocks || []).filter((b) => b.kind === "layer");
+      const exact = idxs.map((i) => layers.find((b) => b.id === `layer-${i}`)).filter(Boolean);
+      if (exact.length) return exact;
+      return layers.filter((b) => {
+        const detail = b.detail || {};
+        const layersStr = String(detail.layers || detail.pattern || b.label || "");
+        return idxs.some((i) => {
+          if (b.index === i) return true;
+          const re = new RegExp(`(?:^|[^0-9])L?${i}(?:[^0-9]|$)`);
+          return re.test(layersStr.replace(/[–—]/g, "-"));
+        });
+      });
+    }
+
+    function fig3OwnBlock(data, nodeId, layersAttr, focus) {
       const all = (data.blocks || []).concat(data.tail || []);
       const byId = (id) => all.find((b) => b.id === id);
       const asPart = (b) => b && {
@@ -4393,28 +4684,46 @@
         weight_shapes: b.weight_shapes, shape_in: b.shape_in, shape_out: b.shape_out,
       };
       const flowParts = ((data.fig3 && data.fig3.kv_flows) || data.kv_flows || [])
-        .filter((f) => f.from === nodeId || f.to === nodeId)
+        .filter((f) => {
+          if (!(f.from === nodeId || f.to === nodeId)) return false;
+          if (focus === "moe") return false;
+          return true;
+        })
         .map((f) => ({ id: `flow-${f.id}`, label: `连线 · ${f.label}`, params: 0, detail: { 说明: f.note || "" } }));
       if (layersAttr) {
-        const picked = layersAttr.split(",").map((s) => byId(`layer-${s.trim()}`)).filter(Boolean);
+        let picked = fig3FindLayerBlocks(data, layersAttr);
+        if (!picked.length) {
+          picked = layersAttr.split(",").map((s) => byId(`layer-${s.trim()}`)).filter(Boolean);
+        }
         if (!picked.length) return null;
         const base = picked[0];
-        const parts = (base.parts || []).slice();
+        const mode = (base.detail || {}).mode || "";
+        let parts = (base.parts || []).slice();
         const seen = new Set(parts.map((p) => p.id));
         picked.slice(1).forEach((b) => (b.parts || []).forEach((p) => {
           if (seen.has(p.id)) return;
           seen.add(p.id);
           parts.push({ ...p, label: `${p.label}（仅 L${b.index}）` });
         }));
-        if (picked.length === 1) return { ...base, parts: parts.concat(flowParts) };
-        const last = picked[picked.length - 1];
+        parts = fig3FilterParts(parts, focus).concat(focus === "moe" ? [] : flowParts);
+        const params = parts.reduce((s, p) => s + (p.params || 0), 0);
+        const spanLabel = picked.length === 1
+          ? `L${base.index}`
+          : `L${base.index}–L${picked[picked.length - 1].index}`;
+        const baseLabel = picked.length === 1
+          ? spanLabel
+          : `${spanLabel}（${picked.length} 层同构，参数按单层列）`;
         return {
           ...base,
-          id: `layers-${base.index}-${last.index}`,
-          label: `L${base.index}–L${last.index} · ${(base.detail || {}).mode || ""}（${picked.length} 层同构，参数按单层列）`,
-          parts: parts.concat(flowParts),
+          id: focus ? `${base.id || spanLabel}-${focus}` : (picked.length === 1 ? base.id : `layers-${base.index}-${picked[picked.length - 1].index}`),
+          label: fig3FocusLabel(baseLabel, focus, mode),
+          params,
+          focus: focus || null,
+          kind: focus ? "module" : base.kind,
+          parts,
         };
       }
+      if (nodeId === "mhc") return fig3MhcBlock(data);
       if (nodeId === "embedding" || nodeId === "text_emb") {
         const b = byId("embed");
         return b ? { ...b, parts: [asPart(b)] } : null;
@@ -4449,11 +4758,13 @@
     }
 
     function openFig3Node(data, nodeId, label, extraDetail) {
+      const focus = (extraDetail && extraDetail.focus) || null;
       const flows = (data.kv_flows || data.fig3 && data.fig3.kv_flows) || [];
-      const related = flows.filter((f) => f.from === nodeId || f.to === nodeId || (Array.isArray(f.to) && f.to.includes(nodeId)));
+      const related = focus === "moe" ? [] : flows.filter((f) => f.from === nodeId || f.to === nodeId || (Array.isArray(f.to) && f.to.includes(nodeId)));
       const parts = [];
       if (extraDetail) {
-        parts.push({ id: nodeId, label: label || nodeId, params: 0, detail: extraDetail });
+        const detailId = focus === "moe" ? "moe" : (focus === "attn" ? "attn" : nodeId);
+        parts.push({ id: detailId, label: label || nodeId, params: 0, detail: extraDetail });
       }
       related.forEach((f) => {
         parts.push({
@@ -4463,17 +4774,28 @@
           detail: { from: f.from, to: f.to, note: f.note || "" },
         });
       });
-      // Prefer matching layer block for drawer richness
+      // Prefer matching layer block, but keep MoE / attn focus so the drawer does not dump the whole layer.
       const blocks = (data.blocks || []).concat(data.tail || []);
       const hit = blocks.find((b) => (b.id || "").includes(nodeId) || (b.label || "").includes(label || "___never___"));
       if (hit && hit.parts && hit.parts.length) {
-        openArchDrawer(hit);
+        const focusedParts = fig3FilterParts(hit.parts, focus);
+        openArchDrawer({
+          ...hit,
+          id: focus ? `${hit.id}-${focus}` : hit.id,
+          label: fig3FocusLabel(hit.label || label || hit.id, focus, (hit.detail || {}).mode || (extraDetail && extraDetail.mode) || ""),
+          focus: focus || null,
+          kind: focus ? "module" : hit.kind,
+          parts: focusedParts.length ? focusedParts : parts,
+          params: (focusedParts.length ? focusedParts : hit.parts).reduce((s, p) => s + (p.params || 0), 0),
+        });
         return;
       }
       openArchDrawer({
         id: nodeId || "fig3-node",
-        label: label || nodeId || "Fig.3",
+        label: fig3FocusLabel(label || nodeId || "Fig.3", focus, (extraDetail && extraDetail.mode) || ""),
         params: 0,
+        focus: focus || null,
+        kind: focus ? "module" : undefined,
         parts: parts.length ? parts : [{ id: "note", label: label || "Fig.3", params: 0, detail: extraDetail || { note: "DeepSeek-V4.1-Flash reference" } }],
       });
     }
@@ -4489,11 +4811,13 @@
       wrap.className = "fig3-wrap";
       wrap.addEventListener("click", (ev) => ev.stopPropagation());
 
+      const hcMult = ((data.config || {}).hc_mult != null) ? data.config.hc_mult : 4;
       const legendSpec = [
         ["Full", "#86efac", "产出 main KV、indexer K 和 Top-K"],
         ["Reuse", "#fde047", "复用 main KV 和已有 Top-K"],
         ["Reindex", "#93c5fd", "复用 KV，只在候选池里重选 Top-K"],
         ["SWA", "#fda4af", "只画最底两层。其余层仍有本层滑窗"],
+        ["mHC", "#0f766e", `层右侧残差环 · ×${hcMult} 流`],
       ];
       const legend = legendSpec.map(([mode, fallback, kv]) => {
         const hit = modes.find((m) => m.mode === mode);
@@ -4501,20 +4825,19 @@
         return `<span><i class="fig3-swatch" style="background:${color}"></i>${mode}: ${kv}</span>`;
       }).join("");
 
-      const encGroups = [...(enc.groups || [])].reverse().map(fig3GroupVisualHtml);
+      const encGroups = [...(enc.groups || [])].reverse().map((g) => fig3GroupVisualHtml(g, hcMult));
       const hiddenHtml = `<div class="fig3-node enc-hidden" data-node="enc_hidden" data-clickable="1">${fig3Esc((enc.output && enc.output.label) || "Enc. Hidden States")}</div>`;
-      const stem = `<div class="fig3-stem">${fig3Arrow()}<span>Single-Pass mHC</span></div>`;
-      const embHtml = `<div class="fig3-node embed" data-node="embedding" data-clickable="1">Embedding</div>`;
-      const encStack = [hiddenHtml, joinUp(encGroups)].filter(Boolean).join(fig3Arrow()) + stem + embHtml;
+      const embHtml = `<div class="fig3-node embed" data-node="embedding" data-clickable="1">Embedding<div class="fig3-sub">展开为 mHC×${hcMult}</div></div>`;
+      const encStack = [hiddenHtml, joinUp(encGroups), embHtml].filter(Boolean).join(fig3Arrow());
 
       const decGroups = dec.groups || [];
       const fullG = decGroups.find((g) => (g.rows || []).some((r) => r.id === "dec_full")) || null;
-      const upper = decGroups.filter((g) => g !== fullG).reverse().map(fig3GroupVisualHtml);
+      const upper = decGroups.filter((g) => g !== fullG).reverse().map((g) => fig3GroupVisualHtml(g, hcMult));
       const dsparkHtml = `<div class="fig3-node dspark" data-node="dspark" data-clickable="1">DSpark<div class="fig3-sub">${fig3Esc(fig.dspark_sub || "推测解码，不计入 20 层")}</div></div>`;
       const headHtml = fig.head
-        ? `<div class="fig3-node head" data-node="${fig3Esc(fig.head.id || "lm_head")}" data-clickable="1">${fig3Esc(fig.head.label || "LM Head")}<div class="fig3-sub">${fig3Esc(fig.head.sub || "")}</div></div>`
+        ? `<div class="fig3-node head" data-node="${fig3Esc(fig.head.id || "lm_head")}" data-clickable="1">${fig3Esc(fig.head.label || "LM Head")}<div class="fig3-sub">${fig3Esc(fig.head.sub || `mHC 合流 → Final RMSNorm`)}</div></div>`
         : "";
-      const exitHtml = fullG ? fig3PairHtml(fullG.rows) : "";
+      const exitHtml = fullG ? fig3PairHtml(fullG.rows, hcMult) : "";
       const decStack = [dsparkHtml, headHtml, joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
 
       wrap.innerHTML = `
@@ -4566,22 +4889,40 @@
       fig3ResizeObs.observe(board);
       scheduleFig3Wires(board);
 
-      // Click handlers for chips / nodes
-      const trainable = !!(data.meta && data.meta.trainable);
-      wrap.querySelectorAll("[data-clickable='1'], .fig3-chip[data-clickable='1'], .fig3-node[data-clickable='1']").forEach((el) => {
+      // Click handlers for chips / nodes — MoE vs CSA2/SWA open focused side panels; mHC residual loop is clickable.
+      wrap.querySelectorAll("[data-clickable='1'], .fig3-chip[data-clickable='1'], .fig3-node[data-clickable='1'], .fig3-mhc-res").forEach((el) => {
         el.addEventListener("click", (ev) => {
           ev.stopPropagation();
+          wrap.querySelectorAll(".is-on").forEach((x) => x.classList.remove("is-on"));
+          el.classList.add("is-on");
           const nodeId = el.getAttribute("data-node") || "";
-          const ownBlock = trainable ? fig3OwnBlock(data, nodeId, el.getAttribute("data-layers")) : null;
+          const layersAttr = el.getAttribute("data-layers");
+          const focus = fig3FocusFromChip(el);
+          const ownBlock = fig3OwnBlock(data, nodeId, layersAttr, focus);
           if (ownBlock) {
             openArchDrawer(ownBlock);
             return;
           }
+          if (nodeId === "mhc") {
+            openArchDrawer(fig3MhcBlock(data));
+            return;
+          }
           const mode = el.getAttribute("data-mode") || "";
           const modeInfo = modes.find((m) => m.mode === mode);
+          if (focus === "moe") {
+            openArchDrawer({
+              id: `${nodeId || "moe"}-focus`,
+              label: el.getAttribute("data-label") || "MoE",
+              params: 0,
+              focus: "moe",
+              kind: "module",
+              parts: [{ id: "moe", label: "MoE", params: 0 }],
+            });
+            return;
+          }
           openFig3Node(data, nodeId, el.getAttribute("data-label") || el.textContent.trim().split("\n")[0], modeInfo
-            ? { mode: modeInfo.mode, kv: modeInfo.kv, color: modeInfo.color }
-            : { node: nodeId });
+            ? { mode: modeInfo.mode, kv: modeInfo.kv, color: modeInfo.color, focus: focus || undefined }
+            : { node: nodeId, focus: focus || undefined });
         });
       });
 
@@ -4770,7 +5111,7 @@
       } else {
         body = `${upper}${ownStem("RMSNorm · pre-FFN")}${attn}${ownStem("RMSNorm · pre-Attn")}`;
       }
-      const name = meta.release_name || (isMoe ? "MiniSeek-M" : "MiniSeek-D");
+      const name = meta.release_name || (isMoe ? "MiniSeek-V" : "MiniSeek-D");
       const legend = isMoe
         ? [
             ["#86efac", "Causal Attn · RoPE"],
@@ -4908,7 +5249,7 @@
       // Dedicated Fig.3 schematic for DeepSeek-V4.1-Flash (CED regions + KV arrows).
       if (meta.diagram === "fig3" || data.fig3) {
         renderFig3Arch(data);
-        $("arch-status-text").textContent = meta.trainable ? "已加载 MiniSeek-M 架构图（可训练）" : "已加载 Fig.3 参考图";
+        $("arch-status-text").textContent = meta.trainable ? "已加载 MiniSeek-V 架构图（可训练）" : "已加载 Fig.3 参考图";
         $("arch-dot").className = "dot finished";
         closeArchDrawer();
         return;
@@ -5051,7 +5392,7 @@
     }
 
     async function loadArchDesign(arch) {
-      archPreset = arch || archPreset || "miniseek-m";
+      archPreset = arch || archPreset || "miniseek-v";
       document.querySelectorAll("#arch-preset-row button").forEach((b) => {
         b.classList.toggle("active", b.dataset.archPreset === archPreset);
       });

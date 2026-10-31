@@ -20,7 +20,7 @@ def test_create_and_get_task(client):
         "/api/tasks",
         json={
             "name": "smoke",
-            "arch": "tiny",
+            "arch": "miniseek-v",
             "mode": "pretrain",
             "hparams": {"max_steps": 2, "batch_size": 2},
         },
@@ -30,11 +30,11 @@ def test_create_and_get_task(client):
     g = client.get(f"/api/tasks/{tid}")
     assert g.status_code == 200
     assert g.json()["status"] == "draft"
-    assert g.json()["arch"] == "tiny"
+    assert g.json()["arch"] == "miniseek-v"
 
 
 def test_list_includes_created(client):
-    r = client.post("/api/tasks", json={"name": "a", "arch": "tiny", "mode": "pretrain", "hparams": {}})
+    r = client.post("/api/tasks", json={"name": "a", "arch": "miniseek-v", "mode": "pretrain", "hparams": {}})
     tid = r.json()["id"]
     rows = client.get("/api/tasks").json()["tasks"]
     assert any(x["id"] == tid for x in rows)
@@ -50,7 +50,7 @@ def test_create_sft_requires_init_ckpt(client):
         "/api/tasks",
         json={
             "name": "sft-bad",
-            "arch": "dense",
+            "arch": "miniseek-v",
             "mode": "sft",
             "hparams": {"init_ckpt": "", "resume": ""},
         },
@@ -64,7 +64,7 @@ def test_create_sft_ok_with_init_ckpt(client):
         "/api/tasks",
         json={
             "name": "sft-ok",
-            "arch": "dense",
+            "arch": "miniseek-v",
             "mode": "sft",
             "hparams": {"init_ckpt": "/tmp/fake_pretrain.pt"},
         },
@@ -78,7 +78,7 @@ def test_patch_sft_clears_init_rejected(client):
         "/api/tasks",
         json={
             "name": "sft-patch",
-            "arch": "dense",
+            "arch": "miniseek-v",
             "mode": "sft",
             "hparams": {"init_ckpt": "/tmp/fake_pretrain.pt"},
         },

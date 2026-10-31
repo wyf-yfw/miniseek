@@ -1,10 +1,10 @@
 import torch
 
-import algo.model.miniseek_m.cache as cache_mod
-from algo import miniseek_m_train as mmt
+import algo.model.miniseek_v.cache as cache_mod
+from algo import miniseek_v_train as mvt
 from algo.model import load_model_from_blob
-from algo.model.miniseek_m import FlashConfig, Transformer
-from algo.model.miniseek_m.cache import PrefixCache
+from algo.model.miniseek_v import FlashConfig, Transformer
+from algo.model.miniseek_v.cache import PrefixCache
 
 
 def _model(seed=0, token_map=None, **over):
@@ -57,7 +57,7 @@ def test_prefix_exact_when_context_within_window():
 def test_load_blob_with_compressed_token_map():
     token_map = [i // 2 for i in range(97)]
     model = _model(3, token_map=token_map, engram_compressed_vocab_size=49)
-    blob = {"model": mmt.state_for_ckpt(model), "config": model.cfg.to_dict(), "stage": "sft"}
+    blob = {"model": mvt.state_for_ckpt(model), "config": model.cfg.to_dict(), "stage": "sft"}
     loaded, cfg = load_model_from_blob(blob)
     loaded.eval()
     assert isinstance(cfg, FlashConfig) and loaded.infer_candidate_pool is True

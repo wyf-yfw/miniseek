@@ -5,25 +5,25 @@ from pathlib import Path
 import torch
 from fastapi.testclient import TestClient
 
-from algo.model.miniseek_m import FlashConfig, Transformer
+from algo.model.miniseek_v import FlashConfig, Transformer
 from api.app import app
 
 
 def test_arch_design_miniseek_m():
     client = TestClient(app)
-    r = client.get("/api/arch/design", params={"arch": "miniseek-m"})
+    r = client.get("/api/arch/design", params={"arch": "miniseek-v"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["config"]["arch"] == "miniseek-m"
+    assert body["config"]["arch"] == "miniseek-v"
     assert body["meta"]["source"] == "design"
     assert body["meta"]["diagram"] == "fig3"
 
 
 def test_arch_design_post_miniseek_m():
     client = TestClient(app)
-    r = client.post("/api/arch/design", json={"arch": "miniseek-m"})
+    r = client.post("/api/arch/design", json={"arch": "miniseek-v"})
     assert r.status_code == 200
-    assert r.json()["config"]["arch"] == "miniseek-m"
+    assert r.json()["config"]["arch"] == "miniseek-v"
 
 
 def test_arch_design_bad():
@@ -46,7 +46,7 @@ def test_arch_inspect_miniseek_m(tmp_path: Path):
     r = client.post("/api/arch/inspect", json={"ckpt_path": str(p)})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["config"]["arch"] == "miniseek-m"
+    assert body["config"]["arch"] == "miniseek-v"
     assert body["meta"]["diagram"] == "fig3"
 
 

@@ -30,18 +30,20 @@ from pydantic import BaseModel, Field
 
 from algo.model import load_model_from_blob
 from algo.model.tokenizer import load_tokenizer
-from algo.model.miniseek_m.cache import PrefixCache
+from algo.model.miniseek_v.cache import PrefixCache
 from api import tasks_store as ts
 from api import bench_store as bs
 from api import clean_store as cs
 from api.task_runner import (
     TRAIN_ARCHS,
+    TRAIN_MODES,
     pid_alive,
     reconcile_task,
     rebuild_metrics_from_log,
     start_task,
     stop_task,
     validate_sft_init_ckpt,
+    validate_dspark_backbone,
 )
 from api.bench_runner import (
     reconcile_run,
@@ -351,7 +353,7 @@ class InferenceEngine:
         if dpath is None or not dpath.exists() or not getattr(self.model, "supports_prefix_cache", False):
             return ""
         try:
-            from algo.model.miniseek_m.dspark import measure_sps
+            from algo.model.miniseek_v.dspark import measure_sps
             from algo.train_dspark import load_drafter
 
             dblob = torch.load(dpath, map_location="cpu", weights_only=False)
@@ -423,11 +425,11 @@ class InferenceEngine:
             raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
 
         cfg = getattr(self.model, "cfg", None)
-        arch = getattr(cfg, "arch", "miniseek-m") if cfg is not None else "miniseek-m"
-        use_moe = arch in ("miniseek-m", "m", "v41") or bool(getattr(cfg, "use_moe", False))  # m=MiniSeek-M
+        arch = getattr(cfg, "arch", "miniseek-v") if cfg is not None else "miniseek-v"
+        use_moe = arch in ("miniseek-v", "miniseek-m", "m", "v41") or bool(getattr(cfg, "use_moe", False))  # miniseek-v=MiniSeek-V
         if not use_moe:
             return {
-                "arch": "miniseek-m",
+                "arch": "miniseek-v",
                 "ok": False,
                 "message": "当前是 Dense 模型，无路由专家负载（N/A）",
             }
@@ -875,7 +877,7 @@ infer_engine = InferenceEngine()
 
 class TaskCreate(BaseModel):
     name: str = ""
-    arch: str = "miniseek-m"
+    arch: str = "miniseek-v"
     mode: str = "pretrain"
     hparams: Dict[str, Any] = Field(default_factory=dict)
     uniquify: bool = False
@@ -905,7 +907,7 @@ class ArchInspectRequest(BaseModel):
 
 
 class ArchDesignRequest(BaseModel):
-    arch: str = "miniseek-m"  # miniseek-m | m-ref
+    arch: str = "miniseek-v"  # miniseek-v | m-ref
 
 
 class BenchCreate(BaseModel):
@@ -1183,9 +1185,9 @@ def defaults() -> dict:
     best = PROJECT_ROOT / "tasks" / "_default_pretrain" / "best.pt"
     return {
         "mode": "pretrain",
-        "arch": "miniseek-m",
+        "arch": "miniseek-v",
         "dense": {
-            "arch": "miniseek-m",
+            "arch": "miniseek-v",
             "mode": "pretrain",
             "data_path": DEFAULT_PRETRAIN_DATA,
             "batch_size": 32,
@@ -1213,8 +1215,8 @@ def defaults() -> dict:
             "resume": "",
             "aux_coef": 0.0001,
         },
-        "miniseek-m": {
-            "arch": "miniseek-m",
+        "miniseek-v": {
+            "arch": "miniseek-v",
             "mode": "pretrain",
             "data_path": DEFAULT_PRETRAIN_DATA,
             "batch_size": 8,
@@ -1244,7 +1246,7 @@ def defaults() -> dict:
         },
         # 旧 UI / 脚本别名
         "v41": {
-            "arch": "miniseek-m",
+            "arch": "miniseek-v",
             "mode": "pretrain",
             "data_path": DEFAULT_PRETRAIN_DATA,
             "batch_size": 8,
@@ -1302,7 +1304,7 @@ def defaults() -> dict:
             "aux_coef": 0.0001,
         },
         "pretrain": {
-            "arch": "miniseek-m",
+            "arch": "miniseek-v",
             "data_path": DEFAULT_PRETRAIN_DATA,
             "out_dir": DEFAULT_PRETRAIN_OUT,
             "batch_size": 32,
@@ -1320,8 +1322,8 @@ def defaults() -> dict:
             "resume": "",
             "aux_coef": 0.0001,
         },
-        "pretrain_miniseek_m": {
-            "arch": "miniseek-m",
+        "pretrain_miniseek_v": {
+            "arch": "miniseek-v",
             "data_path": DEFAULT_PRETRAIN_DATA,
             "out_dir": DEFAULT_V41_OUT,
             "batch_size": 8,
@@ -1340,7 +1342,7 @@ def defaults() -> dict:
             "aux_coef": 0.0001,
         },
         "sft": {
-            "arch": "miniseek-m",
+            "arch": "miniseek-v",
             "mode": "sft",
             "data_path": DEFAULT_SFT_DATA,
             "out_dir": DEFAULT_SFT_OUT,
@@ -1356,6 +1358,27 @@ def defaults() -> dict:
             "init_ckpt": str(best) if best.exists() else "",
             "resume": "",
             "aux_coef": 0.0001,
+        },
+        "dspark": {
+            "arch": "miniseek-v",
+            "mode": "dspark",
+            "data_path": DEFAULT_PRETRAIN_DATA,
+            "out_dir": str(PROJECT_ROOT / "tasks" / "_default_dspark"),
+            "backbone": "",
+            "batch_size": 8,
+            "max_seq_len": 512,
+            "lr": 3e-4,
+            "min_lr": 3e-5,
+            "warmup_steps": 100,
+            "max_steps": 2000,
+            "epochs": 1,
+            "anchors": 32,
+            "grad_clip": 1.0,
+            "log_every": 10,
+            "plot_every": 50,
+            "calibrate": True,
+            "sync_to_backbone": True,
+            "resume": "",
         },
         "data_path": DEFAULT_PRETRAIN_DATA,
         "out_dir": DEFAULT_PRETRAIN_OUT,
@@ -1400,20 +1423,21 @@ def api_list_tasks() -> dict:
 
 @app.post("/api/tasks")
 def api_create_task(body: TaskCreate) -> dict:
-    arch = (body.arch or "miniseek-m").strip().lower()
+    arch = (body.arch or "miniseek-v").strip().lower()
     mode = (body.mode or "pretrain").strip().lower()
     if arch not in TRAIN_ARCHS:
         raise HTTPException(status_code=400, detail=f"未知架构: {arch}")
-    if mode not in {"pretrain", "sft"}:
+    if mode not in TRAIN_MODES:
         raise HTTPException(status_code=400, detail=f"未知模式: {mode}")
     defaults_map = defaults()
-    base = dict(defaults_map.get(arch) or defaults_map["miniseek-m"])
+    base = dict(defaults_map.get(arch) or defaults_map["miniseek-v"])
     base.update(body.hparams or {})
     base["arch"] = arch
     base["mode"] = mode
     base.pop("out_dir", None)  # out_dir forced by store
     try:
         validate_sft_init_ckpt(mode, base, require_exists=False)
+        validate_dspark_backbone(mode, base, require_exists=False)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     name = (body.name or "").strip() or f"{arch}-{mode}"
@@ -1444,7 +1468,7 @@ def api_patch_task(task_id: str, body: TaskPatch) -> dict:
             task["arch"] = arch
         if body.mode is not None:
             mode = body.mode.strip().lower()
-            if mode not in {"pretrain", "sft"}:
+            if mode not in TRAIN_MODES:
                 raise HTTPException(status_code=400, detail=f"未知模式: {mode}")
             task["mode"] = mode
         if body.hparams is not None:
@@ -1454,6 +1478,11 @@ def api_patch_task(task_id: str, body: TaskPatch) -> dict:
             task["hparams"] = hp
         try:
             validate_sft_init_ckpt(
+                str(task.get("mode") or ""),
+                task.get("hparams") or {},
+                require_exists=False,
+            )
+            validate_dspark_backbone(
                 str(task.get("mode") or ""),
                 task.get("hparams") or {},
                 require_exists=False,
@@ -1984,7 +2013,7 @@ def api_clean_preview(body: CleanPreviewRequest) -> dict:
 
 
 @app.get("/api/arch/design")
-def api_arch_design_get(arch: str = "miniseek-m") -> dict:
+def api_arch_design_get(arch: str = "miniseek-v") -> dict:
     try:
         return arch_inspect_design(arch)
     except ValueError as exc:

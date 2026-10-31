@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from algo.model.miniseek_m import FlashConfig, Transformer
-from algo.model.miniseek_m.cache import InferenceCache, LayerCache, ced_prefill, compressor_append, decode_chunk
+from algo.model.miniseek_v import FlashConfig, Transformer
+from algo.model.miniseek_v.cache import InferenceCache, LayerCache, ced_prefill, compressor_append, decode_chunk
 
 
 def _model(seed=0, **over):

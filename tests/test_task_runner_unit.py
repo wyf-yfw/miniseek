@@ -15,7 +15,7 @@ def tasks_root(tmp_path, monkeypatch):
 
 
 def test_reconcile_dead_pid(tasks_root, monkeypatch):
-    t = ts.create_task(name="x", arch="miniseek-m", mode="pretrain", hparams={"batch_size": 1})
+    t = ts.create_task(name="x", arch="miniseek-v", mode="pretrain", hparams={"batch_size": 1})
     t["status"] = "running"
     t["pid"] = 999999  # almost surely dead
     ts.save_task(t)
@@ -26,8 +26,8 @@ def test_reconcile_dead_pid(tasks_root, monkeypatch):
 
 
 def test_start_refuses_second(tasks_root, monkeypatch):
-    a = ts.create_task(name="a", arch="miniseek-m", mode="pretrain", hparams={"max_steps": 1})
-    b = ts.create_task(name="b", arch="miniseek-m", mode="pretrain", hparams={"max_steps": 1})
+    a = ts.create_task(name="a", arch="miniseek-v", mode="pretrain", hparams={"max_steps": 1})
+    b = ts.create_task(name="b", arch="miniseek-v", mode="pretrain", hparams={"max_steps": 1})
     a["status"] = "running"
     a["pid"] = 1
     ts.save_task(a)
@@ -95,7 +95,7 @@ def test_spawn_training_uses_new_session_on_posix(tasks_root, tmp_path, monkeypa
 def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
     if sys.platform == "win32":
         pytest.skip("POSIX killpg test")
-    t = ts.create_task(name="killpg", arch="miniseek-m", mode="pretrain", hparams={"max_steps": 1})
+    t = ts.create_task(name="killpg", arch="miniseek-v", mode="pretrain", hparams={"max_steps": 1})
     t["status"] = "running"
     t["pid"] = 77701
     ts.save_task(t)
@@ -125,12 +125,12 @@ def test_stop_task_uses_killpg_when_session_leader(tasks_root, monkeypatch):
 
 
 def test_build_train_cmd_sft_m(tasks_root, tmp_path):
-    """SFT + M builds a cmd with --arch miniseek-m, aux coef and post-train switches."""
+    """SFT + M builds a cmd with --arch miniseek-v, aux coef and post-train switches."""
     ckpt = tmp_path / "pretrain.pt"
     ckpt.write_bytes(b"x")
     t = ts.create_task(
         name="sft-m",
-        arch="miniseek-m",
+        arch="miniseek-v",
         mode="sft",
         hparams={
             "max_steps": 2,
@@ -143,7 +143,7 @@ def test_build_train_cmd_sft_m(tasks_root, tmp_path):
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
     assert "algo.train_sft" in cmd
-    assert cmd[cmd.index("--arch") + 1] == "miniseek-m"
+    assert cmd[cmd.index("--arch") + 1] == "miniseek-v"
     assert cmd[cmd.index("--aux-coef") + 1] == "0.02"
     assert cmd[cmd.index("--init-ckpt") + 1] == str(ckpt)
     assert "--no-candidate-pool" in cmd and "--act-ckpt" in cmd
@@ -162,7 +162,7 @@ def test_build_train_cmd_rejects_removed_moe(tasks_root):
 def test_build_train_cmd_sft_requires_init_ckpt(tasks_root):
     t = ts.create_task(
         name="sft-no-init",
-        arch="miniseek-m",
+        arch="miniseek-v",
         mode="sft",
         hparams={"max_steps": 2, "init_ckpt": "", "resume": ""},
     )
@@ -178,7 +178,7 @@ def test_build_train_cmd_sft_resume_skips_init(tasks_root, tmp_path):
     resume.write_bytes(b"x")
     t = ts.create_task(
         name="sft-resume",
-        arch="miniseek-m",
+        arch="miniseek-v",
         mode="sft",
         hparams={"max_steps": 2, "init_ckpt": "", "resume": str(resume)},
     )
@@ -190,12 +190,12 @@ def test_build_train_cmd_sft_resume_skips_init(tasks_root, tmp_path):
 def test_build_train_cmd_speed_defaults(tasks_root):
     t = ts.create_task(
         name="spd",
-        arch="miniseek-m",
+        arch="miniseek-v",
         mode="pretrain",
         hparams={"max_steps": 2, "batch_size": 2},
     )
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
-    # MiniSeek-M 默认不 compile（MoE/稀疏索引会 graph-break）
+    # MiniSeek-V 默认不 compile（MoE/稀疏索引会 graph-break）
     assert "--no-compile" in cmd
     assert "--fused-adamw" in cmd
     assert "--batch-mode" in cmd
@@ -205,7 +205,7 @@ def test_build_train_cmd_speed_defaults(tasks_root):
 def test_build_train_cmd_speed_opt_out(tasks_root):
     t = ts.create_task(
         name="spd2",
-        arch="miniseek-m",
+        arch="miniseek-v",
         mode="pretrain",
         hparams={
             "max_steps": 2,
@@ -227,7 +227,7 @@ def test_build_train_cmd_sft_batch_mode(tasks_root, tmp_path):
     ckpt.write_bytes(b"x")
     t = ts.create_task(
         name="sft-bm",
-        arch="miniseek-m",
+        arch="miniseek-v",
         mode="sft",
         hparams={
             "max_steps": 2,
@@ -238,3 +238,53 @@ def test_build_train_cmd_sft_batch_mode(tasks_root, tmp_path):
     cmd = tr.build_train_cmd(ts.load_task(t["id"]))
     assert "--batch-mode" in cmd
     assert cmd[cmd.index("--batch-mode") + 1] == "bucket"
+
+
+def test_build_train_cmd_dspark_requires_backbone(tasks_root):
+    t = ts.create_task(
+        name="dspark-no-bb",
+        arch="miniseek-v",
+        mode="dspark",
+        hparams={"max_steps": 100, "backbone": ""},
+    )
+    with pytest.raises(ValueError, match="Backbone Checkpoint"):
+        tr.build_train_cmd(ts.load_task(t["id"]))
+
+
+def test_build_train_cmd_dspark_success(tasks_root, tmp_path):
+    bb = tmp_path / "backbone.pt"
+    bb.write_bytes(b"x")
+    t = ts.create_task(
+        name="dspark-task",
+        arch="miniseek-v",
+        mode="dspark",
+        hparams={
+            "backbone": str(bb),
+            "batch_size": 4,
+            "max_seq_len": 256,
+            "max_steps": 500,
+            "anchors": 16,
+            "calibrate": True,
+            "sync_to_backbone": False,
+        },
+    )
+    cmd = tr.build_train_cmd(ts.load_task(t["id"]))
+    assert "algo.train_dspark" in cmd
+    assert cmd[cmd.index("--backbone") + 1] == str(bb)
+    assert cmd[cmd.index("--batch-size") + 1] == "4"
+    assert cmd[cmd.index("--max-seq-len") + 1] == "256"
+    assert cmd[cmd.index("--max-steps") + 1] == "500"
+    assert cmd[cmd.index("--anchors") + 1] == "16"
+    assert "--calibrate" in cmd
+    assert "--no-sync-to-backbone" in cmd
+
+
+def test_step_re_matches_dspark_log():
+    line = "step=100 loss=2.8765 tv=0.3421 conf=0.7654 accept=0.650 ppl=17.75 lr=2.50e-04"
+    m = tr.STEP_RE.search(line)
+    assert m is not None
+    assert m.group(1) == "100"
+    assert m.group(2) == "2.8765"
+    assert m.group(3) == "17.75"
+    assert m.group(4) == "2.50e-04"
+

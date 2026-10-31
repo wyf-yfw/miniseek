@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate smoke: load a MiniSeek-M checkpoint and sample a short continuation."""
+"""Generate smoke: load a MiniSeek-V checkpoint and sample a short continuation."""
 from __future__ import annotations
 import argparse
 from pathlib import Path

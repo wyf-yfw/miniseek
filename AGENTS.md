@@ -5,8 +5,8 @@
 ## 项目是什么
 
 - **目标**：做一套**层实现对齐 DeepSeek-V4.1-Flash**（arXiv:2609.19969）的超小可训语言模型。`d`、层数、专家个数、top-k、中间维、总参可以小于论文；**层内算子不能换成另一种算法**；不清楚的以论文和官方推理代码（HF `deepseek-ai/DeepSeek-V4.1-Flash/inference`）为准。
-- **主线 MiniSeek-M0.1**（`--arch miniseek-m`，包 `algo/model/miniseek_m/`，训练辅助 `algo/miniseek_m_train.py`，spec `docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`）：CED 编码 4 + 解码 4，层模式 `SWA,SWA,Full,Reuse | Full,Reuse,Reindex,Reuse`（编码 m=2、解码 m=1，L4 建候选池）；Single-Pass mHC（4 流、Sinkhorn 20）；MoE 1 共享 + 64 路由 top-6、中间维 176（sqrt-softplus 打分，分数 + bias 选专家，选中分数归一后 ×1.5 加权，clamp SwiGLU 阈值 10，bias 每步 ±0.001，序列级 aux 1e-4）；Engram@L1·L3；DSpark 3 block 另训。主干 + Engram 186,933,744（每 token 激活约 33M），DSpark 19,256,850；预算是主干 + Engram ≤200M。全程 BF16（不做论文的 FP4/FP8 KV），暂无视觉。
-- 产品名写全称 **MiniSeek-M**（不要单独叫 `m`）；Python 包用下划线 `miniseek_m`。CLI `--arch miniseek-m`（旧别名 `m` / `v41` 加载时归一）。带 Dense / Tiny 的完整代码在分支 `archive/dense-tiny`；`main` 只保留 MiniSeek-M。旧独立 `MoELM` 已移除。MiniMind 仅作 tokenizer / README 版式参考。对外文案不要写 V4.1 / F0.1；HF 官方路径可保留原名。
+- **主线 MiniSeek-V1**（`--arch miniseek-v`，包 `algo/model/miniseek_v/`，训练辅助 `algo/miniseek_v_train.py`，spec `docs/superpowers/specs/2026-10-29-v41-flash-full-arch-design.md`）：CED 编码 4 + 解码 4，层模式 `SWA,SWA,Full,Reuse | Full,Reuse,Reindex,Reuse`（编码 m=2、解码 m=1，L4 建候选池）；Single-Pass mHC（4 流、Sinkhorn 20）；MoE 1 共享 + 64 路由 top-6、中间维 176（sqrt-softplus 打分，分数 + bias 选专家，选中分数归一后 ×1.5 加权，clamp SwiGLU 阈值 10，bias 每步 ±0.001，序列级 aux 1e-4）；Engram@L1·L3；DSpark 3 block 另训。主干 + Engram 186,933,744（每 token 激活约 33M），DSpark 19,256,850；预算是主干 + Engram ≤200M。全程 BF16（不做论文的 FP4/FP8 KV），暂无视觉。
+- 产品名写全称 **MiniSeek-V** / 型号 **MiniSeek-V1**（不要单独叫 `v`）；Python 包用下划线 `miniseek_v`。CLI `--arch miniseek-v`（旧别名 `miniseek-m` / `m` / `v41` / `f` / `flash` 加载时归一）。**MiniSeek-M0.1** 是已发布的**简单 MoE 对照线**（`release/MiniSeek-M0.1` / HF），代码不在 `main`。带 Dense / Tiny 的完整代码在分支 `archive/dense-tiny`；`main` 只保留 MiniSeek-V。旧独立 `MoELM` 已移除。MiniMind 仅作 tokenizer / README 版式参考。对外文案不要写 V4.1 / F0.1 当产品名；HF 官方 DeepSeek 路径可保留原名。
 - **作者署名**：`wyf-yfw`（勿写真实姓名）。
 - **仓库**：https://github.com/wyf-yfw/miniseek（公仓）。大语料与权重不进 Git。
 
@@ -23,16 +23,16 @@
 - `data/PT/`、`data/SFT/`：与 HF `wyf-yfw/MiniSeek-Pretrain`、`wyf-yfw/MiniSeek-SFT` 镜像（README / SOURCES / stats 可进库）。
 - 大 `.jsonl`、checkpoint、`tasks/`：**gitignore，勿提交**。
 - 训练默认 PT 清洗集：`data/clean/.../clean.jsonl`（常由 `data/PT/pretrain_mix_12g_clean.jsonl` 软链）；**SFT 默认**仍 `data/SFT/sft_miniseek_v5_10g.jsonl`（另有 `sft_miniseek_v5_5g.jsonl` 小跑；5G ⊂ 10G）。
-- **可行性 SFT 推荐**：`data/SFT/sft_miniseek_v5_short256.jsonl` + `max_seq_len=256`，`--arch miniseek-m` 从最近 PT ckpt 初始化；超长 keep-head 截断。Web/CLI 默认路径**不**自动改成 short256，需显式选文件。
+- **可行性 SFT 推荐**：`data/SFT/sft_miniseek_v5_short256.jsonl` + `max_seq_len=256`，`--arch miniseek-v` 从最近 PT ckpt 初始化；超长 keep-head 截断。Web/CLI 默认路径**不**自动改成 short256，需显式选文件。
 - **SFT v5**：见 `docs/superpowers/specs/2026-10-28-sft-v5-mix-design.md` 与 `data/SFT/SOURCES_v5.md`。`sft_miniseek_v5_10g.jsonl` ≈10.00 GiB（~596 万条）；`sft_miniseek_v5_5g.jsonl` ≈5.00 GiB（子集）；`sft_miniseek_v5_short256.jsonl` ≈0.84 GiB（~202 万条，从 10G 按 ≤256/软≤280 丢长样本；见 `SOURCES_v5_short256.md` 与 short256 design spec）。v1 已删；raw 缓存 `_raw_sft_v5/` 已清。
 
 ## 代码结构（简）
 
-- `algo/`：`model/miniseek_m/`（MiniSeek-M：attention / mhc / moe / engram / model / cache / dspark）、`miniseek_m_train.py`、`optim/`（Muon / Sinkhorn 动量 / 参数分组），入口 `train_pretrain` / `train_sft` / `train_dspark` / `dspark_calibrate` / `generate`。DenseLM 仅在 `archive/dense-tiny`。
-- `tests/miniseek_m_ref/`：官方推理代码移植；`tests/test_miniseek_m_*.py` 对照它做逐算子等价测试。
+- `algo/`：`model/miniseek_v/`（MiniSeek-V：attention / mhc / moe / engram / model / cache / dspark）、`miniseek_v_train.py`、`optim/`（Muon / Sinkhorn 动量 / 参数分组），入口 `train_pretrain` / `train_sft` / `train_dspark` / `dspark_calibrate` / `generate`。DenseLM 仅在 `archive/dense-tiny`。
+- `tests/miniseek_v_ref/`：官方推理代码移植；`tests/test_miniseek_v_*.py` 对照它做逐算子等价测试。
 - `api/`：FastAPI；`worker_app` 跑训练/评测（与 Web/API 进程隔离）。
 - `frontend/`：Web UI（训练 / 对话 / 续写 / 架构 / 评测 / 数据清洗 / 专家负载）。
-- `images/`：README 配图；架构页 MiniSeek-M 预设截图，图改了要重截。
+- `images/`：README 配图；架构页 MiniSeek-V 预设截图，图改了要重截。
 - `deploy/`：用户级 systemd 单元（web / api / worker）。**不含**反向 SSH 隧道文件。
 - `tokenizer/`：词表与相关资产。
 
@@ -70,9 +70,9 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 - Max Steps：新开与续训都是**本轮**步数上限；续训进度条/ETA/LR（warmup+cosine）从 0 起算，**不把** ckpt 旧步数并进分母。ckpt 内仍记 lifetime_step 供下次续训。0 或空只按 epochs。
 - `--max-samples`：先从全量合格样本按 `--seed` 均匀抽取再截断，不用文件前缀。不传则全量。验证集仍在这批样本上按 `--valid-ratio` 抽。`--valid-max-samples` 只限制已经抽出的验证子集。
 - SFT：新开才需要 Init Ckpt；填了 Resume 则不必再填 Init。
-- **v41 默认**（CLI 与 Web 一致）：PT `max_seq_len=1024`、lr 3e-4（min = lr×0.1）、`torch.compile` 关；优化器分组：矩阵走 Muon，embed / head / Engram 表走 Sinkhorn 动量（Engram lr×5），norm 与标量走 AdamW。pack 时文档按 2 对齐并带 `doc_ids` 做样本级注意力掩码。PT 候选池默认关；SFT 默认开候选池 + Decoder Bounded Replay 模拟（`--no-candidate-pool` / `--no-bounded-replay` 可关）。显存紧加 `--act-ckpt`。
-- **可行性 SFT 流程（README 里那套）**：数据 `sft_miniseek_v5_short256.jsonl`；`max_seq_len=256`；`--arch miniseek-m` + 最近 PT `last.pt`/`best.pt`。超 `max_seq_len` 时 SFT **keep-head**（从尾截，优先留问题）。正式长训用 10G + `max_seq_len=1024`。
-- **DSpark**：主干训完（建议 SFT 后）再 `python -m algo.train_dspark --backbone <ckpt> --out-dir <主干 ckpt 所在目录>`（主干冻结），然后 `python -m algo.dspark_calibrate --dspark <dir>/dspark.pt --data <jsonl>` 写回 STS 温度。`dspark.pt` 与主干 ckpt 同目录时，Web 对话/续写自动走投机解码；没有时 M0.1 对话走前缀缓存。
+- **miniseek-v 默认**（CLI 与 Web 一致）：PT `max_seq_len=1024`、lr 3e-4（min = lr×0.1）、`torch.compile` 关；优化器分组：矩阵走 Muon，embed / head / Engram 表走 Sinkhorn 动量（Engram lr×5），norm 与标量走 AdamW。pack 时文档按 2 对齐并带 `doc_ids` 做样本级注意力掩码。PT 候选池默认关；SFT 默认开候选池 + Decoder Bounded Replay 模拟（`--no-candidate-pool` / `--no-bounded-replay` 可关）。显存紧加 `--act-ckpt`。
+- **可行性 SFT 流程（README 里那套）**：数据 `sft_miniseek_v5_short256.jsonl`；`max_seq_len=256`；`--arch miniseek-v` + 最近 PT `last.pt`/`best.pt`。超 `max_seq_len` 时 SFT **keep-head**（从尾截，优先留问题）。正式长训用 10G + `max_seq_len=1024`。
+- **DSpark**：主干训完（建议 SFT 后）单独训练（主干冻结）。Web 训练页已集成「DSpark 草稿头」模式（Pretrain / SFT / DSpark 草稿头 三选一），支持配置 Backbone 权重、Anchors、自动 STS 校准及自动同步至主干目录；CLI 也可通过 `python -m algo.train_dspark --backbone <ckpt> --out-dir <dir>` 运行。`dspark.pt` 位于主干 ckpt 同目录时，Web 对话/续写自动走投机解码；没有时 V1 对话走前缀缓存。
 - 验证集：没有独立 valid 文件，也没有 `--valid` 路径。Pretrain / SFT / `valid_ppl` 都只用 `--valid-ratio` 从训练集内存抽样（Pretrain 默认约 `0.01`），不改源 jsonl。`hparams.valid_path` 忽略。
 - **PT pack（默认 `batch_mode=pack`）**：整篇文档先 tokenize，文档间加 eos 拼成 token 流，再按训练配置的 `max_seq_len`（256/512/1024…）做**非重叠**切块组 batch；**不再**在 pack 前把单篇截到 `max_seq_len`（长文尾巴进后续块，不是滑动窗口）。random/bucket 仍按样本截断；SFT 超长仍是 keep-head，与此无关。
 - **FlashAttention**（仅 Dense / Tiny）：PT / SFT 默认开（`--flash-attn` / UI「FlashAttention」）。优先 `flash_attn` 包；未安装则用 torch SDPA flash（bf16/fp16 + CUDA）。`--no-flash-attn` 可关。日志有 `flash_attn=on backend=...`。v41 用自带的按索引 gather 稀疏注意力，日志为 `flash_attn=n/a`。
@@ -90,7 +90,7 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 
 1. 公仓安全：无私钥、无隧道、无机器内网细节进 commit；文档里若必须提 VPS，仅运维说明且提醒勿提交配置文件。
 2. 改部署/重启服务前确认 worker 与训练隔离仍在；优先热更 API/前端，勿连带停训。
-3. 层实现对齐 DeepSeek-V4.1-Flash。宽度和专家数量可以缩小，算子不换。MoE 用 sqrt-softplus 打分 + bias 选专家、选中分数归一 ×route_scale 加权、clamp SwiGLU。Tiny / Dense 是普通因果注意力 + Pre-Norm，不要画成 SWA / CSA2 / CED / mHC；只有 M0.1 画 M 结构。不把 MiniMind 当学习目标。
+3. 层实现对齐 DeepSeek-V4.1-Flash。宽度和专家数量可以缩小，算子不换。MoE 用 sqrt-softplus 打分 + bias 选专家、选中分数归一 ×route_scale 加权、clamp SwiGLU。Tiny / Dense 是普通因果注意力 + Pre-Norm，不要画成 SWA / CSA2 / CED / mHC；只有 V1 画 Flash 全架构。MiniSeek-M0.1 是简单 MoE 对照，不在 main。不把 MiniMind 当学习目标。
 4. 用户未要求时不要新建无关大文件、不要擅自删正在训练引用的数据路径。
 5. 中文沟通可默认；代码/commit 信息保持清晰英文或中英均可，与现有风格一致。
 
@@ -107,11 +107,11 @@ pgrep -af 'train_pretrain|train_sft' | head
 
 ## 当前状态（滚动更新）
 
-- **PT 训练**：wyf 上若还有旧 `MoELM` 训练进程，其 ckpt 新代码不能加载；跑完或用户决定停训之前勿重启 worker。MiniSeek-M0.1（`--arch miniseek-m`）尚未开训。
-- **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 主文件 `pretrain_mix_12g_clean.jsonl`；SFT **默认与 HF 已切 v5 10G**（`sft_miniseek_v5_10g.jsonl`；5G 对照包保留；见 `SOURCES_v5.md`）。**可行性快跑推荐 short256**（已推 HF `sft_short256`；见 `SOURCES_v5_short256.md`）。训练用 `--valid-ratio`，Hub 无独立 valid。v1 与 `_raw_sft_v5` 已清。
-- **代码**：公仓 `main` 以 MiniSeek-M（`--arch miniseek-m`，`algo/model/miniseek_m/`）为主；Dense / Tiny 完整快照在 `archive/dense-tiny`。旧 `MoELM` 已删；产品名写 MiniSeek-M，不写 V4.1 / 单独的 m。
-- **README**：按 MiniMind 版式直接介绍仓库（M0.1 全架构复现 + 训练 / 推理流程），**不写**逐阶段推进叙事；阶段规划只留在 `docs/STAGE_PLAN.md`（历史记录）。
-- **架构页**：默认预设 **MiniSeek-M**（可训练）；参考预设 **DeepSeek-V4.1-Flash**（`m-ref` / `v41-flash`，不可训练，论文原名不要改成 DeepSeek-M）。抽屉说明走 `archMModuleInfo`。
+- **PT 训练**：wyf 上若还有旧 `MoELM` 训练进程，其 ckpt 新代码不能加载；跑完或用户决定停训之前勿重启 worker。MiniSeek-V1（`--arch miniseek-v`）为当前全架构主线。
+- **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 主文件 `pretrain_mix_12g_clean.jsonl`；SFT **默认与 HF 已切 v5 10G**（`sft_miniseek_v5_10g.jsonl`；5G 对照包保留；见 `SOURCES_v5.md`）。**可行性快跑推荐 short256**（已推 HF `sft_short256`；见 `SOURCES_v5_short256.md`）。训练用 `--valid-ratio`，Hub 无独立 valid。旧 SFT v1 与 `_raw_sft_v5` 已清。
+- **代码**：公仓 `main` 以 MiniSeek-V（`--arch miniseek-v`，`algo/model/miniseek_v/`）为主；Dense / Tiny 完整快照在 `archive/dense-tiny`。旧 `MoELM` 已删；产品名写 MiniSeek-V / V1，不写 V4.1 / 单独的 v。MiniSeek-M0.1=简单 MoE 对照（仅 release/HF）。
+- **README**：按 MiniMind 版式直接介绍仓库（V1 全架构复现 + 训练 / 推理流程），**不写**逐阶段推进叙事；阶段规划只留在 `docs/STAGE_PLAN.md`（历史记录）。
+- **架构页**：默认预设 **MiniSeek-V**（可训练 V1）；参考预设 **DeepSeek-V4.1-Flash**（`m-ref` / `v41-flash`，不可训练，论文原名不要改成 DeepSeek-V）。抽屉说明走 `archVModuleInfo`。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。
 - **Loss 图**：取点间隔可在 UI 调节（从 train.log 按 `plot_every` 重采样），不绑死训练启动时的 plot_every。

@@ -2,11 +2,11 @@ import math
 
 import torch
 
-from algo.model.miniseek_m import FlashConfig, Transformer
+from algo.model.miniseek_v import FlashConfig, Transformer
 from algo.optim import (
     Muon,
     SinkhornMomentum,
-    build_miniseek_m_optimizer,
+    build_miniseek_v_optimizer,
     classify_v41_param,
     hybrid_newton_schulz,
     sinkhorn_direction,
@@ -96,7 +96,7 @@ def test_sinkhorn_matches_algorithm_and_masks_rows():
 def _opt():
     torch.manual_seed(4)
     model = Transformer(FlashConfig.tiny())
-    return model, build_miniseek_m_optimizer(model, lr=1e-3)
+    return model, build_miniseek_v_optimizer(model, lr=1e-3)
 
 
 def test_every_param_in_one_group():

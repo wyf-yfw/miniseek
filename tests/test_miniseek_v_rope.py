@@ -1,9 +1,9 @@
 import pytest
 import torch
 
-from algo.model.miniseek_m.config import FlashConfig
-from algo.model.miniseek_m.rope import apply_rotary_emb, layer_freqs, precompute_freqs_cis, rotate_tail
-from tests.miniseek_m_ref import official as ref
+from algo.model.miniseek_v.config import FlashConfig
+from algo.model.miniseek_v.rope import apply_rotary_emb, layer_freqs, precompute_freqs_cis, rotate_tail
+from tests.miniseek_v_ref import official as ref
 
 
 @pytest.mark.parametrize("original_seq_len", [0, 64])
@@ -48,7 +48,7 @@ def test_flash_config_roundtrip():
 
 def test_f01_defaults():
     cfg = FlashConfig()
-    assert cfg.release_name == "MiniSeek-M0.1"
+    assert cfg.release_name == "MiniSeek-V1"
     assert cfg.layer_modes() == ["SWA", "SWA", "Full", "Reuse", "Full", "Reuse", "Reindex", "Reuse"]
     assert [cfg.kv_source_for(i) for i in range(8)] == [None, None, 2, 2, 4, 4, 4, 4]
     assert [cfg.is_decoder(i) for i in range(8)] == [False] * 4 + [True] * 4

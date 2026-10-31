@@ -1,5 +1,7 @@
 # MiniSeek-M0.1：完整复现 DeepSeek-V4.1-Flash 架构（3090 可训）
 
+> **命名更新（2026-10-31）**：产品线已改为 **MiniSeek-V / MiniSeek-V1**；包路径 `algo/model/miniseek_v/`，CLI `--arch miniseek-v`。下文仍保留当时的 MiniSeek-M / miniseek-m 史料写法；MiniSeek-M0.1 现指简单 MoE 对照线（代码不在 main）。
+
 - 日期：2026-10-29
 - 状态：第 1–8 部分已逐段经用户确认；第 9–10 部分及所有未决细节按用户指示「全部按推荐来」定稿
 - 仓库：`wyf-yfw/miniseek`
@@ -39,7 +41,7 @@
 
 ### 3.1 代码组织
 
-新包 `algo/model/miniseek_m/`，按官方 `model.py` 的模块边界拆分：
+新包 `algo/model/miniseek_v/`，按官方 `model.py` 的模块边界拆分：
 
 | 文件 | 内容 |
 |------|------|
@@ -294,7 +296,7 @@ micro-batch 8 × 1024、BF16 autocast、`torch.compile` 默认开；新增按层
 
 ### 12.2 测试（CPU 可跑；用小尺寸配置）
 
-在 `tests/miniseek_m_ref/` 把官方函数的语义移植成纯 torch 参考实现（注明来源与 MIT 许可），逐元素对拍：
+在 `tests/miniseek_v_ref/` 把官方函数的语义移植成纯 torch 参考实现（注明来源与 MIT 许可），逐元素对拍：
 
 | 对象 | 断言 |
 |------|------|

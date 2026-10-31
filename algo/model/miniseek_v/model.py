@@ -1,4 +1,4 @@
-"""MiniSeek-M 主干：embedding → 复制成 hc 份 → 8 个 Block（编码 0–3 / 解码 4–7）→ 合成 → head。
+"""MiniSeek-V 主干：embedding → 复制成 hc 份 → 8 个 Block（编码 0–3 / 解码 4–7）→ 合成 → head。
 
 对应官方 inference/model.py 的 Block / Transformer。CED 体现在 KV 来源层的安排上：解码器只有
 第一个解码器层（Full）有压缩器，它的输入就是编码器输出 H_{L/2}，其余解码器层复用这份全局 KV；

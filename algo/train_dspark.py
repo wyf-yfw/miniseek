@@ -30,13 +30,13 @@ import time
 
 import torch
 
-from algo import miniseek_m_train as mmt
+from algo import miniseek_v_train as mvt
 from algo.batching import PackedTextBatchIter
 from algo.model import load_model_from_blob
 from algo.model.tokenizer import load_tokenizer
-from algo.model.miniseek_m import FlashConfig, step_expert_bias
-from algo.model.miniseek_m.dspark import DSparkDrafter, dspark_training_losses
-from algo.optim import build_miniseek_m_optimizer
+from algo.model.miniseek_v import FlashConfig, step_expert_bias
+from algo.model.miniseek_v.dspark import DSparkDrafter, dspark_training_losses
+from algo.optim import build_miniseek_v_optimizer
 from algo.train_pretrain import JsonlTextDataset, lr_at_step, save_ckpt, set_lr, set_seed
 
 
@@ -44,7 +44,7 @@ def save_dspark(path: Path, drafter: DSparkDrafter, opt, backbone_path: str, ste
     save_ckpt(
         path,
         {
-            "dspark": mmt.state_for_ckpt(drafter),
+            "dspark": mvt.state_for_ckpt(drafter),
             "config": drafter.cfg.to_dict(),
             "backbone": str(backbone_path),
             "step": int(step),
@@ -57,12 +57,12 @@ def save_dspark(path: Path, drafter: DSparkDrafter, opt, backbone_path: str, ste
 
 def load_drafter(blob: dict) -> DSparkDrafter:
     drafter = DSparkDrafter(FlashConfig.from_dict(blob["config"]))
-    drafter.load_state_dict(mmt.clean_state_dict(blob["dspark"]), strict=True)
+    drafter.load_state_dict(mvt.clean_state_dict(blob["dspark"]), strict=True)
     return drafter
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="MiniSeek-M DSpark drafter training (backbone frozen)")
+    p = argparse.ArgumentParser(description="MiniSeek-V DSpark drafter training (backbone frozen)")
     p.add_argument("--backbone", type=str, required=True, help="v41 主干 checkpoint（PT 或 SFT）")
     p.add_argument("--data", type=str, default="data/PT/pretrain_mix_12g_clean.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
@@ -82,6 +82,8 @@ def main() -> None:
     p.add_argument("--save-last-every", type=int, default=1000)
     p.add_argument("--resume", type=str, default=None, help="从 dspark.pt 续训（含 optimizer）")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--calibrate", action=argparse.BooleanOptionalAction, default=True, help="训练完自动校准 STS 投机置信度")
+    p.add_argument("--sync-to-backbone", action=argparse.BooleanOptionalAction, default=True, help="复制 dspark.pt 到主干目录")
     args = p.parse_args()
 
     set_seed(args.seed)
@@ -101,7 +103,7 @@ def main() -> None:
     else:
         rblob = None
         drafter = DSparkDrafter(cfg).to(device)
-    opt = build_miniseek_m_optimizer(drafter, lr=args.lr, cfg=cfg)
+    opt = build_miniseek_v_optimizer(drafter, lr=args.lr, cfg=cfg)
     if rblob is not None and "optimizer" in rblob:
         opt.load_state_dict(rblob["optimizer"])
     print(
@@ -125,13 +127,18 @@ def main() -> None:
             pad_id=pad_id,
             eos_id=eos_id,
             seed=args.seed + epoch,
-            doc_align=mmt.doc_align(cfg),
+            doc_align=mvt.doc_align(cfg),
             with_doc_ids=True,
         )
 
     total_steps = int(args.max_steps or max(1, epoch_iter(0).estimate_len() * max(1, args.epochs)))
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    print(
+        f"[dspark] samples={len(ds.samples)} total_steps={total_steps} start_step=0 "
+        f"warmup={args.warmup_steps} lr={args.lr}→{args.min_lr}",
+        flush=True,
+    )
     gen = torch.Generator().manual_seed(args.seed)
     step, last = 0, 0.0
     t0 = time.time()
@@ -140,7 +147,7 @@ def main() -> None:
         for batch in epoch_iter(epoch):
             if step >= total_steps:
                 break
-            ids, labels, docs = mmt.unpack_batch(batch, device)
+            ids, labels, docs = mvt.unpack_batch(batch, device)
             set_lr(opt, lr_at_step(step + 1, base_lr=args.lr, min_lr=args.min_lr, warmup_steps=args.warmup_steps, total_steps=total_steps))
             opt.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
@@ -154,18 +161,55 @@ def main() -> None:
             step += 1
             last = float(loss.item())
             if step % args.log_every == 0 or step == 1:
+                ce_val = float(terms["ce"])
+                import math
+                ppl_val = math.exp(min(20.0, ce_val))
                 print(
-                    f"epoch={epoch} step={step} loss={last:.4f} ce={float(terms['ce']):.4f} "
+                    f"epoch={epoch} step={step} loss={last:.4f} ce={ce_val:.4f} "
                     f"tv={float(terms['tv']):.4f} conf={float(terms['conf']):.4f} "
-                    f"accept={float(terms['accept']):.4f} lr={opt.param_groups[0]['lr']:.2e}",
+                    f"accept={float(terms['accept']):.4f} ppl={ppl_val:.2f} lr={opt.param_groups[0]['lr']:.2e}",
                     flush=True,
                 )
             if args.save_last_every > 0 and step % args.save_last_every == 0:
                 save_dspark(out_dir / "dspark.pt", drafter, opt, args.backbone, step, last)
         if step >= total_steps:
             break
-    save_dspark(out_dir / "dspark.pt", drafter, opt, args.backbone, step, last)
-    print(f"[dspark] done steps={step} loss={last:.4f} elapsed={time.time() - t0:.1f}s -> {out_dir / 'dspark.pt'}", flush=True)
+    target_ckpt = out_dir / "dspark.pt"
+    save_dspark(target_ckpt, drafter, opt, args.backbone, step, last)
+    print(f"[dspark] done steps={step} loss={last:.4f} elapsed={time.time() - t0:.1f}s -> {target_ckpt}", flush=True)
+
+    if args.calibrate:
+        print("[dspark] 开始自动执行 STS 投机置信度校准...", flush=True)
+        try:
+            import subprocess
+            cal_cmd = [
+                sys.executable,
+                "-m",
+                "algo.dspark_calibrate",
+                "--dspark",
+                str(target_ckpt),
+                "--data",
+                str(args.data),
+                "--backbone",
+                str(args.backbone),
+            ]
+            cal_res = subprocess.run(cal_cmd, capture_output=True, text=True, check=True)
+            for line in cal_res.stdout.strip().splitlines():
+                print(f"[calibrate] {line}", flush=True)
+            print("[dspark] STS 投机置信度校准完成", flush=True)
+        except Exception as exc:
+            print(f"[dspark] WARN: STS 校准遇到异常（dspark.pt 仍有效）: {exc}", flush=True)
+
+    if args.sync_to_backbone:
+        try:
+            import shutil
+            backbone_dir = Path(args.backbone).resolve().parent
+            dest = backbone_dir / "dspark.pt"
+            if dest != target_ckpt.resolve():
+                shutil.copy2(target_ckpt, dest)
+                print(f"[dspark] 已同步复制到主干目录: {dest}（Web 对话已可直接识别并启用）", flush=True)
+        except Exception as exc:
+            print(f"[dspark] WARN: 同步到主干目录失败: {exc}", flush=True)
 
 
 if __name__ == "__main__":
