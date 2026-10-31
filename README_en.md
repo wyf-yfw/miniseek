@@ -52,10 +52,12 @@ MiniSeek shrinks the same architecture to a size a 3090 can train. Depth, width 
 
 | Model | Params | Notes | Release |
 |-------|--------|-------|---------|
-| MiniSeek-V1 | 187M-A33M (+19M DSpark) | Full DeepSeek-V4.1-Flash architecture | see HF / release |
-| [MiniSeek-M0.1](https://huggingface.co/wyf-yfw/MiniSeek-M0.1) | simple MoE baseline | plain MoE (not full Flash) | released |
-| [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense SFT / chat | 2026-10 |
-| [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense pretrained base | 2026-10 |
+| [MiniSeek-V1](https://huggingface.co/wyf-yfw/MiniSeek-V1) | 187M-A33M (+19M DSpark) | Full DeepSeek-V4.1-Flash · SFT / chat | 2026-10 |
+| [MiniSeek-V1-base](https://huggingface.co/wyf-yfw/MiniSeek-V1-base) | 187M-A33M | Full DeepSeek-V4.1-Flash · pretrained base | 2026-10 |
+| [MiniSeek-M0.1](https://huggingface.co/wyf-yfw/MiniSeek-M0.1) | 150M | Simple MoE baseline · SFT / chat | 2026-10 |
+| [MiniSeek-M0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-M0.1-base) | 150M | Simple MoE baseline · pretrained base | 2026-10 |
+| [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense · SFT / chat | 2026-10 |
+| [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense · pretrained base | 2026-10 |
 
 ---
 
@@ -94,10 +96,13 @@ python -m pytest tests -q
 
 ### 1' Download a model
 
-MiniSeek-V1 will be published on Hugging Face once training finishes. For now you can try the dense model:
+All weights are on Hugging Face; download what you need:
 
 ```bash
-hf download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
+hf download wyf-yfw/MiniSeek-V1 --local-dir ./hub/MiniSeek-V1
+# or the simple MoE baseline / Dense line
+# hf download wyf-yfw/MiniSeek-M0.1 --local-dir ./hub/MiniSeek-M0.1
+# hf download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
 ```
 
 ### 2' CLI generation

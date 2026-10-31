@@ -52,10 +52,12 @@ MiniSeek 把这套架构原样缩到一张 3090 能训的尺寸：层数、宽�
 
 | 模型 | 参数量 | 说明 | Release |
 |------|--------|------|---------|
-| MiniSeek-V1 | 187M-A33M（DSpark 另 19M） | DeepSeek-V4.1-Flash 全架构 | 见 HF / release |
-| [MiniSeek-M0.1](https://huggingface.co/wyf-yfw/MiniSeek-M0.1) | 简单 MoE 对照 | 普通 MoE（非 Flash 全架构） | 已发布 |
-| [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense SFT / 对话 | 2026-10 |
-| [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense 预训练基座 | 2026-10 |
+| [MiniSeek-V1](https://huggingface.co/wyf-yfw/MiniSeek-V1) | 187M-A33M（DSpark 另 19M） | DeepSeek-V4.1-Flash 全架构 · SFT / 对话 | 2026-10 |
+| [MiniSeek-V1-base](https://huggingface.co/wyf-yfw/MiniSeek-V1-base) | 187M-A33M | DeepSeek-V4.1-Flash 全架构 · 预训练基座 | 2026-10 |
+| [MiniSeek-M0.1](https://huggingface.co/wyf-yfw/MiniSeek-M0.1) | 150M | 简单 MoE 对照 · SFT / 对话 | 2026-10 |
+| [MiniSeek-M0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-M0.1-base) | 150M | 简单 MoE 对照 · 预训练基座 | 2026-10 |
+| [MiniSeek-D0.1](https://huggingface.co/wyf-yfw/MiniSeek-D0.1) | 31.73M | Dense · SFT / 对话 | 2026-10 |
+| [MiniSeek-D0.1-base](https://huggingface.co/wyf-yfw/MiniSeek-D0.1-base) | 28.45M | Dense · 预训练基座 | 2026-10 |
 
 ---
 
@@ -94,10 +96,13 @@ python -m pytest tests -q
 
 ### 1' 下载模型
 
-MiniSeek-V1 训练完成后发布到 Hugging Face，现在可以先下载 Dense 版：
+权重都在 Hugging Face，按需下载：
 
 ```bash
-hf download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
+hf download wyf-yfw/MiniSeek-V1 --local-dir ./hub/MiniSeek-V1
+# 或简单 MoE 对照 / Dense
+# hf download wyf-yfw/MiniSeek-M0.1 --local-dir ./hub/MiniSeek-M0.1
+# hf download wyf-yfw/MiniSeek-D0.1 --local-dir ./hub/MiniSeek-D0.1
 ```
 
 ### 2' CLI 推理
