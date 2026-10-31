@@ -1340,7 +1340,7 @@
                       <option value="false">关</option>
                     </select>
                   </label>
-                  <label><span class="field-title">同步到主干目录</span><span class="field-hint">自动将产出的 dspark.pt 复制到主干同级目录，让 Web 对话立即可用。</span>
+                  <label><span class="field-title">同步到主干目录</span><span class="field-hint">训完后把 dspark.pt 复制到主干同级，方便在对话页单独选草稿头。</span>
                     <select id="dspark-sync">
                       <option value="true">开（默认）</option>
                       <option value="false">关</option>
@@ -1475,15 +1475,32 @@
       <div class="chat-shell">
         <aside class="chat-side">
           <h2>模型</h2>
-          <label><span class="field-title">Checkpoint</span>
-            <span class="field-hint">打开系统文件对话框选择 .pt，或从下方列表点选。</span>
+          <label><span class="field-title">主干 Checkpoint</span>
+            <span class="field-hint">必选：语言模型权重（best.pt / last.pt）。</span>
             <div class="path-row">
-              <input id="ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
+              <input id="ckpt-manual" type="text" placeholder="主干 .pt" />
               <button type="button" class="btn-browse" data-for="ckpt-manual" id="btn-pick-ckpt">打开选择</button>
             </div>
           </label>
-          <label>最近/扫描到的列表
+          <label>主干列表
             <select id="ckpt-select"></select>
+          </label>
+          <label><span class="field-title">DSpark 草稿头</span>
+            <span class="field-hint">可选：另选 dspark.pt 才启用投机解码；留空则只用主干。</span>
+            <div class="path-row">
+              <input id="dspark-manual" type="text" placeholder="可选 dspark.pt" />
+              <button type="button" class="btn-browse" data-for="dspark-manual" id="btn-pick-dspark">打开选择</button>
+            </div>
+          </label>
+          <label>DSpark 列表
+            <select id="dspark-select"></select>
+          </label>
+          <label><span class="field-title">推理引擎 (性能对比)</span>
+            <span class="field-hint">选择底层计算后端：原生 PyTorch 或 DeepInfer 算子加速。</span>
+            <select id="infer-engine-select">
+              <option value="native" selected>原生引擎 (PyTorch / 原版)</option>
+              <option value="deepinfer">DeepInfer 引擎 (TileLang / 算子加速)</option>
+            </select>
           </label>
           <div class="row">
             <button type="button" id="btn-refresh-ckpt">刷新列表</button>
@@ -1541,16 +1558,33 @@
       <div class="chat-shell">
         <aside class="chat-side">
           <h2>模型（预训练）</h2>
-          <p class="field-hint" style="margin:0 0 10px">与「对话」共用已加载权重；续写不做 chat 模板，适合 Pretrain / Tiny 裸模型。</p>
-          <label><span class="field-title">Checkpoint</span>
-            <span class="field-hint">打开选择或从列表点选后加载。</span>
+          <p class="field-hint" style="margin:0 0 10px">与「对话」共用已加载权重；续写不做 chat 模板。主干必选，DSpark 可选。</p>
+          <label><span class="field-title">主干 Checkpoint</span>
+            <span class="field-hint">必选：语言模型权重。</span>
             <div class="path-row">
-              <input id="cont-ckpt-manual" type="text" placeholder="选择或粘贴 .pt 路径" />
+              <input id="cont-ckpt-manual" type="text" placeholder="主干 .pt" />
               <button type="button" class="btn-browse" data-for="cont-ckpt-manual" id="btn-pick-cont-ckpt">打开选择</button>
             </div>
           </label>
-          <label>最近/扫描到的列表
+          <label>主干列表
             <select id="cont-ckpt-select"></select>
+          </label>
+          <label><span class="field-title">DSpark 草稿头</span>
+            <span class="field-hint">可选；留空则不用投机解码。</span>
+            <div class="path-row">
+              <input id="cont-dspark-manual" type="text" placeholder="可选 dspark.pt" />
+              <button type="button" class="btn-browse" data-for="cont-dspark-manual" id="btn-pick-cont-dspark">打开选择</button>
+            </div>
+          </label>
+          <label>DSpark 列表
+            <select id="cont-dspark-select"></select>
+          </label>
+          <label><span class="field-title">推理引擎 (性能对比)</span>
+            <span class="field-hint">选择底层计算后端：原生 PyTorch 或 DeepInfer 算子加速。</span>
+            <select id="cont-infer-engine-select">
+              <option value="native" selected>原生引擎 (PyTorch / 原版)</option>
+              <option value="deepinfer">DeepInfer 引擎 (TileLang / 算子加速)</option>
+            </select>
           </label>
           <div class="row">
             <button type="button" id="btn-cont-refresh-ckpt">刷新列表</button>
@@ -1908,8 +1942,10 @@
       "resume": { title: "选择 Resume checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
       "init-ckpt": { title: "选择 Init checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
       "dspark-backbone": { title: "选择 DSpark 主干 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
-      "ckpt-manual": { title: "选择推理 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
-      "cont-ckpt-manual": { title: "选择续写 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "ckpt-manual": { title: "选择推理主干 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "dspark-manual": { title: "选择 DSpark 草稿头", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "cont-ckpt-manual": { title: "选择续写主干 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
+      "cont-dspark-manual": { title: "选择续写 DSpark 草稿头", filetypes: "Checkpoint|*.pt;All|*.*", kind: "file" },
       "bench-ckpt": { title: "选择评测 checkpoint", filetypes: "Checkpoint|*.pt;All|*.*", kind: "any" },
     };
 
@@ -2161,7 +2197,7 @@
       const modeHint = $("mode-hint");
       if (modeHint) {
         if (isDspark) {
-          modeHint.textContent = "DSpark：投机解码草稿头训练。主干权重冻结（选择已有的 PT 或 SFT .pt），仅训练 19M 投机草稿头。训完后自动校准 STS 温度并在 Web 对话中开启投机加速。";
+          modeHint.textContent = "DSpark：投机解码草稿头训练。主干权重冻结（选择已有的 PT 或 SFT .pt），仅训练 19M 投机草稿头。训完后可在对话页另选 dspark.pt 启用投机加速。";
         } else if (isSft) {
           modeHint.textContent = "SFT：对话监督微调；数据为 conversations/messages jsonl。下方只显示 SFT 需要的字段（含 Init Ckpt）。";
         } else {
@@ -3116,6 +3152,10 @@
       }
     }
 
+    function isDsparkPath(f) {
+      return /(^|\/)dspark\.pt$/.test(String(f || ""));
+    }
+
     function fillSelect(el, files, emptyLabel) {
       el.innerHTML = "";
       if (!files.length) {
@@ -3133,7 +3173,31 @@
       }
     }
 
-    async function refreshCheckpoints() {
+    function fillOptionalSelect(el, files, emptyLabel) {
+      el.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = emptyLabel;
+      el.appendChild(empty);
+      for (const f of files) {
+        const o = document.createElement("option");
+        o.value = f;
+        o.textContent = f;
+        el.appendChild(o);
+      }
+    }
+
+    function preferBackboneCkpt(files) {
+      const bb = files.filter((f) => !isDsparkPath(f));
+      return (
+        bb.find((f) => f.endsWith("best.pt")) ||
+        bb.find((f) => f.endsWith("last.pt")) ||
+        bb[0] ||
+        ""
+      );
+    }
+
+    async function fetchCheckpointFiles() {
       let files = [];
       if (selectedId) {
         const res = await fetch(`/api/tasks/${selectedId}/checkpoints`);
@@ -3143,10 +3207,22 @@
         const res = await fetch("/api/checkpoints");
         if (res.ok) files = (await res.json()).files || [];
       }
-      fillSelect($("ckpt-select"), files, "无可用 checkpoint");
-      // Prefer best.pt then last.pt from current task
-      const prefer = files.find((f) => f.endsWith("best.pt")) || files.find((f) => f.endsWith("last.pt"));
-      if (prefer) $("ckpt-select").value = prefer;
+      return files;
+    }
+
+    async function refreshCheckpoints() {
+      const files = await fetchCheckpointFiles();
+      const backbone = files.filter((f) => !isDsparkPath(f));
+      const dsparks = files.filter((f) => isDsparkPath(f));
+      fillSelect($("ckpt-select"), backbone, "无可用主干 checkpoint");
+      fillOptionalSelect($("dspark-select"), dsparks, "不使用 DSpark");
+      const prefer = preferBackboneCkpt(files);
+      if (prefer) {
+        $("ckpt-select").value = prefer;
+        if (!($("ckpt-manual").value || "").trim()) $("ckpt-manual").value = prefer;
+      }
+      const curD = ($("dspark-manual").value || "").trim();
+      if (curD && dsparks.includes(curD)) $("dspark-select").value = curD;
     }
 
     async function refreshEnv() {
@@ -3352,8 +3428,16 @@
         const row = document.createElement("div");
         row.className = `msg-row ${m.role}`;
         row.innerHTML = `<div class="msg-bubble"><div class="msg-avatar">${m.role === "user" ? "你" : "AI"}</div><div class="msg-body"></div></div>`;
-        row.querySelector(".msg-body").textContent = m.content || "";
-        if (m.streaming) row.querySelector(".msg-body").classList.add("streaming");
+        const body = row.querySelector(".msg-body");
+        body.textContent = m.content || "";
+        if (m.meta) {
+          const metaEl = document.createElement("div");
+          metaEl.className = "msg-meta";
+          metaEl.style.cssText = "font-size:11px;color:var(--muted);margin-top:6px;border-top:1px dashed var(--line);padding-top:4px;";
+          metaEl.textContent = m.meta;
+          body.appendChild(metaEl);
+        }
+        if (m.streaming) body.classList.add("streaming");
         box.appendChild(row);
       }
       box.scrollTop = box.scrollHeight;
@@ -3574,14 +3658,22 @@
       }
       return { events, rest };
     }
+    function syncInferPathsToContinue(path, dspark) {
+      if ($("cont-ckpt-manual") && path) $("cont-ckpt-manual").value = path;
+      if ($("cont-dspark-manual")) $("cont-dspark-manual").value = dspark || "";
+      if ($("ckpt-manual") && path) $("ckpt-manual").value = path;
+      if ($("dspark-manual")) $("dspark-manual").value = dspark || "";
+    }
+
     async function loadCheckpoint() {
       $("load-msg").textContent = "正在加载…";
       setChatStatus("加载中…", false);
       const path = ($("ckpt-manual").value || "").trim() || $("ckpt-select").value;
+      const dspark = ($("dspark-manual").value || "").trim() || $("dspark-select").value || "";
       const res = await fetch("/api/infer/load", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ckpt_path: path }),
+        body: JSON.stringify({ ckpt_path: path, dspark_path: dspark }),
       });
       const msg = res.ok ? (await res.json()).message : await readError(res);
       $("load-msg").textContent = msg;
@@ -3591,6 +3683,7 @@
         $("cont-status-text").textContent = res.ok ? msg : "加载失败";
         $("cont-dot").classList.toggle("on", !!res.ok);
       }
+      if (res.ok) syncInferPathsToContinue(path, dspark);
     }
     async function sendChat() {
       if (chatState.streaming) return;
@@ -3625,6 +3718,7 @@
         renderTopk(null);
         setChatStatus("逐步调试中…", true);
       }
+      const engine = ($("infer-engine-select") && $("infer-engine-select").value) || "native";
       try {
         const res = await fetch("/api/infer/chat/stream", {
           method: "POST",
@@ -3638,6 +3732,7 @@
             seed: num("seed"),
             debug: debug,
             debug_topk: Math.max(1, Math.min(50, num("debug-topk") || 10)),
+            engine: engine,
           }),
         });
         if (!res.ok) {
@@ -3670,10 +3765,13 @@
               if (ev.data && typeof ev.data.text === "string" && !assistant.content && !debug) {
                 assistant.content = ev.data.text;
               }
+              const engLabel = ev.data.engine_label || (ev.data.engine === "deepinfer" ? "DeepInfer 算子加速" : "原生 PyTorch");
               setChatStatus(
-                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s`,
+                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s · [${engLabel}]`,
                 true
               );
+              assistant.meta = `${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s · 耗时 ${ev.data.seconds || 0}s · [${engLabel}]`;
+              renderChat();
               if (debug) {
                 chatState.debugDone = true;
                 finishDebugIfIdle();
@@ -3741,6 +3839,33 @@
       const v = $("ckpt-select").value;
       if (v) $("ckpt-manual").value = v;
     });
+    $("dspark-select").addEventListener("change", () => {
+      $("dspark-manual").value = $("dspark-select").value || "";
+    });
+
+    async function onEngineChange(newEngine) {
+      if ($("infer-engine-select")) $("infer-engine-select").value = newEngine;
+      if ($("cont-infer-engine-select")) $("cont-infer-engine-select").value = newEngine;
+      try {
+        const res = await fetch("/api/infer/engine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ engine: newEngine }),
+        });
+        if (res.ok) {
+          const label = newEngine === "deepinfer" ? "DeepInfer 算子加速" : "原生 PyTorch";
+          setChatStatus(`引擎已就绪 · [${label}]`, true);
+          setContStatus(`引擎已就绪 · [${label}]`, true);
+        }
+      } catch (_) {}
+    }
+
+    if ($("infer-engine-select")) {
+      $("infer-engine-select").addEventListener("change", (e) => onEngineChange(e.target.value));
+    }
+    if ($("cont-infer-engine-select")) {
+      $("cont-infer-engine-select").addEventListener("change", (e) => onEngineChange(e.target.value));
+    }
 
     $("btn-load").addEventListener("click", loadCheckpoint);
     $("btn-clear-chat").addEventListener("click", () => {
@@ -3845,6 +3970,13 @@
       g.textContent = contState.gen;
       box.appendChild(p);
       box.appendChild(g);
+      if (contState.meta) {
+        const m = document.createElement("div");
+        m.className = "cont-meta";
+        m.style.cssText = "font-size:12px;color:var(--muted);margin-top:10px;border-top:1px dashed var(--line);padding-top:6px;";
+        m.textContent = contState.meta;
+        box.appendChild(m);
+      }
       box.classList.toggle("streaming", !!contState.streaming);
       box.scrollTop = box.scrollHeight;
     }
@@ -3854,52 +3986,48 @@
         const res = await fetch("/api/checkpoints");
         if (res.ok) list = (await res.json()).files || [];
       } catch (_) { list = []; }
-      const sel = $("cont-ckpt-select");
-      const cur = sel.value;
-      sel.innerHTML = "";
-      if (!list.length) {
-        const o = document.createElement("option");
-        o.value = "";
-        o.textContent = "无可用 checkpoint";
-        sel.appendChild(o);
-      } else {
-        for (const f of list) {
-          const path = typeof f === "string" ? f : (f.path || f);
-          const o = document.createElement("option");
-          o.value = path;
-          o.textContent = path;
-          sel.appendChild(o);
+      const paths = list.map((f) => (typeof f === "string" ? f : (f.path || f))).filter(Boolean);
+      const backbone = paths.filter((f) => !isDsparkPath(f));
+      const dsparks = paths.filter((f) => isDsparkPath(f));
+      const curBb = $("cont-ckpt-select").value;
+      const curDs = $("cont-dspark-select").value;
+      fillSelect($("cont-ckpt-select"), backbone, "无可用主干 checkpoint");
+      fillOptionalSelect($("cont-dspark-select"), dsparks, "不使用 DSpark");
+      if (curBb && backbone.includes(curBb)) $("cont-ckpt-select").value = curBb;
+      else {
+        const prefer = preferBackboneCkpt(paths);
+        if (prefer) {
+          $("cont-ckpt-select").value = prefer;
+          if (!($("cont-ckpt-manual").value || "").trim()) $("cont-ckpt-manual").value = prefer;
         }
       }
-      if (cur) sel.value = cur;
-      else if (list.length) {
-        const prefer = list.find((x) => String(typeof x === "string" ? x : x.path || "").includes("best.pt"));
-        const path = prefer ? (typeof prefer === "string" ? prefer : prefer.path) : (typeof list[0] === "string" ? list[0] : list[0].path);
-        if (path) { sel.value = path; $("cont-ckpt-manual").value = path; }
-      }
+      if (curDs && dsparks.includes(curDs)) $("cont-dspark-select").value = curDs;
+      const manD = ($("cont-dspark-manual").value || "").trim();
+      if (manD && dsparks.includes(manD)) $("cont-dspark-select").value = manD;
     }
     $("cont-ckpt-select").addEventListener("change", () => {
       const v = $("cont-ckpt-select").value;
       if (v) $("cont-ckpt-manual").value = v;
     });
+    $("cont-dspark-select").addEventListener("change", () => {
+      $("cont-dspark-manual").value = $("cont-dspark-select").value || "";
+    });
     async function loadContCheckpoint() {
       $("cont-load-msg").textContent = "正在加载…";
       setContStatus("加载中…", false);
       const path = ($("cont-ckpt-manual").value || "").trim() || $("cont-ckpt-select").value;
+      const dspark = ($("cont-dspark-manual").value || "").trim() || $("cont-dspark-select").value || "";
       const res = await fetch("/api/infer/load", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ckpt_path: path }),
+        body: JSON.stringify({ ckpt_path: path, dspark_path: dspark }),
       });
       const msg = res.ok ? (await res.json()).message : await readError(res);
       $("cont-load-msg").textContent = msg;
       setContStatus(res.ok ? msg : "加载失败", res.ok);
       if ($("load-msg")) $("load-msg").textContent = msg;
       if (typeof setChatStatus === "function") setChatStatus(res.ok ? msg : "加载失败", res.ok);
-      if (res.ok && path) {
-        if ($("ckpt-manual")) $("ckpt-manual").value = path;
-        if ($("cont-ckpt-manual")) $("cont-ckpt-manual").value = path;
-      }
+      if (res.ok) syncInferPathsToContinue(path, dspark);
     }
     async function runContinue() {
       if (contState.streaming) return;
@@ -3914,6 +4042,7 @@
       const controller = new AbortController();
       contState.abort = controller;
       setContStatus("生成中…", true);
+      const engine = ($("cont-infer-engine-select") && $("cont-infer-engine-select").value) || ($("infer-engine-select") && $("infer-engine-select").value) || "native";
       try {
         const res = await fetch("/api/infer/continue/stream", {
           method: "POST",
@@ -3925,6 +4054,7 @@
             temperature: num("cont-temperature"),
             top_k: num("cont-top-k"),
             seed: num("cont-seed"),
+            engine: engine,
           }),
         });
         if (!res.ok) {
@@ -3949,10 +4079,13 @@
               contState.gen += (contState.gen ? "\n" : "") + ("错误: " + (ev.data.message || "unknown"));
               renderContOut();
             } else if (ev.event === "done") {
+              const engLabel = ev.data.engine_label || (ev.data.engine === "deepinfer" ? "DeepInfer 算子加速" : "原生 PyTorch");
               setContStatus(
-                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s`,
+                `完成 · ${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s · [${engLabel}]`,
                 true
               );
+              contState.meta = `${ev.data.tokens || 0} tok · ${ev.data.tokens_per_s || 0} tok/s · 耗时 ${ev.data.seconds || 0}s · [${engLabel}]`;
+              renderContOut();
             }
           }
         }

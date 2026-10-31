@@ -66,6 +66,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = PROJECT_ROOT / "frontend"
 DEFAULT_PRETRAIN_DATA = str(PROJECT_ROOT / "data" / "PT" / "pretrain_mix_12g_clean.jsonl")
 DEFAULT_SFT_DATA = str(PROJECT_ROOT / "data" / "SFT" / "sft_miniseek_v5_10g.jsonl")
+DEFAULT_SFT_SHORT256 = str(PROJECT_ROOT / "data" / "SFT" / "sft_miniseek_v5_short256.jsonl")
 DEFAULT_PRETRAIN_OUT = str(PROJECT_ROOT / "tasks" / "_default_pretrain")
 DEFAULT_SFT_OUT = str(PROJECT_ROOT / "tasks" / "_default_sft")
 DEFAULT_V41_OUT = str(PROJECT_ROOT / "tasks" / "_default_v41")
@@ -269,8 +270,11 @@ def format_chat_messages(messages: List[dict]) -> str:
 class InferenceEngine:
     def __init__(self) -> None:
         self.model = None
+        self.deepinfer_model = None
+        self.active_engine = "native"
         self.tokenizer = None
         self.loaded_ckpt: Optional[str] = None
+        self.loaded_dspark: Optional[str] = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._gen_lock = threading.Lock()
         self._cancel = threading.Event()
@@ -282,12 +286,19 @@ class InferenceEngine:
         """Signal the active stream_chat / stream_continue loop to break ASAP."""
         self._cancel.set()
 
-    def load_model(self, ckpt_path: str) -> str:
+    def load_model(self, ckpt_path: str, dspark_path: str = "") -> str:
         if not ckpt_path or not Path(ckpt_path).exists():
             raise HTTPException(status_code=404, detail=f"找不到 checkpoint: {ckpt_path}")
         if self.tokenizer is None:
             self.tokenizer = load_tokenizer(allow_fallback=True)
-        path = Path(ckpt_path)
+        path = Path(ckpt_path).resolve()
+        dspark_raw = (dspark_path or "").strip()
+        drafter_file: Optional[Path] = None
+        if dspark_raw:
+            drafter_file = Path(dspark_raw).resolve()
+            if not drafter_file.exists():
+                raise HTTPException(status_code=404, detail=f"找不到 DSpark 权重: {dspark_raw}")
+
         # HF export dir or pytorch_model.bin → normalize to training blob shape
         if path.is_dir() and (path / "pytorch_model.bin").exists():
             weight_path = path / "pytorch_model.bin"
@@ -312,9 +323,16 @@ class InferenceEngine:
                     "loss": cfg_raw.get("train_loss", "?"),
                 }
         else:
-            blob = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            blob = torch.load(str(path), map_location="cpu", weights_only=False)
+
+        if isinstance(blob, dict) and "dspark" in blob and "model" not in blob:
+            raise HTTPException(
+                status_code=400,
+                detail="选中的是 DSpark 草稿头，不是主干。请在「主干」里选 best.pt/last.pt，在「DSpark」里另选 dspark.pt。",
+            )
+
         model, cfg = load_model_from_blob(blob)
-                # M：多轮对话复用上一轮的全局 KV（单槽前缀缓存）；换权重时清空
+        # MiniSeek-V：多轮对话复用上一轮的全局 KV（单槽前缀缓存）；换权重时清空
         self.prefix_cache = PrefixCache() if getattr(model, "supports_prefix_cache", False) else None
         device = torch.device("cpu")
         if torch.cuda.is_available():
@@ -339,32 +357,50 @@ class InferenceEngine:
             model.to(device).eval()
         self.model = model
         self.device = device
-        self.loaded_ckpt = ckpt_path
-        dspark_note = self._load_sibling_drafter(path, cfg, device)
+        self.loaded_ckpt = str(path)
+        self.loaded_dspark = None
+        dspark_note = self._attach_drafter(cfg, device, drafter_file)
+
+        deepinfer_note = ""
+        self.deepinfer_model = None
+        if device.type == "cuda":
+            try:
+                from algo.model.miniseek_v.deepinfer_engine import DeepInferAcceleratedModel
+                self.deepinfer_model = DeepInferAcceleratedModel(self.model)
+                deepinfer_note = " | DeepInfer 算子加速已就绪"
+            except Exception as e:
+                logger.warning(f"DeepInfer 引擎初始化失败: {e}")
+                deepinfer_note = f" (DeepInfer 初始化跳过: {e})"
+
         step = blob.get("step", "?")
         loss = blob.get("loss", "?")
         where = "GPU" if device.type == "cuda" else "CPU"
-        return f"已加载 {Path(ckpt_path).name} (Step: {step}, Loss: {loss}, {where}){dspark_note}"
+        return f"已加载 {path.name} (Step: {step}, Loss: {loss}, {where}){dspark_note}{deepinfer_note}"
 
-    def _load_sibling_drafter(self, path: Path, cfg, device: torch.device) -> str:
-        """M：checkpoint 同目录有 dspark.pt 时加载草稿头，对话/续写走 DSpark 投机解码。"""
+    def _attach_drafter(self, cfg, device: torch.device, drafter_path: Optional[Path]) -> str:
+        """仅在显式传入 dspark.pt 时启用投机解码；不选则不用草稿头。"""
         self.drafter, self.sps = None, None
-        dpath = path.with_name("dspark.pt") if path.is_file() else None
-        if dpath is None or not dpath.exists() or not getattr(self.model, "supports_prefix_cache", False):
+        if drafter_path is None:
             return ""
+        if not getattr(self.model, "supports_prefix_cache", False):
+            return "（当前主干不支持 DSpark，已忽略草稿头）"
         try:
             from algo.model.miniseek_v.dspark import measure_sps
             from algo.train_dspark import load_drafter
 
-            dblob = torch.load(dpath, map_location="cpu", weights_only=False)
+            dblob = torch.load(str(drafter_path), map_location="cpu", weights_only=False)
+            if not (isinstance(dblob, dict) and "dspark" in dblob):
+                raise ValueError("文件不是有效的 dspark.pt（缺少 dspark 权重）")
             drafter = load_drafter(dblob)
             if drafter.cfg.dim != cfg.dim or drafter.cfg.vocab_size != cfg.vocab_size:
                 return "（dspark.pt 与主干尺寸不符，未启用）"
             self.drafter = drafter.to(device).eval()
             self.sps = measure_sps(self.model, cfg.dspark_block_size + 1, device)
-            return "，DSpark 投机解码已启用"
+            self.loaded_dspark = str(drafter_path)
+            return f"，DSpark 已启用（{drafter_path.name}）"
         except Exception as exc:  # noqa: BLE001
             self.drafter = None
+            self.loaded_dspark = None
             return f"（DSpark 加载失败：{exc}）"
 
     def generate(
@@ -374,6 +410,7 @@ class InferenceEngine:
         temperature: float = 0.8,
         top_k: int = 50,
         seed: int = 42,
+        engine: Optional[str] = None,
     ) -> str:
         if self.model is None:
             raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
@@ -384,12 +421,17 @@ class InferenceEngine:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
 
+        engine_to_use = (engine or self.active_engine or "native").lower().strip()
+        use_deepinfer = engine_to_use in ("deepinfer", "tilelang") and self.deepinfer_model is not None
+        active_model = self.deepinfer_model if use_deepinfer else self.model
+        engine_label = "DeepInfer (TileLang 算子加速)" if use_deepinfer else "原生 (PyTorch)"
+
         ids = self.tokenizer.encode(prompt, add_special_tokens=True)
         input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
         eos_id = getattr(self.tokenizer, "eos_token_id", None)
         t0 = time.time()
         with self._gen_lock:
-            out = self.model.generate(
+            out = active_model.generate(
                 input_ids,
                 max_new_tokens=int(max_new_tokens),
                 temperature=float(temperature),
@@ -402,7 +444,7 @@ class InferenceEngine:
         text = self.tokenizer.decode(out[0].tolist(), skip_special_tokens=True)
         return (
             f"{text}\n\n---\n生成 {gen_tokens} tokens | 耗时 {cost:.2f}s | "
-            f"{speed:.1f} tokens/s"
+            f"{speed:.1f} tokens/s | 引擎: {engine_label}"
         )
 
     def expert_load(
@@ -555,6 +597,7 @@ class InferenceEngine:
         temperature: float = 0.8,
         top_k: int = 50,
         seed: int = 42,
+        engine: Optional[str] = None,
     ):
         if self.model is None:
             raise HTTPException(status_code=400, detail="请先加载一个 Checkpoint")
@@ -562,6 +605,11 @@ class InferenceEngine:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
+
+        engine_to_use = (engine or self.active_engine or "native").lower().strip()
+        use_deepinfer = engine_to_use in ("deepinfer", "tilelang") and self.deepinfer_model is not None
+        active_model = self.deepinfer_model if use_deepinfer else self.model
+        engine_label = "DeepInfer (TileLang 算子加速)" if use_deepinfer else "原生 (PyTorch)"
 
         ids = self.tokenizer.encode(prompt, add_special_tokens=False)
         input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
@@ -577,9 +625,11 @@ class InferenceEngine:
             extra = {"prefix_cache": self.prefix_cache}
         else:
             extra = {}
+        if use_deepinfer:
+            extra["cancel_event"] = self._cancel
         with self._gen_lock:
             self._cancel.clear()
-            for token in self.model.generate_stream(
+            for token in active_model.generate_stream(
                 input_ids,
                 max_new_tokens=int(max_new_tokens),
                 temperature=float(temperature),
@@ -617,6 +667,8 @@ class InferenceEngine:
                 "seconds": round(cost, 2),
                 "tokens_per_s": round(speed, 1),
                 "cancelled": cancelled,
+                "engine": "deepinfer" if use_deepinfer else "native",
+                "engine_label": engine_label,
             },
         }
 
@@ -808,6 +860,7 @@ class InferenceEngine:
         temperature: float = 0.8,
         top_k: int = 50,
         seed: int = 42,
+        engine: Optional[str] = None,
     ):
         """Raw prefix continuation for pretrained LMs (no chat template)."""
         if self.model is None:
@@ -819,6 +872,11 @@ class InferenceEngine:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
 
+        engine_to_use = (engine or self.active_engine or "native").lower().strip()
+        use_deepinfer = engine_to_use in ("deepinfer", "tilelang") and self.deepinfer_model is not None
+        active_model = self.deepinfer_model if use_deepinfer else self.model
+        engine_label = "DeepInfer (TileLang 算子加速)" if use_deepinfer else "原生 (PyTorch)"
+
         ids = self.tokenizer.encode(prompt, add_special_tokens=True)
         input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
         eos_id = getattr(self.tokenizer, "eos_token_id", None)
@@ -828,9 +886,11 @@ class InferenceEngine:
         n = 0
         cancelled = False
         extra = {"drafter": self.drafter, "sps": self.sps} if self.drafter is not None else {}
+        if use_deepinfer:
+            extra["cancel_event"] = self._cancel
         with self._gen_lock:
             self._cancel.clear()
-            for token in self.model.generate_stream(
+            for token in active_model.generate_stream(
                 input_ids,
                 max_new_tokens=int(max_new_tokens),
                 temperature=float(temperature),
@@ -868,6 +928,8 @@ class InferenceEngine:
                 "seconds": round(cost, 2),
                 "tokens_per_s": round(speed, 1),
                 "cancelled": cancelled,
+                "engine": "deepinfer" if use_deepinfer else "native",
+                "engine_label": engine_label,
             },
         }
 
@@ -892,6 +954,7 @@ class TaskPatch(BaseModel):
 
 class LoadRequest(BaseModel):
     ckpt_path: str
+    dspark_path: str = ""
 
 
 class ExpertLoadRequest(BaseModel):
@@ -948,6 +1011,7 @@ class GenerateRequest(BaseModel):
     temperature: float = 0.8
     top_k: int = 50
     seed: int = 42
+    engine: str = "native"
 
 
 class ChatMessage(BaseModel):
@@ -963,6 +1027,11 @@ class ChatRequest(BaseModel):
     seed: int = 42
     debug: bool = False
     debug_topk: int = 10
+    engine: str = "native"
+
+
+class InferEngineRequest(BaseModel):
+    engine: str = "native"
 
 
 def list_checkpoints_global() -> List[str]:
@@ -1362,7 +1431,7 @@ def defaults() -> dict:
         "dspark": {
             "arch": "miniseek-v",
             "mode": "dspark",
-            "data_path": DEFAULT_PRETRAIN_DATA,
+            "data_path": DEFAULT_SFT_SHORT256,
             "out_dir": str(PROJECT_ROOT / "tasks" / "_default_dspark"),
             "backbone": "",
             "batch_size": 8,
@@ -2053,9 +2122,30 @@ def moe_expert_load(req: ExpertLoadRequest) -> dict:
         ckpt_path=req.ckpt_path,
     )
 
+@app.get("/api/infer/engine")
+def infer_engine_get() -> dict:
+    return {
+        "engine": infer_engine.active_engine,
+        "deepinfer_available": infer_engine.deepinfer_model is not None,
+        "available": ["native"] + (["deepinfer"] if infer_engine.deepinfer_model is not None else []),
+    }
+
+
+@app.post("/api/infer/engine")
+def infer_engine_set(req: InferEngineRequest) -> dict:
+    engine = req.engine.lower().strip()
+    if engine not in ("native", "deepinfer"):
+        raise HTTPException(status_code=400, detail="支持的引擎为: native 或 deepinfer")
+    if engine == "deepinfer" and infer_engine.deepinfer_model is None:
+        raise HTTPException(status_code=400, detail="DeepInfer 引擎不可用（请先加载模型到 GPU）")
+    infer_engine.active_engine = engine
+    label = "DeepInfer (TileLang 算子加速)" if engine == "deepinfer" else "原生 (PyTorch)"
+    return {"engine": infer_engine.active_engine, "message": f"已切换至 {label} 引擎"}
+
+
 @app.post("/api/infer/load")
 def infer_load(req: LoadRequest) -> dict:
-    return {"message": infer_engine.load_model(req.ckpt_path)}
+    return {"message": infer_engine.load_model(req.ckpt_path, dspark_path=req.dspark_path or "")}
 
 
 @app.post("/api/infer/generate")
@@ -2066,6 +2156,7 @@ def infer_generate(req: GenerateRequest) -> dict:
         temperature=req.temperature,
         top_k=req.top_k,
         seed=req.seed,
+        engine=req.engine,
     )}
 
 
@@ -2118,6 +2209,7 @@ async def infer_chat_stream(req: ChatRequest) -> StreamingResponse:
                     temperature=req.temperature,
                     top_k=req.top_k,
                     seed=req.seed,
+                    engine=req.engine,
                 )
             for item in gen:
                 yield _sse(item["event"], item["data"])
@@ -2151,6 +2243,7 @@ async def infer_continue_stream(req: GenerateRequest) -> StreamingResponse:
                 temperature=req.temperature,
                 top_k=req.top_k,
                 seed=req.seed,
+                engine=req.engine,
             ):
                 yield _sse(item["event"], item["data"])
         except HTTPException as exc:

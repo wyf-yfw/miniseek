@@ -124,6 +124,33 @@ def reservoir_subset(items, max_samples: Optional[int], seed: int) -> tuple[list
     return buf, n
 
 
+
+def format_chat_text(conversations: List[dict]) -> str:
+    """拼成 <|im_start|>role\ncontent<|im_end|>\n ...（与 train_sft.format_chat 一致）。"""
+    parts: List[str] = []
+    for turn in conversations:
+        role = (turn.get("role") or "").strip().lower()
+        if role not in {"user", "assistant", "system"}:
+            continue
+        content = turn.get("content")
+        if content is None:
+            content = ""
+        content = str(content).strip()
+        parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
+    return "\n".join(parts)
+
+
+def jsonl_obj_to_text(obj: dict) -> str:
+    """PT 的 text/content，或 SFT 的 conversations/messages → 整段 ChatML 文本。"""
+    text = obj.get("text") or obj.get("content") or ""
+    if text:
+        return str(text)
+    conv = obj.get("conversations") or obj.get("messages")
+    if isinstance(conv, list) and conv:
+        return format_chat_text(conv)
+    return ""
+
+
 class JsonlTextDataset(Dataset):
     def __init__(
         self,
@@ -149,7 +176,7 @@ class JsonlTextDataset(Dataset):
                         if not line:
                             continue
                         obj = json.loads(line)
-                        text = obj.get("text") or obj.get("content") or ""
+                        text = jsonl_obj_to_text(obj)
                         if text:
                             yield text
 

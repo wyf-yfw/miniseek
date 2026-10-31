@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """DSpark 草稿头训练（预训练之后的独立阶段，主干冻结）。
 
+数据：PT `{"text"}` 或 SFT `{"conversations":[...]}`（整段 ChatML）。
+
 示例::
 
     python -m algo.train_dspark --backbone tasks/<pt>/last.pt \\
-        --data data/PT/pretrain_mix_12g_clean.jsonl --out-dir tasks/_dspark --max-steps 2000
+        --data data/SFT/sft_miniseek_v5_short256.jsonl --out-dir tasks/_dspark --max-steps 2000
 
 产出 ``<out-dir>/dspark.pt``：{"dspark", "config", "backbone", "step", "loss", "optimizer", "stage"}。
 校准置信度（STS）见 ``python -m algo.dspark_calibrate``。
@@ -64,7 +66,7 @@ def load_drafter(blob: dict) -> DSparkDrafter:
 def main() -> None:
     p = argparse.ArgumentParser(description="MiniSeek-V DSpark drafter training (backbone frozen)")
     p.add_argument("--backbone", type=str, required=True, help="v41 主干 checkpoint（PT 或 SFT）")
-    p.add_argument("--data", type=str, default="data/PT/pretrain_mix_12g_clean.jsonl")
+    p.add_argument("--data", type=str, default="data/SFT/sft_miniseek_v5_short256.jsonl")
     p.add_argument("--tokenizer", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="tasks/_default_dspark")
     p.add_argument("--max-seq-len", type=int, default=None, help="默认取主干配置")
@@ -207,7 +209,7 @@ def main() -> None:
             dest = backbone_dir / "dspark.pt"
             if dest != target_ckpt.resolve():
                 shutil.copy2(target_ckpt, dest)
-                print(f"[dspark] 已同步复制到主干目录: {dest}（Web 对话已可直接识别并启用）", flush=True)
+                print(f"[dspark] 已同步复制到主干目录: {dest}（对话页可另选此草稿头启用投机解码）", flush=True)
         except Exception as exc:
             print(f"[dspark] WARN: 同步到主干目录失败: {exc}", flush=True)
 

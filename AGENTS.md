@@ -72,7 +72,7 @@ Windows 本地可：`MINISEEK_MONOLITH=1 uvicorn api.app:app --host 0.0.0.0 --po
 - SFT：新开才需要 Init Ckpt；填了 Resume 则不必再填 Init。
 - **miniseek-v 默认**（CLI 与 Web 一致）：PT `max_seq_len=1024`、lr 3e-4（min = lr×0.1）、`torch.compile` 关；优化器分组：矩阵走 Muon，embed / head / Engram 表走 Sinkhorn 动量（Engram lr×5），norm 与标量走 AdamW。pack 时文档按 2 对齐并带 `doc_ids` 做样本级注意力掩码。PT 候选池默认关；SFT 默认开候选池 + Decoder Bounded Replay 模拟（`--no-candidate-pool` / `--no-bounded-replay` 可关）。显存紧加 `--act-ckpt`。
 - **可行性 SFT 流程（README 里那套）**：数据 `sft_miniseek_v5_short256.jsonl`；`max_seq_len=256`；`--arch miniseek-v` + 最近 PT `last.pt`/`best.pt`。超 `max_seq_len` 时 SFT **keep-head**（从尾截，优先留问题）。正式长训用 10G + `max_seq_len=1024`。
-- **DSpark**：主干训完（建议 SFT 后）单独训练（主干冻结）。Web 训练页已集成「DSpark 草稿头」模式（Pretrain / SFT / DSpark 草稿头 三选一），支持配置 Backbone 权重、Anchors、自动 STS 校准及自动同步至主干目录；CLI 也可通过 `python -m algo.train_dspark --backbone <ckpt> --out-dir <dir>` 运行。`dspark.pt` 位于主干 ckpt 同目录时，Web 对话/续写自动走投机解码；没有时 V1 对话走前缀缓存。
+- **DSpark**：主干训完（建议 SFT 后）单独训练（主干冻结）。Web 训练页已集成「DSpark 草稿头」模式（Pretrain / SFT / DSpark 草稿头 三选一），支持配置 Backbone 权重、Anchors、自动 STS 校准及同步复制到主干目录（方便找文件）；CLI：`python -m algo.train_dspark --backbone <ckpt> --out-dir <dir>`。Web 对话/续写：**主干 .pt 与 dspark.pt 分栏可选**；不选草稿头则只用主干（前缀缓存）；选了才启用投机解码。
 - 验证集：没有独立 valid 文件，也没有 `--valid` 路径。Pretrain / SFT / `valid_ppl` 都只用 `--valid-ratio` 从训练集内存抽样（Pretrain 默认约 `0.01`），不改源 jsonl。`hparams.valid_path` 忽略。
 - **PT pack（默认 `batch_mode=pack`）**：整篇文档先 tokenize，文档间加 eos 拼成 token 流，再按训练配置的 `max_seq_len`（256/512/1024…）做**非重叠**切块组 batch；**不再**在 pack 前把单篇截到 `max_seq_len`（长文尾巴进后续块，不是滑动窗口）。random/bucket 仍按样本截断；SFT 超长仍是 keep-head，与此无关。
 - **FlashAttention**（仅 Dense / Tiny）：PT / SFT 默认开（`--flash-attn` / UI「FlashAttention」）。优先 `flash_attn` 包；未安装则用 torch SDPA flash（bf16/fp16 + CUDA）。`--no-flash-attn` 可关。日志有 `flash_attn=on backend=...`。v41 用自带的按索引 gather 稀疏注意力，日志为 `flash_attn=n/a`。
@@ -116,6 +116,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。
 - **Loss 图**：取点间隔可在 UI 调节（从 train.log 按 `plot_every` 重采样），不绑死训练启动时的 plot_every。
 - **推理停止**：对话/续写点停止会 `POST /api/infer/stop`，打断服务端 `generate_stream` 并释放 `_gen_lock`（不能只 abort 前端 fetch）。
+- **双推理引擎对比 (DeepInfer)**：Web 对话与续写支持「原生引擎 (PyTorch)」与「DeepInfer 引擎 (TileLang / 算子加速)」实时切换。加速引擎采用 `deep_select.topk`、叠放专家参数与并行 Batched GEMM（消除 64 次 Python 专家循环）、高效 4x4 Sinkhorn 矩阵双随机投影及 TileLang SWA 算子；两引擎同驻显存零额外占用、无缝切换、输出等价，实测速度提升约 1.4x~1.5x。
 
 ## 维护约定（固定动作）
 
