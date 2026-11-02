@@ -117,6 +117,8 @@ pgrep -af 'train_pretrain|train_sft' | head
 - **Loss 图**：取点间隔可在 UI 调节（从 train.log 按 `plot_every` 重采样），不绑死训练启动时的 plot_every。
 - **推理停止**：对话/续写点停止会 `POST /api/infer/stop`，打断服务端 `generate_stream` 并释放 `_gen_lock`（不能只 abort 前端 fetch）。
 - **双推理引擎对比 (DeepInfer)**：Web 对话与续写支持「原生引擎 (PyTorch)」与「DeepInfer 引擎 (TileLang / 算子加速)」实时切换。加速引擎采用 `deep_select.topk`、叠放专家参数与并行 Batched GEMM（消除 64 次 Python 专家循环）、高效 4x4 Sinkhorn 矩阵双随机投影及 TileLang SWA 算子；两引擎同驻显存零额外占用、无缝切换、输出等价，实测速度提升约 1.4x~1.5x。
+- **全新对话二级页与输出测试合并**：原「对话」与「续写」合并为「输出测试」页（含单步探针与前缀续写两个子 Tab）；新增独立全屏「对话」页（ChatGPT 沉浸风格，左侧 Sessions 历史管理、右侧多轮流式对话与悬浮输入框，左下角支持切换 Hugging Face 模型：MiniSeek-V1 / MiniSeek-V1-base）。
+- **HF 实例推理与算子对齐**：HF 自定义代码 `modeling_miniseek_v.py` 算子已与原生数学等价（修复 mHC 混合公式、Engram KV 切分、质数初始化，Logits 误差降至 7.6e-6）；支持 HF 模型流式多轮与单轮问答（AutoModel + TextIteratorStreamer，默认带 repetition_penalty=1.15，并支持单轮独立/多轮记忆切换防止小模型上下文污染）。
 
 ## 维护约定（固定动作）
 

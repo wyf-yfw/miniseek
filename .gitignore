@@ -49,6 +49,7 @@ export/
 
 # Task / run outputs
 tasks/
+_sync_stash/
 logs/
 *.log
 api_restart.log*

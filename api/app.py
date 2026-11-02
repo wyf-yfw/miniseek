@@ -1022,12 +1022,15 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     max_new_tokens: int = 256
-    temperature: float = 0.8
-    top_k: int = 50
+    temperature: float = 0.6
+    top_k: int = 40
     seed: int = 42
     debug: bool = False
     debug_topk: int = 10
     engine: str = "native"
+    single_turn: Optional[bool] = None
+    model: Optional[str] = "wyf-yfw/MiniSeek-V1"
+    repetition_penalty: float = 1.15
 
 
 class InferEngineRequest(BaseModel):
@@ -2183,17 +2186,140 @@ def infer_stop() -> dict:
     return {"ok": True, "message": "已请求停止生成"}
 
 
+
+# -------------------------------------------------------------
+# HuggingFace 模型推理引擎 (对齐官方 HF 实例代码与 TextIteratorStreamer)
+# -------------------------------------------------------------
+_hf_models: Dict[str, Any] = {}
+_hf_tokenizers: Dict[str, Any] = {}
+_hf_lock = threading.Lock()
+
+
+def get_hf_model_and_tokenizer(model_id: str):
+    mid = (model_id or "").strip()
+    if mid.lower() in ("miniseek-v1", "miniseek_v1", "miniseek", "v1"):
+        mid = "wyf-yfw/MiniSeek-V1"
+    elif mid.lower() in ("miniseek-v1-base", "miniseek_v1_base", "base"):
+        mid = "wyf-yfw/MiniSeek-V1-base"
+
+    with _hf_lock:
+        if mid in _hf_models:
+            return _hf_models[mid], _hf_tokenizers[mid], mid
+
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(mid, trust_remote_code=True)
+        device_map = "auto" if torch.cuda.is_available() else None
+        model = AutoModelForCausalLM.from_pretrained(
+            mid,
+            trust_remote_code=True,
+            dtype="auto",
+            device_map=device_map,
+        )
+        if hasattr(model, "infer_candidate_pool"):
+            model.infer_candidate_pool = True
+        model.eval()
+
+        _hf_models[mid] = model
+        _hf_tokenizers[mid] = tokenizer
+        return model, tokenizer, mid
+
+
+def stream_chat_hf(
+    model_id: str,
+    messages: List[dict],
+    max_new_tokens: int = 256,
+    temperature: float = 0.6,
+    top_k: int = 40,
+    repetition_penalty: float = 1.15,
+):
+    from transformers import TextIteratorStreamer
+
+    model, tokenizer, real_mid = get_hf_model_and_tokenizer(model_id)
+
+    cleaned = []
+    for m in messages:
+        role = (m.get("role") or "").strip().lower()
+        if role in ("user", "assistant", "system"):
+            cleaned.append({"role": role, "content": str(m.get("content") or "").strip()})
+    if not cleaned or cleaned[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="最后一条消息必须是 user")
+
+    try:
+        prompt = tokenizer.apply_chat_template(cleaned, tokenize=False, add_generation_prompt=True)
+    except Exception:
+        prompt = format_chat_messages(cleaned) + "\n<|im_start|>assistant\n"
+
+    inputs = tokenizer(prompt, return_tensors="pt")
+    if torch.cuda.is_available():
+        inputs = {k: v.cuda() for k, v in inputs.items()}
+
+    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    kwargs = dict(
+        **inputs,
+        streamer=streamer,
+        max_new_tokens=int(max_new_tokens),
+        temperature=float(temperature),
+        do_sample=float(temperature) > 0,
+        top_k=int(top_k),
+        repetition_penalty=float(repetition_penalty),
+        eos_token_id=tokenizer.eos_token_id,
+    )
+
+    infer_engine._cancel.clear()
+    thread = threading.Thread(target=model.generate, kwargs=kwargs)
+    t0 = time.time()
+    thread.start()
+
+    tokens_count = 0
+    clean_label = real_mid.split("/")[-1]
+    for new_text in streamer:
+        if infer_engine._cancel.is_set():
+            break
+        tokens_count += 1
+        clean_piece = new_text.replace("<|im_end|>", "").replace("<|im_start|>", "")
+        if clean_piece:
+            yield {"event": "token", "data": {"text": clean_piece}}
+
+    thread.join(timeout=1.0)
+    cost = time.time() - t0
+    tps = round(tokens_count / max(cost, 1e-3), 1)
+    yield {
+        "event": "done",
+        "data": {
+            "tokens": tokens_count,
+            "seconds": round(cost, 2),
+            "tokens_per_s": tps,
+            "engine_label": f"HF · {clean_label}",
+        },
+    }
+
+
 @app.post("/api/infer/chat/stream")
 async def infer_chat_stream(req: ChatRequest) -> StreamingResponse:
     if not req.messages:
         raise HTTPException(status_code=400, detail="messages 不能为空")
-    payload = _single_turn_messages([m.model_dump() for m in req.messages])
+    raw_msgs = [m.model_dump() for m in req.messages]
+    if req.debug or (req.single_turn is True):
+        payload = _single_turn_messages(raw_msgs)
+    else:
+        # MiniSeek-V1 is trained with max_seq_len=256; limit history to at most the last 2 turns to prevent context explosion and error accumulation
+        payload = raw_msgs[-4:] if len(raw_msgs) > 4 else raw_msgs
     if not payload or (payload[-1].get("role") or "").strip().lower() != "user":
-        raise HTTPException(status_code=400, detail="messages 中需要至少一条 user")
+        raise HTTPException(status_code=400, detail="messages 中最后一条需要是 user")
 
     def event_iter():
         try:
-            if req.debug:
+            if req.model and (req.model.startswith("wyf-yfw") or "miniseek" in req.model.lower() or "/" in req.model):
+                gen = stream_chat_hf(
+                    model_id=req.model,
+                    messages=payload,
+                    max_new_tokens=req.max_new_tokens,
+                    temperature=req.temperature,
+                    top_k=req.top_k,
+                    repetition_penalty=getattr(req, "repetition_penalty", 1.15),
+                )
+            elif req.debug:
                 gen = infer_engine.stream_chat_debug(
                     payload,
                     max_new_tokens=req.max_new_tokens,
