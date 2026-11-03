@@ -45,7 +45,7 @@ MiniSeek 把这套架构原样缩到一张 3090 能训的尺寸：层数、宽�
 - 优化器（`algo/optim/`）：Muon、Sinkhorn 动量，以及按 V4 规则把参数分到 Muon / AdamW / Sinkhorn 三组。
 - 训练脚本：预训练 `algo/train_pretrain.py`、SFT `algo/train_sft.py`、DSpark `algo/train_dspark.py` 与置信度校准 `algo/dspark_calibrate.py`；支持断点续训、pack 组批与样本级注意力掩码、从训练集按比例抽验证集。
 - 官方推理代码的移植（`tests/miniseek_v_ref/`）与逐算子等价测试（`tests/test_v41_*.py`）。
-- Web UI（FastAPI，`:7860`）：训练 Task、对话、续写、架构图、评测（C-Eval / CMMLU / GSM8K）、数据清洗、专家负载。
+- Web UI（FastAPI，`:7860`）：训练 Task、对话、续写、架构图、评测（默认 tinyBenchmarks；可选 C-Eval / CMMLU / GSM8K）、排行榜、数据清洗、专家负载。
 - 一条 Dense 小模型线 `DenseLM`（MiniSeek-D0.1），权重已开源。
 
 #### 🎉 已发布模型列表
