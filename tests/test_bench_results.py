@@ -37,3 +37,17 @@ def test_normalize_prefers_acc_norm_for_tiny():
     assert out["metrics"]["tinyMMLU"]["acc"] == pytest.approx(0.325)
     assert out["metrics"]["tinyMMLU"]["acc_stderr"] is None
     assert out["metrics"]["tinyGSM8k"]["acc"] == pytest.approx(0.01)
+
+
+def test_load_tiny_compare_baselines():
+    from algo.eval.bench_results import load_tiny_compare_baselines, TINY_TASKS
+
+    data = load_tiny_compare_baselines()
+    assert data["suite"] == "tinyBenchmarks"
+    assert list(data["tasks"]) == list(TINY_TASKS)
+    ids = [m["id"] for m in data["models"]]
+    assert ids == ["d01", "m01", "minimind2-moe", "ef55"]
+    for m in data["models"]:
+        assert m["scores_pct"] is not None
+        for task in TINY_TASKS:
+            assert isinstance(m["scores_pct"][task], (int, float))

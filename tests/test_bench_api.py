@@ -63,6 +63,17 @@ def test_presets_endpoint(client):
     assert "ceval-valid" in data["allowed_tasks"]
 
 
+def test_compare_endpoint(client):
+    c, _root = client
+    r = c.get("/api/bench/compare")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["suite"] == "tinyBenchmarks"
+    assert len(data["models"]) == 4
+    assert {m["id"] for m in data["models"]} == {"d01", "m01", "minimind2-moe", "ef55"}
+    assert all(m.get("scores_pct") for m in data["models"])
+
+
 def test_post_tiny_suite_default(client):
     c, ckpt = client
     r = c.post("/api/bench/tasks", json={"ckpt_path": str(ckpt)})

@@ -1,0 +1,70 @@
+{
+  "suite": "tinyBenchmarks",
+  "tasks": [
+    "tinyMMLU",
+    "tinyHellaswag",
+    "tinyArc",
+    "tinyWinogrande",
+    "tinyTruthfulQA",
+    "tinyGSM8k"
+  ],
+  "metric_note": "MC tasks: IRT++ acc_norm/acc from tinyBenchmarks (~100 items). GSM8k: exact_match flexible-extract. Scores are percent.",
+  "models": [
+    {
+      "id": "d01",
+      "label": "MiniSeek-D0.1",
+      "subtitle": "Dense chat/SFT · release/MiniSeek-D0.1-sft",
+      "source": "/tmp/tinybench_d01_summary.json",
+      "scores_pct": {
+        "tinyMMLU": 33.07,
+        "tinyHellaswag": 27.07,
+        "tinyArc": 18.69,
+        "tinyWinogrande": 46.33,
+        "tinyTruthfulQA": 46.8,
+        "tinyGSM8k": 0.55
+      }
+    },
+    {
+      "id": "m01",
+      "label": "MiniSeek-M0.1",
+      "subtitle": "MoE chat/SFT · release/MiniSeek-M0.1",
+      "source": "/tmp/tinybench_m01_summary.json",
+      "scores_pct": {
+        "tinyMMLU": 26.31,
+        "tinyHellaswag": 31.16,
+        "tinyArc": 26.6,
+        "tinyWinogrande": 46.2,
+        "tinyTruthfulQA": 49.03,
+        "tinyGSM8k": 1.04
+      }
+    },
+    {
+      "id": "minimind2-moe",
+      "label": "MiniMind2-MoE",
+      "subtitle": "jingyaogong/MiniMind2-MoE",
+      "source": "/tmp/tinybench_minimind_summary.json",
+      "scores_pct": {
+        "tinyMMLU": 26.83,
+        "tinyHellaswag": 25.27,
+        "tinyArc": 26.14,
+        "tinyWinogrande": 36.9,
+        "tinyTruthfulQA": 46.81,
+        "tinyGSM8k": 0.55
+      }
+    },
+    {
+      "id": "ef55",
+      "label": "MiniSeek-V1 · ef55",
+      "subtitle": "multiturn SFT best · tasks/20261102-221734-ef55",
+      "source": "/tmp/tinybench_ef55_summary.json",
+      "scores_pct": {
+        "tinyMMLU": 32.5,
+        "tinyHellaswag": 24.16,
+        "tinyArc": 24.18,
+        "tinyWinogrande": 48.96,
+        "tinyTruthfulQA": 50.45,
+        "tinyGSM8k": 0.55
+      }
+    }
+  ]
+}

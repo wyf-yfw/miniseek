@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # tiny* ≈100 题/场景，适合小模型日常门禁；full 仍保留原 C-Eval/CMMLU/GSM8K。
@@ -73,3 +75,32 @@ def normalize_lm_eval_results(raw: Dict[str, Any], tasks: List[str]) -> Dict[str
             "acc_stderr": _pick(block, _ERR_KEYS),
         }
     return {"metrics": metrics}
+
+
+def load_tiny_compare_baselines() -> Dict[str, Any]:
+    """Side-by-side tinyBenchmarks reference scores for the Eval page compare table."""
+    path = Path(__file__).resolve().parent / "tiny_compare_baselines.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    tasks = list(raw.get("tasks") or TINY_TASKS)
+    models = []
+    for m in raw.get("models") or []:
+        scores = m.get("scores_pct") or {}
+        # normalize GSM8k_flexible -> tinyGSM8k for table columns
+        if "tinyGSM8k" not in scores and "tinyGSM8k_flexible" in scores:
+            scores = dict(scores)
+            scores["tinyGSM8k"] = scores.pop("tinyGSM8k_flexible")
+        row = {
+            "id": m.get("id"),
+            "label": m.get("label"),
+            "subtitle": m.get("subtitle") or "",
+            "source": m.get("source"),
+            "scores_pct": scores if scores else None,
+        }
+        models.append(row)
+    return {
+        "suite": raw.get("suite") or "tinyBenchmarks",
+        "tasks": tasks,
+        "metric_note": raw.get("metric_note") or "",
+        "models": models,
+    }
+

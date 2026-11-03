@@ -132,6 +132,64 @@
     .bench-scores { width: 100%; border-collapse: collapse; font-size: 13px; }
     .bench-scores th, .bench-scores td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; }
     .bench-scores th { color: var(--muted); font-weight: 600; }
+
+    .bench-compare-card {
+      margin: 0 0 14px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .bench-compare-card h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .bench-compare-meta {
+      margin: 0 0 12px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .bench-compare-wrap { overflow-x: auto; }
+    .bench-compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      min-width: 720px;
+    }
+    .bench-compare-table th,
+    .bench-compare-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .bench-compare-table th:first-child,
+    .bench-compare-table td:first-child {
+      text-align: left;
+      position: sticky;
+      left: 0;
+      background: #fff;
+      z-index: 1;
+    }
+    .bench-compare-table thead th {
+      font-weight: 600;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .bench-compare-table .model-label { font-weight: 600; }
+    .bench-compare-table .model-sub {
+      display: block;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 2px;
+      white-space: normal;
+      max-width: 240px;
+    }
+    .bench-compare-table .best { color: #0a7a43; font-weight: 700; }
+    .bench-compare-table .pending { color: var(--muted); font-style: italic; }
     .bench-hist { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
     .bench-hist li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; cursor: pointer; background: #fafbfc; }
     .bench-hist li:hover, .bench-hist li.active { border-color: var(--accent); background: #fff; }
@@ -2505,6 +2563,16 @@
     </section>
 
     <section id="bench" class="panel">
+      <div class="bench-compare-card" id="bench-compare-card">
+        <h3>tinyBenchmarks 对比表</h3>
+        <p class="bench-compare-meta" id="bench-compare-meta">加载中… D0.1 / M0.1 / MiniMind2-MoE / ef55（V1 multiturn）同套件对照。</p>
+        <div class="bench-compare-wrap">
+          <table class="bench-compare-table" id="bench-compare-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
       <div class="train-layout">
         <aside class="task-sidebar">
           <h2>评测 Tasks</h2>
@@ -6617,6 +6685,59 @@
       return (Number(v) * 100).toFixed(2) + "%";
     }
 
+
+    async function loadBenchCompare() {
+      const meta = $("bench-compare-meta");
+      const table = $("bench-compare-table");
+      if (!table) return;
+      try {
+        const r = await fetch("/api/bench/compare");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        renderBenchCompare(data);
+      } catch (e) {
+        if (meta) meta.textContent = "对比表加载失败：" + (e && e.message ? e.message : e);
+      }
+    }
+
+    function renderBenchCompare(data) {
+      const meta = $("bench-compare-meta");
+      const table = $("bench-compare-table");
+      if (!table) return;
+      const tasks = (data && data.tasks) || [];
+      const models = (data && data.models) || [];
+      if (meta) {
+        meta.textContent = (data && data.metric_note) || "tinyBenchmarks 参考分（%）。";
+      }
+      const short = (t) => String(t).replace(/^tiny/, "");
+      const thead = table.querySelector("thead");
+      const tbody = table.querySelector("tbody");
+      thead.innerHTML = "<tr><th>模型</th>" + tasks.map((t) => "<th>" + short(t) + "</th>").join("") + "</tr>";
+      // best per task
+      const best = {};
+      tasks.forEach((t) => {
+        let mx = null;
+        models.forEach((m) => {
+          const s = m.scores_pct && m.scores_pct[t];
+          if (typeof s === "number" && (mx === null || s > mx)) mx = s;
+        });
+        best[t] = mx;
+      });
+      tbody.innerHTML = models.map((m) => {
+        const scores = m.scores_pct || null;
+        const cells = tasks.map((t) => {
+          if (!scores || typeof scores[t] !== "number") {
+            return '<td class="pending">—</td>';
+          }
+          const v = scores[t];
+          const cls = best[t] !== null && Math.abs(v - best[t]) < 1e-9 ? ' class="best"' : "";
+          return "<td" + cls + ">" + (Number.isInteger(v) ? v.toFixed(1) : v.toFixed(2)) + "</td>";
+        }).join("");
+        const sub = m.subtitle ? '<span class="model-sub">' + String(m.subtitle).replace(/</g, "&lt;") + "</span>" : "";
+        return '<tr><td><span class="model-label">' + String(m.label || m.id).replace(/</g, "&lt;") + "</span>" + sub + "</td>" + cells + "</tr>";
+      }).join("");
+    }
+
     function renderBenchScores(scores) {
       const body = $("bench-score-body");
       body.innerHTML = "";
@@ -6993,7 +7114,7 @@ $("btn-bench-edit").addEventListener("click", async () => {
 
     document.querySelectorAll(".page-tabs button").forEach((btn) => {
       btn.addEventListener("click", () => {
-        if (btn.dataset.tab === "bench") refreshBenchTasks();
+        if (btn.dataset.tab === "bench") { refreshBenchTasks(); loadBenchCompare(); }
       });
     });
 
@@ -7533,6 +7654,7 @@ $("btn-bench-edit").addEventListener("click", async () => {
 
     // boot: if train already boots elsewhere; also refresh bench list quietly
     refreshBenchTasks().catch(() => {});
+    loadBenchCompare().catch(() => {});
 
     // Live-reload: poll index.html mtime; save HTML → ~1s auto refresh (no systemctl)
     (function liveReload() {

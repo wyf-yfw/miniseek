@@ -37,6 +37,7 @@ from algo.eval.bench_results import (
     ALLOWED_TASKS as _BENCH_ALLOWED_TASKS,
     BENCH_PRESETS as _BENCH_PRESETS,
     DEFAULT_TASKS as _BENCH_DEFAULT_TASKS,
+    load_tiny_compare_baselines as _load_tiny_compare,
 )
 from api import clean_store as cs
 from api.task_runner import (
@@ -1775,6 +1776,13 @@ def _bench_with_progress(run: dict) -> dict:
 
 
 # ---- Bench Tasks API (symmetric with /api/tasks) ----
+
+
+
+@app.get("/api/bench/compare")
+def api_bench_compare() -> dict:
+    """Side-by-side tinyBenchmarks reference table (D0.1 / M0.1 / MiniMind2-MoE / ef55)."""
+    return _load_tiny_compare()
 
 @app.get("/api/bench/presets")
 def api_bench_presets() -> dict:
