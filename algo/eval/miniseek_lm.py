@@ -172,7 +172,9 @@ class MiniSeekLM(TemplateLM):
                 results.append((0.0, True))
                 _update_sample_progress(i + 1, total)
                 continue
-            inp = (context_enc + continuation_enc)[-(self.max_length + 1) :]
+            # Model rejects seq_len > max_seq_len; keep <= max_length tokens.
+            # logits[i] predicts token i+1, so length L yields L scored positions.
+            inp = (context_enc + continuation_enc)[-self.max_length :]
             # Leave at least one continuation token for scoring
             cont_len = len(continuation_enc)
             if len(inp) < cont_len + 1:

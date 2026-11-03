@@ -49,3 +49,24 @@ def test_post_start_and_conflict(client):
                 rid2 = r2.json()["id"]
                 s2 = c.post(f"/api/bench/tasks/{rid2}/start")
                 assert s2.status_code == 409
+
+
+def test_presets_endpoint(client):
+    c, _ckpt = client
+    r = c.get("/api/bench/presets")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["default"] == "tiny"
+    ids = {p["id"] for p in data["presets"]}
+    assert ids == {"tiny", "full"}
+    assert "tinyMMLU" in data["allowed_tasks"]
+    assert "ceval-valid" in data["allowed_tasks"]
+
+
+def test_post_tiny_suite_default(client):
+    c, ckpt = client
+    r = c.post("/api/bench/tasks", json={"ckpt_path": str(ckpt)})
+    assert r.status_code == 200, r.text
+    tasks = r.json()["tasks"]
+    assert "tinyMMLU" in tasks
+    assert "ceval-valid" not in tasks

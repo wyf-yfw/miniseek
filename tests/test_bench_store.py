@@ -23,3 +23,22 @@ def test_reject_unknown_task(tmp_path, monkeypatch):
     monkeypatch.setattr(bs, "RUNS_ROOT", tmp_path / "runs")
     with pytest.raises(ValueError, match="task"):
         bs.create_run(ckpt_path="x.pt", tasks=["mmlu"], limit=None, device="cpu")
+
+
+def test_create_default_is_tiny_suite(tmp_path, monkeypatch):
+    monkeypatch.setattr(bs, "RUNS_ROOT", tmp_path / "runs")
+    row = bs.create_run(ckpt_path="x.pt", device="cpu")
+    assert row["tasks"][0] == "tinyMMLU"
+    assert "tinyGSM8k" in row["tasks"]
+    assert "ceval-valid" not in row["tasks"]
+
+
+def test_accept_tiny_tasks(tmp_path, monkeypatch):
+    monkeypatch.setattr(bs, "RUNS_ROOT", tmp_path / "runs")
+    row = bs.create_run(
+        ckpt_path="x.pt",
+        tasks=["tinyMMLU", "tinyArc"],
+        limit=None,
+        device="cpu",
+    )
+    assert row["tasks"] == ["tinyMMLU", "tinyArc"]

@@ -39,18 +39,28 @@ lm_eval --model hf \
 - CED（因果编码器-解码器）：encoder/decoder 梯度与表示探针
 
 
-## Web / CLI（一期默认套件）
 
-默认任务：`ceval-valid`, `cmmlu`, `gsm8k`（Agent / MATH 二期）。
+## Web / CLI（默认 tinyBenchmarks）
+
+默认任务（评测页「tiny」套件）：`tinyMMLU`, `tinyHellaswag`, `tinyArc`, `tinyWinogrande`, `tinyTruthfulQA`, `tinyGSM8k`（每场景约 100 题，IRT++ 估大榜分）。
+
+完整套件（评测页「完整」）：`ceval-valid`, `cmmlu`, `gsm8k`。
+
+依赖：
 
 ```bash
 pip install 'lm-eval>=0.4.5'
-python -m eval.run_benchmark \
-  --ckpt tasks/<id>/checkpoints/best.pt \
-  --tasks ceval-valid,cmmlu,gsm8k \
-  --out eval/runs/manual-1 \
-  --device cuda \
-  --limit 8
+pip install 'tinyBenchmarks @ git+https://github.com/felipemaiapolo/tinyBenchmarks'
 ```
 
-Web「评测」Tab 调用同一 CLI；跑次落在 `eval/runs/<id>/`（`run.json` + `results.json` + `run.log`）。
+wyf 上推荐用项目内 `.venv-dj`（已装 lm-eval + tinyBenchmarks）；Web worker 会优先用该解释器跑评测。
+
+```bash
+python -m algo.eval.run_benchmark \
+  --ckpt tasks/<id>/checkpoints/best.pt \
+  --tasks tinyMMLU,tinyHellaswag,tinyArc,tinyWinogrande,tinyTruthfulQA,tinyGSM8k \
+  --out algo/eval/runs/manual-tiny \
+  --device cuda
+```
+
+Web「评测」Tab → 新建 Task → 默认已勾选 tiny 套件；可一键切到「完整（慢）」。跑次落在 `algo/eval/runs/<id>/`。

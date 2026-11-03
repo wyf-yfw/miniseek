@@ -71,6 +71,7 @@ def run_bench(
             batch_size=batch_size,
             limit=limit,
             device=device,
+            confirm_run_unsafe_code=True,
         )
         if isinstance(raw, tuple):
             raw = raw[0]

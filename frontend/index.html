@@ -2527,12 +2527,24 @@
                 <input id="bench-ckpt" type="text" placeholder="选择权重 .pt / HF 目录" />
                 <button type="button" class="btn-browse" data-for="bench-ckpt">浏览</button>
               </div>
-              <div class="bench-tasks" id="bench-task-checks">
-                <label><input type="checkbox" value="ceval-valid" checked /> ceval-valid</label>
-                <label><input type="checkbox" value="cmmlu" checked /> cmmlu</label>
-                <label><input type="checkbox" value="gsm8k" checked /> gsm8k</label>
+              <div class="field-title" style="margin-top:4px">评测套件</div>
+              <div class="mode-row" id="bench-preset-row">
+                <button type="button" id="bench-preset-tiny" class="active" data-bench-preset="tiny">tiny（推荐）</button>
+                <button type="button" id="bench-preset-full" data-bench-preset="full">完整（慢）</button>
               </div>
-              <label for="bench-limit"><span class="field-title">Limit</span><span class="field-hint">每子集最多样本；空=全量。</span></label>
+              <p id="bench-preset-hint" class="mode-hint">tinyBenchmarks：每场景约 100 题，估大榜分数；适合小模型日常评测。</p>
+              <div class="bench-tasks" id="bench-task-checks">
+                <label><input type="checkbox" value="tinyMMLU" checked /> tinyMMLU</label>
+                <label><input type="checkbox" value="tinyHellaswag" checked /> tinyHellaswag</label>
+                <label><input type="checkbox" value="tinyArc" checked /> tinyArc</label>
+                <label><input type="checkbox" value="tinyWinogrande" checked /> tinyWinogrande</label>
+                <label><input type="checkbox" value="tinyTruthfulQA" checked /> tinyTruthfulQA</label>
+                <label><input type="checkbox" value="tinyGSM8k" checked /> tinyGSM8k</label>
+                <label><input type="checkbox" value="ceval-valid" /> ceval-valid</label>
+                <label><input type="checkbox" value="cmmlu" /> cmmlu</label>
+                <label><input type="checkbox" value="gsm8k" /> gsm8k</label>
+              </div>
+              <label for="bench-limit"><span class="field-title">Limit</span><span class="field-hint">每子集最多样本；空=全量（tiny 约 100/场景）。冒烟可填 8。</span></label>
               <input id="bench-limit" type="number" min="1" step="1" placeholder="例如 8 冒烟" />
               <div class="actions" style="margin-top:12px">
                 <button type="button" id="btn-bench-save">保存配置</button>
@@ -6651,6 +6663,53 @@
       if (start) start.textContent = benchUnsaved ? "创建并启动" : "Start";
     }
 
+    const BENCH_PRESETS = {
+      tiny: {
+        tasks: ["tinyMMLU", "tinyHellaswag", "tinyArc", "tinyWinogrande", "tinyTruthfulQA", "tinyGSM8k"],
+        hint: "tinyBenchmarks：每场景约 100 题，估大榜分数；适合小模型日常评测。",
+      },
+      full: {
+        tasks: ["ceval-valid", "cmmlu", "gsm8k"],
+        hint: "C-Eval valid + CMMLU + GSM8K 全量；题难、耗时长，发版深测再用。",
+      },
+    };
+    let benchPreset = "tiny";
+
+    function applyBenchPreset(id, opts = {}) {
+      const preset = BENCH_PRESETS[id] || BENCH_PRESETS.tiny;
+      benchPreset = BENCH_PRESETS[id] ? id : "tiny";
+      const selected = new Set(preset.tasks);
+      document.querySelectorAll("#bench-task-checks input").forEach((el) => {
+        el.checked = selected.has(el.value);
+      });
+      document.querySelectorAll("#bench-preset-row button").forEach((b) => {
+        b.classList.toggle("active", b.getAttribute("data-bench-preset") === benchPreset);
+      });
+      const hint = $("bench-preset-hint");
+      if (hint) hint.textContent = preset.hint;
+      if (!opts.silent) {
+        const msg = $("bench-msg");
+        if (msg) msg.textContent = `已切换到 ${benchPreset === "tiny" ? "tiny" : "完整"} 套件`;
+      }
+    }
+
+    function syncBenchPresetFromChecks() {
+      const checked = [...document.querySelectorAll("#bench-task-checks input:checked")].map((x) => x.value).sort();
+      let matched = null;
+      for (const [id, preset] of Object.entries(BENCH_PRESETS)) {
+        const want = [...preset.tasks].sort();
+        if (want.length === checked.length && want.every((t, i) => t === checked[i])) {
+          matched = id;
+          break;
+        }
+      }
+      benchPreset = matched;
+      document.querySelectorAll("#bench-preset-row button").forEach((b) => {
+        const id = b.getAttribute("data-bench-preset");
+        b.classList.toggle("active", matched != null && id === matched);
+      });
+    }
+
     function openNewBenchForm() {
       benchSelectedId = null;
       benchCurrent = null;
@@ -6663,10 +6722,7 @@
       $("bench-name").value = "";
       $("bench-ckpt").value = "";
       $("bench-limit").value = "";
-      const defaults = new Set(["ceval-valid", "cmmlu", "gsm8k"]);
-      document.querySelectorAll("#bench-task-checks input").forEach((el) => {
-        el.checked = defaults.has(el.value);
-      });
+      applyBenchPreset("tiny", { silent: true });
       $("bench-status-text").textContent = "未开始";
       $("bench-dot").className = "dot";
       $("bench-run-meta").textContent = "";
@@ -6700,6 +6756,7 @@
       document.querySelectorAll("#bench-task-checks input").forEach((el) => {
         el.checked = selected.size ? selected.has(el.value) : el.checked;
       });
+      syncBenchPresetFromChecks();
     }
 
     function setBenchFormEnabled(on) {
@@ -6797,6 +6854,15 @@
     $("btn-new-bench-task").addEventListener("click", () => {
       // 只打开空表单，不落盘；点「创建并启动」才真正创建评测任务
       openNewBenchForm();
+    });
+
+    document.querySelectorAll("#bench-preset-row button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        applyBenchPreset(btn.getAttribute("data-bench-preset") || "tiny");
+      });
+    });
+    document.querySelectorAll("#bench-task-checks input").forEach((el) => {
+      el.addEventListener("change", () => syncBenchPresetFromChecks());
     });
 
     $("btn-bench-save").addEventListener("click", async () => {

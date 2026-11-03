@@ -33,6 +33,11 @@ from algo.model.tokenizer import load_tokenizer
 from algo.model.miniseek_v.cache import PrefixCache
 from api import tasks_store as ts
 from api import bench_store as bs
+from algo.eval.bench_results import (
+    ALLOWED_TASKS as _BENCH_ALLOWED_TASKS,
+    BENCH_PRESETS as _BENCH_PRESETS,
+    DEFAULT_TASKS as _BENCH_DEFAULT_TASKS,
+)
 from api import clean_store as cs
 from api.task_runner import (
     TRAIN_ARCHS,
@@ -976,7 +981,7 @@ class ArchDesignRequest(BaseModel):
 class BenchCreate(BaseModel):
     name: str = ""
     ckpt_path: str = ""
-    tasks: List[str] = Field(default_factory=lambda: ["ceval-valid", "cmmlu", "gsm8k"])
+    tasks: List[str] = Field(default_factory=lambda: list(_BENCH_DEFAULT_TASKS))
     limit: Optional[int] = None
 
 
@@ -1771,6 +1776,16 @@ def _bench_with_progress(run: dict) -> dict:
 
 # ---- Bench Tasks API (symmetric with /api/tasks) ----
 
+@app.get("/api/bench/presets")
+def api_bench_presets() -> dict:
+    """UI suite presets: tiny (default) vs full heavy benchmarks."""
+    return {
+        "default": "tiny",
+        "allowed_tasks": list(_BENCH_ALLOWED_TASKS),
+        "presets": list(_BENCH_PRESETS.values()),
+    }
+
+
 @app.get("/api/bench/tasks")
 def api_bench_list_tasks() -> dict:
     rows = []
@@ -1800,7 +1815,7 @@ def api_bench_create_task(body: BenchCreate) -> dict:
         return bs.create_run(
             name=body.name or "",
             ckpt_path=body.ckpt_path or "",
-            tasks=list(body.tasks or ["ceval-valid", "cmmlu", "gsm8k"]),
+            tasks=list(body.tasks or list(_BENCH_DEFAULT_TASKS)),
             limit=body.limit,
             device="cpu",
         )

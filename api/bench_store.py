@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from algo.eval.bench_results import ALLOWED_TASKS
+from algo.eval.bench_results import ALLOWED_TASKS, DEFAULT_TASKS
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNS_ROOT = PROJECT_ROOT / "algo" / "eval" / "runs"
@@ -50,7 +50,7 @@ def create_run(
     device: str = "cpu",
     name: str = "",
 ) -> Dict[str, Any]:
-    cleaned = _clean_tasks(tasks if tasks is not None else ["ceval-valid", "cmmlu", "gsm8k"])
+    cleaned = _clean_tasks(tasks if tasks is not None else list(DEFAULT_TASKS))
     rid = new_run_id()
     d = run_dir(rid)
     d.mkdir(parents=True, exist_ok=False)

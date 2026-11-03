@@ -20,6 +20,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _owned_procs: Dict[str, subprocess.Popen] = {}
 
 
+def _bench_python() -> str:
+    """Prefer project .venv-dj (has lm-eval + tinyBenchmarks); else current interpreter."""
+    venv_py = PROJECT_ROOT / ".venv-dj" / "bin" / "python"
+    if venv_py.is_file():
+        return str(venv_py)
+    return sys.executable
+
+
+
 def _any_bench_running() -> Optional[str]:
     for row in bs.list_runs():
         if row.get("status") != "running":
@@ -143,7 +152,7 @@ def start_run(run_id: str, *, training_busy: bool) -> Dict[str, Any]:
     })
 
     cmd = [
-        sys.executable,
+        _bench_python(),
         "-u",
         "-m",
         "algo.eval.run_benchmark",
@@ -167,6 +176,10 @@ def start_run(run_id: str, *, training_busy: bool) -> Dict[str, Any]:
     env["PYTHONUNBUFFERED"] = "1"
     env["BENCH_PROGRESS_PATH"] = str(out_dir / "progress.json")
     env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+    # Ensure `import algo` works when spawning .venv-dj python
+    pp = env.get("PYTHONPATH", "")
+    root = str(PROJECT_ROOT)
+    env["PYTHONPATH"] = root if not pp else (root + os.pathsep + pp)
     log_fh = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
     try:
         proc = subprocess.Popen(
