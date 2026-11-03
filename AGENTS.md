@@ -111,7 +111,7 @@ pgrep -af 'train_pretrain|train_sft' | head
 - **数据**：`data/PT` + `data/SFT` 布局；HF `MiniSeek-Pretrain` 主文件 `pretrain_mix_12g_clean.jsonl`；SFT **默认与 HF 已切 v5 10G**（`sft_miniseek_v5_10g.jsonl`；5G 对照包保留；见 `SOURCES_v5.md`）。**可行性快跑推荐 short256**（已推 HF `sft_short256`；见 `SOURCES_v5_short256.md`）。训练用 `--valid-ratio`，Hub 无独立 valid。旧 SFT v1 与 `_raw_sft_v5` 已清。
 - **代码**：公仓 `main` 以 MiniSeek-V（`--arch miniseek-v`，`algo/model/miniseek_v/`）为主；Dense / Tiny 完整快照在 `archive/dense-tiny`。旧 `MoELM` 已删；产品名写 MiniSeek-V / V1，不写 V4.1 / 单独的 v。MiniSeek-M0.1=简单 MoE 对照（仅 release/HF）。
 - **README**：按 MiniMind 版式直接介绍仓库（V1 全架构复现 + 训练 / 推理流程），**不写**逐阶段推进叙事；阶段规划只留在 `docs/STAGE_PLAN.md`（历史记录）。
-- **架构页**：默认预设 **MiniSeek-V**（可训练 V1）；参考预设 **DeepSeek-V4.1-Flash**（`m-ref` / `v41-flash`，不可训练，论文原名不要改成 DeepSeek-V）。抽屉说明走 `archVModuleInfo`。
+- **架构页**：默认预设 **MiniSeek-V**（可训练 V1）；参考预设 **DeepSeek-V4.1-Flash**（`m-ref` / `v41-flash`，不可训练，论文原名不要改成 DeepSeek-V）。抽屉说明走 `archVModuleInfo`。Figure 3 架构优化：`Enc. Hidden States` 移至 Causal Encoder 容器外部上方；`DSpark` 与 `LM Head` 移至 Decoder 容器外部上方，层级严格对齐论文原版图示，动态连线保持精准吸附。
 - **UI**：顶栏 7 个 page-tabs（含专家负载）单行 `flex`，禁止折成两行。
 - **UI**：续写页「停止」与对话页一致，常显；仅生成中可点。
 - **Loss 图**：取点间隔可在 UI 调节（从 train.log 按 `plot_every` 重采样），不绑死训练启动时的 plot_every。

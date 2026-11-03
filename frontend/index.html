@@ -870,6 +870,22 @@
       row-gap: 12px;
       align-items: stretch;
     }
+    .fig3-col {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .fig3-col.encoder-col { grid-area: enc; }
+    .fig3-col.decoder-col { grid-area: dec; }
+    .fig3-col-top {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      flex: 1;
+    }
+    .fig3-col > .fig3-region {
+      min-height: auto;
+    }
     .fig3-region {
       border: 1.5px solid #334155;
       border-radius: 16px;
@@ -878,11 +894,8 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      min-height: 100%;
       overflow: visible;
     }
-    .fig3-region.encoder { grid-area: enc; }
-    .fig3-region.decoder { grid-area: dec; }
     .fig3-region-title {
       font-weight: 800;
       font-size: 15px;
@@ -6143,7 +6156,7 @@
       const encGroups = [...(enc.groups || [])].reverse().map((g) => fig3GroupVisualHtml(g, hcMult));
       const hiddenHtml = `<div class="fig3-node enc-hidden" data-node="enc_hidden" data-clickable="1">${fig3Esc((enc.output && enc.output.label) || "Enc. Hidden States")}</div>`;
       const embHtml = `<div class="fig3-node embed" data-node="embedding" data-clickable="1">Embedding<div class="fig3-sub">展开为 mHC×${hcMult}</div></div>`;
-      const encStack = [hiddenHtml, joinUp(encGroups), embHtml].filter(Boolean).join(fig3Arrow());
+      const encStack = [joinUp(encGroups), embHtml].filter(Boolean).join(fig3Arrow());
 
       const decGroups = dec.groups || [];
       const fullG = decGroups.find((g) => (g.rows || []).some((r) => r.id === "dec_full")) || null;
@@ -6153,20 +6166,33 @@
         ? `<div class="fig3-node head" data-node="${fig3Esc(fig.head.id || "lm_head")}" data-clickable="1">${fig3Esc(fig.head.label || "LM Head")}<div class="fig3-sub">${fig3Esc(fig.head.sub || `mHC 合流 → Final RMSNorm`)}</div></div>`
         : "";
       const exitHtml = fullG ? fig3PairHtml(fullG.rows, hcMult) : "";
-      const decStack = [dsparkHtml, headHtml, joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
+      const decStack = [joinUp(upper), exitHtml].filter(Boolean).join(fig3Arrow());
+      const decTop = [dsparkHtml, headHtml].filter(Boolean).join(fig3Arrow());
 
       wrap.innerHTML = `
         <div class="fig3-title">${fig3Esc(fig.title || "Figure 3 | Overall architecture of DeepSeek-V4.1-Flash")}</div>
         <div class="fig3-legend">${legend}</div>
         <div class="fig3-board">
           <div class="fig3-stage">
-            <div class="fig3-region encoder" data-section="encoder">
-              <div class="fig3-region-title">${fig3Esc(enc.label || "Causal Encoder (20L)")}</div>
-              <div class="fig3-stack">${encStack}</div>
+            <div class="fig3-col encoder-col">
+              <div class="fig3-col-top">
+                ${hiddenHtml}
+              </div>
+              ${fig3Arrow()}
+              <div class="fig3-region encoder" data-section="encoder">
+                <div class="fig3-region-title">${fig3Esc(enc.label || "Causal Encoder (20L)")}</div>
+                <div class="fig3-stack">${encStack}</div>
+              </div>
             </div>
-            <div class="fig3-region decoder" data-section="decoder">
-              <div class="fig3-region-title">${fig3Esc(dec.label || "Decoder (20L)")}</div>
-              <div class="fig3-stack">${decStack}</div>
+            <div class="fig3-col decoder-col">
+              <div class="fig3-col-top">
+                ${decTop}
+              </div>
+              ${decTop ? fig3Arrow() : ""}
+              <div class="fig3-region decoder" data-section="decoder">
+                <div class="fig3-region-title">${fig3Esc(dec.label || "Decoder (20L)")}</div>
+                <div class="fig3-stack">${decStack}</div>
+              </div>
             </div>
             <div class="fig3-pool">
               <div class="fig3-pool-label">Hierarchical<br>Sparse Indexer</div>
