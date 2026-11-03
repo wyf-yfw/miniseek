@@ -53,6 +53,34 @@
       }
     },
     {
+      "id": "minimind3-dense",
+      "label": "MiniMind3-Dense",
+      "subtitle": "jingyaogong/minimind-3 · 64M Qwen3",
+      "source": "/tmp/tinybench_minimind3_dense_summary.json",
+      "scores_pct": {
+        "tinyMMLU": 29.14,
+        "tinyHellaswag": 33.01,
+        "tinyArc": 27.51,
+        "tinyWinogrande": 46.78,
+        "tinyTruthfulQA": 47.15,
+        "tinyGSM8k": 5.24
+      }
+    },
+    {
+      "id": "minimind3-moe",
+      "label": "MiniMind3-MoE",
+      "subtitle": "jingyaogong/minimind-3-moe · 198M/A64M Qwen3-MoE",
+      "source": "/tmp/tinybench_minimind3_moe_summary.json",
+      "scores_pct": {
+        "tinyMMLU": 29.98,
+        "tinyHellaswag": 33.02,
+        "tinyArc": 28.49,
+        "tinyWinogrande": 46.82,
+        "tinyTruthfulQA": 51.38,
+        "tinyGSM8k": 0.55
+      }
+    },
+    {
       "id": "ef55",
       "label": "MiniSeek-V1 · ef55",
       "subtitle": "multiturn SFT best · tasks/20261102-221734-ef55",

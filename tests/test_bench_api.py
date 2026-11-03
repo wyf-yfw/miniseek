@@ -69,8 +69,8 @@ def test_compare_endpoint(client):
     assert r.status_code == 200
     data = r.json()
     assert data["suite"] == "tinyBenchmarks"
-    assert len(data["models"]) == 4
-    assert {m["id"] for m in data["models"]} == {"d01", "m01", "minimind2-moe", "ef55"}
+    assert len(data["models"]) == 6
+    assert {m["id"] for m in data["models"]} == {"d01", "m01", "minimind2-moe", "minimind3-dense", "minimind3-moe", "ef55"}
     assert all(m.get("scores_pct") for m in data["models"])
 
 

@@ -46,7 +46,7 @@ def test_load_tiny_compare_baselines():
     assert data["suite"] == "tinyBenchmarks"
     assert list(data["tasks"]) == list(TINY_TASKS)
     ids = [m["id"] for m in data["models"]]
-    assert ids == ["d01", "m01", "minimind2-moe", "ef55"]
+    assert ids == ["d01", "m01", "minimind2-moe", "minimind3-dense", "minimind3-moe", "ef55"]
     for m in data["models"]:
         assert m["scores_pct"] is not None
         for task in TINY_TASKS:
